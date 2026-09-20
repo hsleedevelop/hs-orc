@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>hs-orchestrator — PRD</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/deck.css">
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<a class="home" href="index.html">← 허브</a>
+<div class="counter" id="counter"></div>
+<div class="hint"><kbd>←</kbd><kbd>→</kbd><span>이동</span><kbd>F</kbd><span>전체화면</span><kbd>S</kbd><span>노트</span></div>
+
+<div class="deck">
+
+  <div class="slide title" data-notes="hs-orchestrator의 제품 요구사항 정의입니다. 이 덱은 '무엇을 왜 만드는가'를 다루고, 어떻게 만드는지는 SPEC 덱에서 다룹니다.">
+    <div class="overline a">Product Requirements · v0.1</div>
+    <h1 class="a">hs-orchestrator</h1>
+    <p class="sub a">매트릭스를 실행 가능한 라우터로 바꾸는<br>로컬 오케스트레이터</p>
+    <div class="meta a"><span>2026-09-20</span><span>상태: 승인 대기</span><span>소유자: hs.lee</span></div>
+  </div>
+
+  <div class="slide section" data-notes="먼저 문제부터. 이 제품이 없을 때 실제로 무엇이 새는지.">
+    <div class="num a">01</div>
+    <h2 class="a">문제</h2>
+    <p class="sub a">모델·effort 선택이 매번 즉흥 판단이다</p>
+  </div>
+
+  <div class="slide" data-notes="세 가지 비용이 반복됩니다. 과소 배정은 왕복 비용으로, 과대 배정은 직접 비용으로, 검증 누락은 나중에 더 큰 비용으로 돌아옵니다. 셋 다 '기준이 없어서' 생깁니다.">
+    <h2 class="a">반복되는 세 가지 비용</h2>
+    <div class="cards c3 a">
+      <div class="card">
+        <div class="k">01</div>
+        <h3>과소 배정</h3>
+        <p>복잡한 RCA를 Sonnet High로 시작해 세 번 왕복하고 결국 Astra로 올린다. 왕복 비용이 처음부터 제대로 배정했을 때보다 크다.</p>
+      </div>
+      <div class="card">
+        <div class="k">02</div>
+        <h3>과대 배정</h3>
+        <p>타입 수정 하나에 Fable Max를 띄운다. 작업당 <strong>$7.63</strong>이 <strong>$0.21</strong>로 끝날 일에 나간다.</p>
+      </div>
+      <div class="card">
+        <div class="k">03</div>
+        <h3>검증 누락</h3>
+        <p>모델이 "완료했습니다"라고 하면 끝난 것으로 처리한다. 무엇이 증거인지가 업무마다 새로 정해진다.</p>
+      </div>
+    </div>
+    <div class="callout a" style="margin-top:22px">
+      <p>매트릭스 v6는 이 셋에 대한 답을 <strong>이미 표로 갖고 있다.</strong> 문제는 그 표가 HTML 문서로만 존재하고 <strong>실행되지 않는다</strong>는 것이다.</p>
+    </div>
+  </div>
+
+  <div class="slide" data-notes="제품을 한 문장으로. 핵심은 '실행 가능한 라우터'입니다. 매트릭스는 입력이고, 이 제품은 그것을 돌리는 기계입니다.">
+    <div class="overline a">제품 정의</div>
+    <p class="lead a">hs-orchestrator는 매트릭스를 <span class="hi">실행 가능한 라우터</span>로 바꾸는 로컬 오케스트레이터다.</p>
+    <p class="a" style="margin-top:26px">작업 1건을 받아 업무 유형으로 <strong>분류</strong>하고, 매트릭스대로 primary와 independent reviewer <strong>두 슬롯</strong>에 모델·effort를 <strong>배정</strong>하고, 실제 CLI 엔진을 띄워 <strong>실행</strong>하고, 그 업무 유형이 요구하는 <strong>증거로 닫는다</strong>.</p>
+    <div class="flow a" style="margin-top:28px">
+      <div class="step"><div class="n">1</div><div class="t">분류</div><div class="d">11행 중 1행</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="n">2</div><div class="t">위임 판정</div><div class="d">§1 하한선</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="n">3</div><div class="t">두 슬롯 배정</div><div class="d">primary + reviewer</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="n">4</div><div class="t">실행</div><div class="d">CLI 엔진</div></div>
+      <div class="arrow">→</div>
+      <div class="step"><div class="n">5</div><div class="t">증거 수집</div><div class="d">운영 기준</div></div>
+    </div>
+  </div>
+
+  <div class="slide section" data-notes="목표와 비목표. 비목표를 명시하는 것이 범위를 지키는 유일한 방법입니다.">
+    <div class="num a">02</div>
+    <h2 class="a">목표 / 비목표</h2>
+  </div>
+
+  <div class="slide" data-notes="다섯 개 목표 전부 측정 가능하게 썼습니다. '좋아진다' 같은 서술은 없습니다.">
+    <h2 class="a">목표 — 전부 측정 가능하게</h2>
+    <table class="a sm">
+      <thead><tr><th style="width:56px">#</th><th>목표</th><th>측정</th></tr></thead>
+      <tbody>
+        <tr><td>G1</td><td>배정이 매번 같은 기준으로 나온다</td><td>매트릭스 11행 전부가 문서와 일치하게 배정된다</td></tr>
+        <tr><td>G2</td><td>비싼 실행 전에 비용이 보인다</td><td>승인 화면에 primary+reviewer 합산 예상 비용이 표시된다</td></tr>
+        <tr><td>G3</td><td>독립 리뷰가 구조적으로 강제된다</td><td>교차 벤더 불변식 위반이 코드 수준에서 불가능하다</td></tr>
+        <tr><td>G4</td><td>완료 판정이 증거로 닫힌다</td><td>업무별 <code>운영 기준</code>이 요구하는 증거 수집 후에만 완료 표시</td></tr>
+        <tr><td>G5</td><td>무엇을 왜 그렇게 돌렸는지 남는다</td><td>모든 배정·실행이 결정 로그에 2회 append된다</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="slide" data-notes="비목표가 더 중요할 수 있습니다. 특히 '자체 LLM 호출 안 함' — 모든 실행은 설치된 CLI를 통합니다. API 키를 직접 다루지 않는 것이 보안과 단순성 양쪽에 좋습니다.">
+    <h2 class="a">비목표 — 하지 않는 것</h2>
+    <div class="cards c3 a">
+      <div class="card"><h3>모델 벤치마킹</h3><p>매트릭스는 <strong>입력</strong>이지 이 제품의 산출물이 아니다.</p></div>
+      <div class="card"><h3>자체 LLM 호출</h3><p>모든 실행은 설치된 CLI를 통한다. <strong>API 키를 직접 다루지 않는다.</strong></p></div>
+      <div class="card"><h3>팀 협업 · 웹 서비스</h3><p>단일 사용자, 로컬 실행. 권한 모델과 멀티테넌시는 범위 밖.</p></div>
+      <div class="card"><h3>IDE 통합</h3><p>v1은 터미널에서 산다.</p></div>
+      <div class="card"><h3>매트릭스 편집기</h3><p>매트릭스는 외부에서 갱신되는 <strong>읽기 전용 입력</strong>이다.</p></div>
+      <div class="card"><h3>원격 실행</h3><p>로컬 프로세스만. 클라우드 세션은 범위 밖.</p></div>
+    </div>
+  </div>
+
+  <div class="slide section" data-notes="이제 제품의 핵심 판단 다섯 가지입니다. 이것들이 다른 설계와 갈리는 지점입니다.">
+    <div class="num a">03</div>
+    <h2 class="a">핵심 제품 판단</h2>
+    <p class="sub a">여기서 설계가 갈린다</p>
+  </div>
+
+  <div class="slide" data-notes="가장 중요한 판단입니다. 스케치는 '엔진 선택'이었지만 매트릭스는 단일 선택이 아닙니다. 11행 전부가 교차 벤더 쌍입니다.">
+    <div class="overline a">판단 1</div>
+    <h2 class="a">배정은 한 슬롯이 아니라 <span class="hi">두 슬롯</span>이다</h2>
+    <p class="a">매트릭스 11행 전부가 <strong>primary + independent reviewer</strong> 쌍이고, <strong>전부 OpenAI × Claude 교차</strong>다. 이것이 "독립 리뷰"의 정의다.</p>
+    <div class="callout danger a" style="margin-top:20px">
+      <div class="t">이것을 놓치면</div>
+      <p>단일 엔진 선택기로 축소하면 <strong>매트릭스의 절반을 버리는 것</strong>이고, 제품의 존재 이유가 사라진다.</p>
+    </div>
+  </div>
+
+  <div class="slide" data-notes="완료 판정 로직을 새로 만들지 않습니다. 매트릭스가 이미 규정하고 있습니다.">
+    <div class="overline a">판단 2</div>
+    <h2 class="a"><code>운영 기준</code> 열이 <span class="hi">완료의 정의</span>다</h2>
+    <p class="a">매트릭스는 업무 유형마다 수용 증거를 이미 규정한다.</p>
+    <div class="cards c3 a" style="margin-top:18px">
+      <div class="card"><div class="k">성능 최적화</div><p>baseline / 변경 / 재측정 <strong>3점</strong></p></div>
+      <div class="card"><div class="k">복잡한 버그 RCA</div><p>가설이 아니라 <strong>로그로 반증</strong></p></div>
+      <div class="card"><div class="k">테스트 설계</div><p>실패 재현 → 최소 수정 → <strong>회귀</strong></p></div>
+    </div>
+    <p class="foot a">완료 판정 로직을 새로 발명하지 않는다. 발명하면 매트릭스와 어긋난다.</p>
+  </div>
+
+  <div class="slide" data-notes="순서 문제입니다. 라우터와 매트릭스는 다른 질문에 답하는데, 순서를 뒤집으면 하한선에 걸릴 작업에 Fable을 띄우게 됩니다.">
+    <div class="overline a">판단 3</div>
+    <h2 class="a">라우터가 먼저, 매트릭스가 <span class="hi">나중</span>이다</h2>
+    <div class="two a">
+      <div class="card">
+        <div class="k">/delegation-router</div>
+        <h3>넘길 것인가?</h3>
+        <p>§1 하한선 → 네 갈래 (①하향 ②유지 ③부분상향 ④전체승격)</p>
+      </div>
+      <div class="card">
+        <div class="k">매트릭스 v6</div>
+        <h3>누구에게 어떤 effort로?</h3>
+        <p>primary + reviewer 두 슬롯의 모델과 effort</p>
+      </div>
+    </div>
+    <div class="callout warn a" style="margin-top:20px">
+      <div class="t">순서가 뒤집히면</div>
+      <p>하한선에 걸릴 작업(도구 호출 1~2번, 스크립트 한 줄)에 <strong>Fable을 띄우게 된다.</strong></p>
+    </div>
+  </div>
+
+  <div class="slide" data-notes="상향 사다리와 근거 등급. 둘 다 매트릭스 원본이 명시적으로 규정하는 것입니다.">
+    <div class="overline a">판단 4 · 5</div>
+    <h2 class="a">사다리를 탄다 · 근거를 섞지 않는다</h2>
+    <div class="two a">
+      <div>
+        <h3>상향은 사다리를 탄다</h3>
+        <p style="font-size:17px">어려워지면 즉시 최상위로 가지 않는다.</p>
+        <div class="flow" style="margin-top:12px">
+          <div class="step"><div class="n">①</div><div class="t">근거 보강</div></div>
+          <div class="arrow">→</div>
+          <div class="step"><div class="n">②</div><div class="t">effort 상향</div></div>
+          <div class="arrow">→</div>
+          <div class="step"><div class="n">③</div><div class="t">모델 상향</div></div>
+          <div class="arrow">→</div>
+          <div class="step"><div class="n">④</div><div class="t">reviewer 추가</div></div>
+        </div>
+        <p class="foot" style="margin-top:14px">L1 Luna/Haiku → L2 Terra/Sonnet → L3 Sol/Opus → L5 Astra/Fable</p>
+      </div>
+      <div>
+        <h3>근거 등급을 섞지 않는다</h3>
+        <table class="xs" style="margin-top:12px">
+          <tbody>
+            <tr><td><span class="badge ind">independent</span></td><td>Terminal-Bench 4.0, Artificial Analysis</td></tr>
+            <tr><td><span class="badge ven">vendor</span></td><td>OpenAI / Anthropic 발표</td></tr>
+            <tr><td><span class="badge pol">policy</span></td><td>매트릭스 배정표</td></tr>
+          </tbody>
+        </table>
+        <p class="foot" style="margin-top:14px">TB4의 Astra 58.2 대 Fable 57.9 같은 <strong>0.3pp 차이로 우열을 표시하지 않는다.</strong></p>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide section" data-notes="기능 요구사항입니다.">
+    <div class="num a">04</div>
+    <h2 class="a">기능 요구사항</h2>
+  </div>
+
+  <div class="slide" data-notes="FR-1부터 11까지. 앞의 여섯이 코어이고 뒤의 다섯이 조회·기록 기능입니다.">
+    <h2 class="a">FR-1 ~ FR-11</h2>
+    <table class="a xs">
+      <thead><tr><th style="width:80px">#</th><th style="width:190px">기능</th><th>핵심</th></tr></thead>
+      <tbody>
+        <tr><td>FR-1</td><td>작업 분류</td><td>11행 중 1행. 실패 시 "해당 없음" → 사용자에게 올림. <strong>임의 기본 배정 금지</strong></td></tr>
+        <tr><td>FR-2</td><td>위임 판정</td><td>§1 하한선 점검. 걸리면 배정하지 않고 "직접 처리"로 종료</td></tr>
+        <tr><td>FR-3</td><td>두 슬롯 배정</td><td>primary/reviewer 모델·effort. <strong>교차 벤더 불변식</strong> + L1~L5 사다리</td></tr>
+        <tr><td>FR-4</td><td>엔진 실행</td><td>비대화 모드로 CLI 실행. 스트림 · 취소 · 타임아웃</td></tr>
+        <tr><td>FR-5</td><td>비용 표시</td><td>승인 <strong>전</strong> 합산 예상 비용. "AA 측정치, 실제 지출 아님" 명시</td></tr>
+        <tr><td>FR-6</td><td>진행 방식 3종</td><td><code>/pingpong</code> · <code>/loop</code> · <code>/graph</code></td></tr>
+        <tr><td>FR-7</td><td>tasks</td><td>상태 · 배정 · 증거 · 누적 비용</td></tr>
+        <tr><td>FR-8</td><td>dashboard</td><td>실행 중 · 배정 분포 · 누적 비용 · 성공/재시도 추이</td></tr>
+        <tr><td>FR-9</td><td>세션 조회</td><td><code>codex agents</code> + <code>claude agents</code> 통합</td></tr>
+        <tr><td>FR-10</td><td>PR / MR 조회</td><td><code>gh-axi</code> 우선, <code>gh</code> 폴백</td></tr>
+        <tr><td>FR-11</td><td>결정 로그</td><td>라우터 §7 스키마. 착수 시 1차, 검증 후 <strong>같은 id로 2차 append</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="slide" data-notes="진행 방식 3종. 자율성 축으로 갈랐습니다. pingpong만 비자율이고, 그래서 상한 정책이 다릅니다.">
+    <h2 class="a">진행 방식 3종 — <span class="hi">자율성</span>으로 가른다</h2>
+    <table class="a">
+      <thead><tr><th style="width:150px">방식</th><th style="width:210px">성격</th><th>핵심 요구</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">/pingpong</td><td>대화형 — <strong>비자율</strong></td><td>턴마다 사용자 확인, 중간 개입으로 방향 수정 가능</td></tr>
+        <tr><td class="mono">/loop</td><td>loop-engineering — 자율</td><td>Goal·Planner·Executor·Evaluator·Critic·Recovery 분리, <strong>최대 반복 수 필수</strong></td></tr>
+        <tr><td class="mono">/graph</td><td>graph-engineering — 자율</td><td>노드별 독립 배정, <strong>순환 검출 필수</strong>, 부분 실패 전파 규칙</td></tr>
+      </tbody>
+    </table>
+    <div class="callout a" style="margin-top:22px">
+      <p>세 방식 공통: 사이클마다 <strong>근거·변경·검증</strong>을 남기고, 검증 없이 다음으로 넘어가지 않으며, 최대 시도 도달 시 사람에게 올린다.</p>
+    </div>
+  </div>
+
+  <div class="slide section" data-notes="릴리스와 지표, 위험으로 마무리합니다.">
+    <div class="num a">05</div>
+    <h2 class="a">릴리스 · 지표 · 위험</h2>
+  </div>
+
+  <div class="slide" data-notes="v1 TUI, v2 GUI입니다. 핵심은 코어가 UI에 의존하지 않아야 한다는 것 — v2에서 재작성이 필요하면 v1 설계가 틀린 겁니다.">
+    <h2 class="a">릴리스 단계</h2>
+    <div class="two a">
+      <div class="card">
+        <div class="k">v1</div>
+        <h3>TUI</h3>
+        <p>FR-1 ~ FR-11 전부. 터미널 UI.</p>
+        <p style="margin-top:12px; color:#c8c8c8"><strong>완료 판정</strong><br>실제 작업 1건이 분류 → 배정 → 실행 → 증거 수집까지 사람 개입 없이 통과</p>
+      </div>
+      <div class="card">
+        <div class="k">v2</div>
+        <h3>GUI</h3>
+        <p>v1의 코어를 그대로 쓰고 셸만 교체.</p>
+        <p style="margin-top:12px; color:#c8c8c8"><strong>완료 판정</strong><br>GUI에서 v1과 동일한 시나리오가 통과</p>
+      </div>
+    </div>
+    <div class="callout warn a" style="margin-top:22px">
+      <p>v1의 코어(분류·라우팅·어댑터·진행 방식)는 <strong>UI에 의존하지 않는 헤드리스 라이브러리</strong>여야 한다. v2에서 재작성이 필요하면 <strong>v1 설계가 틀린 것이다.</strong></p>
+    </div>
+  </div>
+
+  <div class="slide" data-notes="성공 지표는 전부 0 아니면 100입니다. 애매한 중간값이 없습니다.">
+    <h2 class="a">성공 지표</h2>
+    <div class="stats a">
+      <div class="stat"><div class="v">100%</div><div class="l">매트릭스 11행 배정 일치율</div></div>
+      <div class="stat"><div class="v">0</div><div class="l">교차 벤더 위반</div></div>
+      <div class="stat"><div class="v">0</div><div class="l">실행 전 비용 미표시 경로</div></div>
+      <div class="stat"><div class="v">0</div><div class="l">증거 없이 완료된 작업</div></div>
+      <div class="stat"><div class="v">0%</div><div class="l">결정 로그 2차 append 누락</div></div>
+    </div>
+    <p class="foot a" style="margin-top:30px">전부 0 아니면 100이다. 애매한 중간값을 두지 않는다.</p>
+  </div>
+
+  <div class="slide" data-notes="위험 중 최상단 두 개는 실측으로 확인된 것입니다. 가설이 아닙니다.">
+    <h2 class="a">위험</h2>
+    <table class="a xs">
+      <thead><tr><th style="width:230px">위험</th><th style="width:190px">영향</th><th>완화</th></tr></thead>
+      <tbody>
+        <tr><td>반복 방식의 무한 루프</td><td><strong>비용이 직접 나간다</strong></td><td>최대 반복 수 없이는 구현하지 않는다. 누적 비용 상한에서 강제 중단</td></tr>
+        <tr><td><code>claude --effort</code> 오타가 조용히 기본값으로 <span class="badge ind">실측</span></td><td>잘못된 effort로 실행되고 아무도 모름</td><td>어댑터가 CLI에 넘기기 <strong>전에</strong> 검증하고 실패시킨다</td></tr>
+        <tr><td>Cursor가 Astra·Haiku 미지원 <span class="badge ind">실측</span></td><td>11행 중 7행에서 대체 불가</td><td>모델별 가용성 테이블. 불가 조합은 대체 후보에서 제외</td></tr>
+        <tr><td>매트릭스 원본 갱신</td><td>구현 테이블과 불일치</td><td>원본 HTML 대조 테스트. 불일치 시 빌드 실패</td></tr>
+        <tr><td>좀비 CLI 프로세스</td><td>비용·리소스 누수</td><td>취소가 자식 프로세스를 실제로 죽이는지 테스트</td></tr>
+        <tr><td>매트릭스에 없는 업무 유형</td><td>임의 배정</td><td>"해당 없음"은 사용자에게 올린다. 기본 배정을 만들지 않는다</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="slide" data-notes="미해결 질문 네 가지입니다. 1번과 3번은 DECISIONS 덱의 D-006, D-007과 연결됩니다.">
+    <h2 class="a">미해결 질문</h2>
+    <ol class="a">
+      <li>매트릭스에 없는 업무 유형이 반복해서 들어오면 <strong>행을 추가</strong>할 것인가, 계속 사용자에게 올릴 것인가</li>
+      <li><strong>누적 비용 상한</strong>의 기본값</li>
+      <li><code>/loop</code>를 Claude Code 내장 스킬 위에 얹을 것인가 <strong>자체 구현</strong>할 것인가</li>
+      <li>v2 GUI의 기술 선택 (v1 완료 후 결정)</li>
+    </ol>
+    <p class="foot a" style="margin-top:30px">→ 결정 근거와 번복 시 영향은 <strong>DECISIONS</strong> 덱에서.</p>
+  </div>
+
+</div>
+<script src="assets/deck.js"></script>
+</body>
+</html>
