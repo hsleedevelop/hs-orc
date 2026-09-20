@@ -20,6 +20,8 @@ import { appendDecision, decisionLogPath } from '../core/decision-log.ts';
 import { firstLine, secondLine } from '../core/decide.ts';
 import { storeRun } from '../core/run-store.ts';
 import { reportError, reportNotice } from '../core/report.ts';
+import { collect, type Evidence } from '../core/evidence.ts';
+import { changedFiles, loadEvidenceFile, runCommand } from '../core/evidence-gather.ts';
 import { GATE_CHECKS, parseGateCheck, type GateSignals } from '../core/gatekeeper.ts';
 import { classifyWithModel } from '../core/classify-llm.ts';
 import { route } from '../core/pipeline.ts';
@@ -33,6 +35,9 @@ interface Parsed {
   maxIterations?: number;
   budgetUsd?: number;
   graphFile?: string;
+  verify: { cmd: string; phase?: string }[];
+  evidenceFile?: string;
+  crashTest: boolean;
   taskId?: string;
   primaryEffort?: Effort;
   reviewerEffort?: Effort;
@@ -45,11 +50,12 @@ interface Parsed {
 
 const USAGE = `사용법: node src/shell/cli.ts "<작업>" [--task R01] [--effort high] [--reviewer-effort high]
        [--gate <${GATE_CHECKS.join('|')}>]... [--classify-llm] [--run] [--timeout 600] [--raw]
-       [--mode once|pingpong|loop|graph] [--max-iterations N] [--budget 20] [--graph <nodes.json>]`;
+       [--mode once|pingpong|loop|graph] [--max-iterations N] [--budget 20] [--graph <nodes.json>]
+       [--verify "[phase:]<명령>"]... [--evidence <file.json>] [--crash-test]`;
 
 function parseArgs(argv: readonly string[]): Parsed {
   const positional: string[] = [];
-  const parsed: Parsed = { task: '', mode: 'once', gate: {}, classifyLlm: false, run: false, raw: false, timeoutMs: 900_000 };
+  const parsed: Parsed = { task: '', mode: 'once', gate: {}, verify: [], crashTest: false, classifyLlm: false, run: false, raw: false, timeoutMs: 900_000 };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -65,6 +71,19 @@ function parseArgs(argv: readonly string[]): Parsed {
       case '--max-iterations': parsed.maxIterations = Number(value()); break;
       case '--budget': parsed.budgetUsd = Number(value()); break;
       case '--graph': parsed.graphFile = value(); break;
+      case '--verify': {
+        // `phase:명령` 이면 단계를 붙인다 (R05 before/after, R06 reproduce/fix/regress 용).
+        const v = value();
+        const [head, ...rest] = v.split(':');
+        parsed.verify.push(
+          rest.length > 0 && head !== undefined && /^[a-z-]+$/.test(head)
+            ? { cmd: rest.join(':'), phase: head }
+            : { cmd: v },
+        );
+        break;
+      }
+      case '--evidence': parsed.evidenceFile = value(); break;
+      case '--crash-test': parsed.crashTest = true; break;
       case '--task': parsed.taskId = value(); break;
       case '--effort': parsed.primaryEffort = value() as Effort; break;
       case '--reviewer-effort': parsed.reviewerEffort = value() as Effort; break;
@@ -84,6 +103,14 @@ function parseArgs(argv: readonly string[]): Parsed {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+
+  // 크래시 리포터 자가 검증 — 디버그 경로는 프로덕션 빌드에도 남긴다 (hs-00-core 관찰가능성).
+  if (args.crashTest) {
+    const r = reportError('cli', 'crash-test', new Error('의도적 크래시 — 리포팅 경로 자가 검증'));
+    process.stderr.write(`${r.display}\n크래시 리포팅 경로가 살아 있다 (severity=${r.severity}).\n`);
+    process.exitCode = 3;
+    return;
+  }
   const matrix = loadMatrix();
   const catalog = loadEngines();
 
@@ -260,13 +287,43 @@ async function main(): Promise<void> {
     process.stderr.write(`${reportError('run-store', 'persist', error).display}\n`);
   }
 
+  // 증거 수집 (SPEC §5). 운영 기준이 요구하는 증거가 모였을 때만 완료다 (PRD G4).
+  const evidence: Evidence[] = [];
+  for (const v of args.verify) evidence.push(runCommand(v.cmd, process.cwd(), v.phase));
+  if (args.verify.length > 0) evidence.push(changedFiles());
+  if (args.evidenceFile) {
+    try {
+      evidence.push(...loadEvidenceFile(args.evidenceFile));
+    } catch (error) {
+      process.stderr.write(`${reportError('evidence', 'load', error).display}\n`);
+    }
+  }
+  const report = collect(plan.assignment, evidence);
+
+  process.stderr.write(
+    [
+      '',
+      `증거   ${report.summary}`,
+      ...report.accepted.map((e) => `       + ${e.kind}${e.kind === 'command' ? ` \`${e.cmd}\` exit=${e.exitCode}` : ''}`),
+      ...report.missing.map((m) => `       - 없음: ${m}`),
+      ...report.rejected.map((r) => `       ! 거절(${r.evidence.kind}): ${r.why}`),
+    ].join('\n') + '\n',
+  );
+
   // 2차 결정 로그 — **같은 id 로 append** 한다. 갱신이 아니다.
-  // 자동 증거가 없으므로 outcome 은 unverified 다. "성공했습니다"는 증거가 아니다 (SPEC §5).
+  // 증거가 모였을 때만 ok 다. "성공했습니다"는 증거가 아니다 (SPEC §5).
+  const outcome = run.outcome !== 'ok' ? 'wrong' : report.satisfied ? 'ok' : 'unverified';
   appendDecision(
     secondLine(
       decision,
-      run.outcome === 'ok' ? 'unverified' : 'wrong',
-      stored ? `원시 로그 ${stored} · 운영 기준: ${plan.assignment.operatingCriterion}` : '',
+      outcome,
+      [
+        stored ? `원시 로그 ${stored}` : '',
+        `운영 기준: ${plan.assignment.operatingCriterion}`,
+        report.satisfied ? `증거 ${report.accepted.length}건 충족` : `증거 미충족: ${report.missing.join(' / ')}`,
+      ]
+        .filter(Boolean)
+        .join(' · '),
     ),
   );
   process.stdout.write(`${args.raw ? run.rawStdout : run.text}\n`);
@@ -275,7 +332,7 @@ async function main(): Promise<void> {
       (run.usage ? ` · in ${run.usage.inputTokens} / out ${run.usage.outputTokens}` : '') +
       (run.costUsd !== undefined ? ` · $${run.costUsd.toFixed(4)}` : '') +
       (run.unparsedLines.length ? ` · 파싱 실패 ${run.unparsedLines.length}줄` : '') +
-      `\n결정   ${decision.id} 2차 append 완료 (outcome=${run.outcome === 'ok' ? 'unverified' : 'wrong'})` +
+      `\n결정   ${decision.id} 2차 append 완료 (outcome=${outcome})` +
       (stored ? `\n원본   ${stored}` : '') +
       `\nreviewer ${reviewer.label} 왕복이 필요하면 --mode pingpong 또는 --mode loop 다.\n`,
   );

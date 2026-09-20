@@ -280,6 +280,13 @@ cursor  -p "<prompt>" --model gpt-5.6-sol-xhigh --output-format stream-json
 
 **"성공했습니다"라는 산문은 증거가 아니다.** `file:line`, 실행 명령과 exit code, 수정 경로, 인용 원문을 받는다.
 
+구현: `src/core/evidence.ts` 의 `REQUIREMENTS` 가 위 표를 그대로 옮긴 것이다 — **이 표를 바꾸려면 SPEC 을 먼저 바꾼다.**
+증거 종류는 `command`(명령+exit code) · `document-section` · `changed-files` · `measurement`(값+환경) ·
+`citation`(`file:line`) · `review` · `ordering`(두 시각) 일곱이고, 모양 검사를 통과하지 못하면 **거절한다.**
+`--verify "[phase:]<명령>"` 은 명령을 실제로 돌려 exit code 를 받고(R05 `before`/`after`,
+R06 `reproduce`/`fix`/`regress` 단계 표기 지원), 변경 파일은 git 에서 읽는다 — 모델이 말한 목록을 믿지 않는다.
+증거가 모였을 때만 결정 로그 2차 줄의 `outcome` 이 `ok` 가 된다. 아니면 `unverified` 다.
+
 ## 6. 진행 방식 3종
 
 ### 6.1 `/pingpong` — 대화형

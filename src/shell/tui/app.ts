@@ -161,15 +161,32 @@ function DashboardScreen({ journal, budget }: { journal: Journal; budget: Budget
   );
 }
 
-function DebugScreen(): ReactElement {
+function DebugScreen({ keys }: { keys: boolean }): ReactElement {
   const limits = loadLimits();
   const catalog = loadEngines();
+  const [crash, setCrash] = useState('');
+
+  // **고의 크래시 버튼** — 크래시 리포팅은 자가 검증으로만 살아 있음을 확인할 수 있다
+  // (hs-engineering: "크래시 리포터는 디버그 메뉴의 고의 크래시 버튼으로 자가 검증한다").
+  useInput(
+    (input) => {
+      if (input !== 'c') return;
+      try {
+        throw new Error('의도적 크래시 — 리포팅 경로 자가 검증');
+      } catch (error) {
+        setCrash(reportError('tui/debug', 'crash-test', error).display);
+      }
+    },
+    { isActive: keys },
+  );
+
   // 디버그 화면은 프로덕션 빌드에도 싣는다 (hs-00-core 관찰가능성, SPEC §7).
   return row(
     `node ${process.version} · pid ${process.pid}`,
     `cwd ${process.cwd()}`,
     `limits 예산 $${limits.budgetUsd} · 반복 ${limits.maxIterations} · 노드 ${limits.maxNodes}`,
     `engines ${Object.keys(catalog.engines).join(', ')} · models ${Object.keys(catalog.models).length}`,
+    crash ? h(Text, { color: 'red' }, crash) : h(Text, { dimColor: true }, keys ? 'c: 고의 크래시 (리포팅 자가 검증)' : '(키 입력 없음)'),
   );
 }
 
@@ -199,7 +216,7 @@ export function App({ task, initialScreen }: { task: string; initialScreen?: Scr
     : screen === 'Sessions' ? h(SessionsScreen, null)
     : screen === 'Reviews' ? h(ReviewsScreen, null)
     : screen === 'Dashboard' ? h(DashboardScreen, { journal, budget })
-    : screen === 'Debug' ? h(DebugScreen, null)
+    : screen === 'Debug' ? h(DebugScreen, { keys: keysAvailable })
     : row('기록 없음 — 이 세션에서 실행한 작업이 여기 쌓인다 (영속화는 S6).');
 
   return h(Box, { flexDirection: 'column' }, h(Header, { screen, keys: keysAvailable }), body);
