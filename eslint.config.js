@@ -23,13 +23,23 @@ const layerBoundary = (layer, forbidden) => ({
 });
 
 export default tseslint.config(
-  { ignores: ['node_modules/**', 'dist/**', 'slides/**', 'data/matrix.json'] },
+  { ignores: ['node_modules/**', 'dist/**', 'slides/**', 'data/matrix.json', 'src/shell/gui/renderer/bundle.js'] },
 
   eslint.configs.recommended,
+
+  // 렌더러는 Chromium 이라 별도 tsconfig(DOM lib)를 쓴다 — 프로젝트를 따로 지정한다.
+  {
+    files: ['src/shell/gui/renderer/**/*.ts'],
+    extends: [tseslint.configs.recommendedTypeChecked],
+    languageOptions: {
+      parserOptions: { project: './tsconfig.renderer.json', tsconfigRootDir: import.meta.dirname },
+    },
+  },
 
   // 타입 인지 린트는 tsconfig 에 포함된 src/**/*.ts 에만 건다.
   {
     files: ['src/**/*.ts'],
+    ignores: ['src/shell/gui/renderer/**/*.ts'],
     extends: [tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: { project: './tsconfig.json', tsconfigRootDir: import.meta.dirname },

@@ -8,25 +8,31 @@
   },
   "scripts": {
     "gen:matrix": "node scripts/gen-matrix.mjs",
-    "type-check": "tsc --noEmit",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.renderer.json",
     "lint": "eslint .",
     "test": "node --test 'src/**/__tests__/*.test.ts'",
     "gate": "npm run matrix:check && npm run type-check && npm run lint && npm run test",
     "secret-scan": "gitleaks protect --staged --redact --no-banner",
     "prepare": "git config core.hooksPath githooks",
     "matrix:check": "node scripts/gen-matrix.mjs --check",
-    "tui": "node src/shell/tui/main.ts"
+    "tui": "node src/shell/tui/main.ts",
+    "build:gui": "esbuild src/shell/gui/renderer/app.ts --bundle --format=esm --outfile=src/shell/gui/renderer/bundle.js --log-level=warning",
+    "gui": "npm run build:gui && electron src/shell/gui/main.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "26.6.2",
     "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "electron": "44.4.3",
+    "esbuild": "0.28.2",
     "eslint": "10.11.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.70.0"
   },
   "dependencies": {
     "ink": "7.1.1",
-    "react": "19.3.0"
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   }
 }

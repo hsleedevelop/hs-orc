@@ -190,12 +190,29 @@ PRD §8 지표를 실제 실행으로 확인한다. **2026-09-20 실측 (커밋 
 
 ---
 
-## S7 — GUI 셸 (v2)
+## S7 — GUI 셸 (v2)  ✅ 2026-09-21
 
 `shell/` 만 교체한다. Core·adapters는 손대지 않는다.
 
 **완료 판정**: v1의 S5 완료 시나리오가 GUI에서 동일하게 통과한다.
 **위험**: Core 수정이 필요하면 v1 설계가 틀린 것이다. 그 경우 GUI를 진행하지 말고 Core 경계를 먼저 고친다.
+
+**실측 결과 (Electron 44.4.3 + React 19, D-021):**
+
+- **위험 항목 통과** — `git diff main -- src/core src/adapters src/data` 가 **비었다.**
+  Core·adapters·data 를 한 줄도 고치지 않고 GUI 가 붙었다. v1 설계가 틀리지 않았다는 유일한 증거다.
+- **실제 창에서 S5 시나리오 통과** (`webContents.executeJavaScript` 로 UI 를 직접 조작):
+  1. 입력 → `분류 R01` · `primary Luna·medium → codex/gpt-5.6-luna` · `reviewer Haiku·low → claude/claude-haiku-4-5-20251001` · `비용 $0.39` · `INDEPENDENT` 배지
+  2. **승인 버튼 클릭** → 실제 codex 프로세스 실행
+  3. `증거 충족` · `outcome=ok` · `누적 $0.18 / $20 (추정 포함)`
+  4. Dashboard 반영: `배정 분포 Luna×1` · `결과 ok×1` · `검증 누락 없음`
+- 결정 로그: 같은 `id` 2줄 (`pending` → `ok`)
+- 화면 5개(Run/Dashboard/Sessions/Reviews/Debug) + **고의 크래시 버튼**을 프로덕션에도 싣는다
+- 렌더러에 Node 를 열지 않는다(`contextIsolation: true`, `nodeIntegration: false`).
+  Core 접근은 preload 가 노출한 IPC 뿐이고, CSP 로 원격 코드·인라인 스크립트를 막는다
+
+**비용**: Electron 바이너리로 `node_modules` 가 72MB → **403MB** 가 됐다. 이 저장소는 iCloud Drive 안이라
+그만큼 동기화된다 — 신경 쓰이면 `node_modules` 를 iCloud 밖으로 빼거나 `.nosync` 처리를 검토한다.
 
 ---
 
