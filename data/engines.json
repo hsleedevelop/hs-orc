@@ -1,0 +1,97 @@
+{
+  "$evidence": {
+    "note": "수기 파일이다 (SPEC §9). 모델 id는 추측이 아니라 아래 출처의 실측이다.",
+    "collectedAt": "2026-09-20",
+    "codex": "~/.codex/models_cache.json (client 0.154.0, fetched 2026-09-20T11:52:52Z) 의 slug·supported_reasoning_levels",
+    "cursor": "cursor-agent --list-models (2026.09.15-d2fe57e)",
+    "claude": "claude -p --model <id> \"Reply with exactly: ok\" 를 4개 id로 실제 실행해 응답 확인 (claude 2.1.278)"
+  },
+  "efforts": ["low", "medium", "high", "xhigh", "max"],
+  "engines": {
+    "claude": {
+      "binaries": ["claude"],
+      "promptArgv": ["-p"],
+      "modelFlag": "--model",
+      "effort": { "kind": "flag", "flag": "--effort" }
+    },
+    "codex": {
+      "binaries": ["codex"],
+      "promptArgv": ["exec"],
+      "modelFlag": "-m",
+      "effort": { "kind": "config", "flag": "-c", "key": "model_reasoning_effort" }
+    },
+    "cursor": {
+      "binaries": ["cursor-cli", "cursor-agent"],
+      "promptArgv": ["-p"],
+      "modelFlag": "--model",
+      "effort": { "kind": "modelSuffix" },
+      "variant": { "default": "thinking", "fastOptIn": false }
+    }
+  },
+  "models": {
+    "luna": {
+      "defaultEngine": "codex",
+      "availability": {
+        "codex": { "id": "gpt-5.6-luna", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+        "cursor": { "idTemplate": "gpt-5.6-luna-{effort}", "efforts": ["low", "medium", "high", "xhigh", "max"], "thinking": false },
+        "claude": null
+      }
+    },
+    "terra": {
+      "defaultEngine": "codex",
+      "availability": {
+        "codex": { "id": "gpt-5.6-terra", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+        "cursor": { "idTemplate": "gpt-5.6-terra-{effort}", "efforts": ["low", "medium", "high", "xhigh", "max"], "thinking": false },
+        "claude": null
+      }
+    },
+    "sol": {
+      "defaultEngine": "codex",
+      "availability": {
+        "codex": { "id": "gpt-5.6-sol", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+        "cursor": { "idTemplate": "gpt-5.6-sol-{effort}", "efforts": ["low", "medium", "high", "xhigh", "max"], "thinking": false },
+        "claude": null
+      }
+    },
+    "astra": {
+      "defaultEngine": "codex",
+      "availability": {
+        "codex": { "id": "gpt-6-astra", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+        "cursor": null,
+        "claude": null
+      }
+    },
+    "haiku": {
+      "defaultEngine": "claude",
+      "availability": {
+        "claude": { "id": "claude-haiku-4-5-20251001", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+        "cursor": null,
+        "codex": null
+      }
+    },
+    "sonnet": {
+      "defaultEngine": "claude",
+      "availability": {
+        "claude": { "id": "claude-sonnet-5", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+        "cursor": { "idTemplate": "claude-sonnet-5-thinking-{effort}", "efforts": ["low", "medium", "high", "xhigh", "max"], "thinking": true },
+        "codex": null
+      }
+    },
+    "opus": {
+      "defaultEngine": "claude",
+      "availability": {
+        "claude": { "id": "claude-opus-5", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+        "cursor": { "idTemplate": "claude-opus-5-thinking-{effort}", "efforts": ["low", "medium", "high", "xhigh", "max"], "thinking": true },
+        "codex": null
+      }
+    },
+    "fable": {
+      "defaultEngine": "claude",
+      "availability": {
+        "claude": { "id": "claude-fable-5-1", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+        "cursor": { "idTemplate": "claude-fable-5-1-thinking-{effort}", "efforts": ["low", "medium", "high", "xhigh", "max"], "thinking": true },
+        "codex": null
+      }
+    }
+  }
+}
