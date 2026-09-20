@@ -31,6 +31,8 @@ export type Availability = {
   readonly idTemplate?: string;
   readonly efforts: readonly Effort[];
   readonly thinking?: boolean;
+  /** `-fast` 변형이 이 모델에 **존재하는가** (D-023 실측). 없으면 fast 요청은 던진다. */
+  readonly fast?: boolean;
 } | null;
 
 export interface ModelSpec {

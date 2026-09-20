@@ -21,6 +21,7 @@ import { firstLine, secondLine } from '../core/decide.ts';
 import { storeRun } from '../core/run-store.ts';
 import { reportError, reportNotice } from '../core/report.ts';
 import { collect, type Evidence } from '../core/evidence.ts';
+import { readUnclassified, recordUnclassified, suggestRows } from '../core/unclassified.ts';
 import { changedFiles, loadEvidenceFile, runCommand } from '../core/evidence-gather.ts';
 import { GATE_CHECKS, parseGateCheck, type GateSignals } from '../core/gatekeeper.ts';
 import { classifyWithModel } from '../core/classify-llm.ts';
@@ -136,6 +137,11 @@ async function main(): Promise<void> {
     // 정상 비즈니스 상태다 — notice 로 내린다 (PLAN S6-4).
     const note = reportNotice('pipeline', 'unclassified', result.message);
     process.stderr.write(`${note.display}\n  --classify-llm 으로 저비용 모델 분류를 시도할 수 있다.\n`);
+
+    // 누적만 한다. 행 추가는 원본 편집으로만 (D-022).
+    recordUnclassified(args.task);
+    for (const s of suggestRows(readUnclassified())) process.stderr.write(`\n${s.message}\n`);
+
     process.exitCode = 1;
     return;
   }

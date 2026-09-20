@@ -61,13 +61,22 @@ export interface Invocation {
  * 지원하지 않는 조합은 **명시적 실패**다. 가장 가까운 모델로 말없이 바꾸지 않는다 (D-004).
  * `resolveBinary` 를 타지 않는 순수 함수라 테스트가 프로세스를 띄우지 않는다.
  */
+export interface InvocationOptions {
+  readonly engine?: EngineName;
+  /** Cursor `-fast` 옵트인 (D-023). 기본은 꺼짐 — 추론 품질 우선(SPEC §3.3). */
+  readonly fast?: boolean;
+}
+
 export function buildInvocation(
   catalog: Engines,
   model: ModelKey,
   effort: string,
   prompt: string,
-  engine?: EngineName,
+  engineOrOptions?: EngineName | InvocationOptions,
 ): Omit<Invocation, 'bin'> {
+  const options: InvocationOptions =
+    typeof engineOrOptions === 'string' ? { engine: engineOrOptions } : (engineOrOptions ?? {});
+  const engine = options.engine;
   assertEffort(effort);
 
   const modelSpec = catalog.models[model];
@@ -81,9 +90,20 @@ export function buildInvocation(
   }
 
   const spec = catalog.engines[target];
-  const modelId = availability.idTemplate
+  // `-fast` 는 **모델별 옵트인**이고, 없는 모델이면 일반 변형으로 떨어뜨리지 않고 던진다 (D-023).
+  if (options.fast === true) {
+    if (spec.effort.kind !== 'modelSuffix') {
+      throw new EngineError(`${target} 에는 fast 변형이 없다 (fast 는 cursor 전용이다).`);
+    }
+    if (availability.fast !== true) {
+      throw new EngineError(`cursor 에 ${model} 의 -fast 변형이 없다. 일반 변형으로 말없이 바꾸지 않는다 (D-023).`);
+    }
+  }
+
+  const baseId = availability.idTemplate
     ? availability.idTemplate.replace('{effort}', effort)
     : (availability.id ?? '');
+  const modelId = options.fast === true ? `${baseId}-fast` : baseId;
   if (!modelId) throw new EngineError(`${target}/${model} 의 모델 id 가 비어 있다 — engines.json 이 깨졌다.`);
 
   const argv = [...spec.promptArgv, prompt, spec.modelFlag, modelId];

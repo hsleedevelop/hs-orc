@@ -65,3 +65,29 @@ describe('supports()', () => {
     ]);
   });
 });
+
+describe('Cursor -fast (D-023)', () => {
+  it('fast 가 있는 모델은 모델 id 에 -fast 가 붙는다', () => {
+    assert.equal(
+      buildInvocation(catalog, 'sol', 'xhigh', 'P', { engine: 'cursor', fast: true }).modelId,
+      'gpt-5.6-sol-xhigh-fast',
+    );
+    assert.equal(
+      buildInvocation(catalog, 'opus', 'max', 'P', { engine: 'cursor', fast: true }).modelId,
+      'claude-opus-5-thinking-max-fast',
+    );
+  });
+
+  it('fast 가 없는 Sonnet·Fable 은 일반 변형으로 떨어지지 않고 던진다', () => {
+    assert.throws(() => buildInvocation(catalog, 'sonnet', 'high', 'P', { engine: 'cursor', fast: true }), /-fast 변형이 없다/);
+    assert.throws(() => buildInvocation(catalog, 'fable', 'high', 'P', { engine: 'cursor', fast: true }), /-fast 변형이 없다/);
+  });
+
+  it('cursor 가 아닌 엔진에 fast 를 요청하면 던진다', () => {
+    assert.throws(() => buildInvocation(catalog, 'sol', 'high', 'P', { engine: 'codex', fast: true }), /fast 는 cursor 전용/);
+  });
+
+  it('기본값은 fast 미사용이다 (SPEC §3.3 추론 품질 우선)', () => {
+    assert.equal(buildInvocation(catalog, 'sol', 'xhigh', 'P', 'cursor').modelId, 'gpt-5.6-sol-xhigh');
+  });
+});

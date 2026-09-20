@@ -6,7 +6,8 @@
     "cursor": "cursor-agent --list-models (2026.09.15-d2fe57e)",
     "claude": "claude -p --model <id> \"Reply with exactly: ok\" 를 4개 id로 실제 실행해 응답 확인 (claude 2.1.278)",
     "stream": "claude/cursor는 --output-format stream-json (claude는 --verbose 동반), codex는 --output-format 자체가 없고 --json(JSONL). 2026-09-20 실행 캡처로 확인.",
-    "stdin": "세 CLI 모두 stdin이 TTY가 아니면 입력을 기다린다. codex는 무기한 블록, claude는 3초 경고 후 진행. 어댑터는 stdin을 닫는다."
+    "stdin": "세 CLI 모두 stdin이 TTY가 아니면 입력을 기다린다. codex는 무기한 블록, claude는 3초 경고 후 진행. 어댑터는 stdin을 닫는다.",
+    "cursorFast": "cursor-agent --list-models (2026-09-21) 실측: -fast 변형은 luna/terra/sol 각 6종, opus 8종에 있고 sonnet·fable-5-1 에는 0종이다. D-023."
   },
   "efforts": [
     "low",
@@ -100,7 +101,8 @@
             "xhigh",
             "max"
           ],
-          "thinking": false
+          "thinking": false,
+          "fast": true
         },
         "claude": null
       }
@@ -127,7 +129,8 @@
             "xhigh",
             "max"
           ],
-          "thinking": false
+          "thinking": false,
+          "fast": true
         },
         "claude": null
       }
@@ -154,7 +157,8 @@
             "xhigh",
             "max"
           ],
-          "thinking": false
+          "thinking": false,
+          "fast": true
         },
         "claude": null
       }
@@ -215,7 +219,8 @@
             "xhigh",
             "max"
           ],
-          "thinking": true
+          "thinking": true,
+          "fast": false
         },
         "codex": null
       }
@@ -242,7 +247,8 @@
             "xhigh",
             "max"
           ],
-          "thinking": true
+          "thinking": true,
+          "fast": true
         },
         "codex": null
       }
@@ -269,7 +275,8 @@
             "xhigh",
             "max"
           ],
-          "thinking": true
+          "thinking": true,
+          "fast": false
         },
         "codex": null
       }
