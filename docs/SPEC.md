@@ -9,6 +9,9 @@
 
 2026-09-20에 실제 실행으로 확인한 값이다. 구현 중 `--help`로 재확인하되, 기억이 이 표와 다르면 표를 따른다.
 
+> **갱신 2026-09-20 (S1)**: 모델 id를 실측으로 채웠다(§3.2). 함정이 4가지에서 5가지로 늘었다(§0.1-5).
+> 실측 원본은 `data/engines.json`의 `$evidence` 키에 출처와 함께 박혀 있다.
+
 | 엔진 | 바이너리 | 버전 | 비대화 실행 | 모델 | effort |
 |---|---|---|---|---|---|
 | Claude | `claude` | 2.1.278 | `claude -p` | `--model` | `--effort low\|medium\|high\|xhigh\|max` |
@@ -17,12 +20,13 @@
 
 세 엔진 모두 `--output-format`을 지원하며 `stream-json`을 받을 수 있다.
 
-### 0.1 확인된 함정 4가지
+### 0.1 확인된 함정 5가지
 
 1. **`codex -p`는 비대화 실행이 아니다.** 최상위 `-p`는 profile이고 비대화 실행은 `codex exec`(별칭 `codex e`)다.
 2. **`claude --effort`에 잘못된 값을 주면 경고만 내고 기본 effort로 조용히 실행된다.** 실측 출력: `Warning: Unknown --effort value 'bogus' — ignoring it and using the default effort.` 어댑터가 CLI에 넘기기 **전에** 검증하지 않으면 잘못된 effort로 돌고 아무도 모른다.
 3. **Cursor는 effort가 별도 플래그가 아니라 모델 id의 일부다.** `gpt-5.6-sol-xhigh`처럼 붙는다. `-fast`와 `-thinking` 변형이 따로 있다.
 4. **`cursor-cli`라는 바이너리는 이 환경에 없다.** 설치된 것은 `cursor`와 `cursor-agent`뿐이다. 제품은 `cursor-cli`를 우선 탐색하고 없으면 `cursor-agent`로 폴백하는 해석 로직을 두며, 설정으로 덮어쓸 수 있게 한다.
+5. **`codex -m`은 없는 모델 id를 거부하지 않는다.** 실측 출력: `warning: Model metadata for \`gpt-5.6-bogus\` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.` 경고만 내고 **그대로 실행된다.** `claude --model`은 반대로 `[claude-code:unrecognized_model]`로 즉시 거부한다. 즉 모델 id의 방어선은 codex 쪽에만 없고, `supports()`가 그 자리를 메운다 — §0.1-2와 같은 계열의 조용한 폴백이다.
 
 ## 1. 아키텍처
 
@@ -145,20 +149,35 @@ interface EngineAdapter {
 
 ### 3.2 모델 → 엔진 매핑
 
-| 매트릭스 모델 | 기본 엔진 | 대체 엔진 (`cursor-cli -p`) |
-|---|---|---|
-| Luna | codex | `gpt-5.6-luna-{effort}` ✅ |
-| Terra | codex | `gpt-5.6-terra-{effort}` ✅ |
-| Sol | codex | `gpt-5.6-sol-{effort}` ✅ |
-| **Astra** | codex | **없음 ❌** |
-| **Haiku** | claude | **없음 ❌** |
-| Sonnet | claude | `claude-sonnet-5-{effort}` ✅ |
-| Opus | claude | `claude-opus-5-thinking-{effort}` ✅ |
-| Fable | claude | `claude-fable-5-1-{effort}` ✅ |
+**모델 id는 추측이 아니라 실측이다** (S1, 2026-09-20). 출처는 `data/engines.json`의 `$evidence`:
+codex는 `~/.codex/models_cache.json`(client 0.154.0)의 `slug`·`supported_reasoning_levels`,
+cursor는 `cursor-agent --list-models`, claude는 4개 id를 실제로 `-p` 실행해 응답을 확인했다.
 
-`cursor-agent --list-models`(2026-09-20) 실측 결과다. **Cursor는 8모델 중 6개만 커버한다.** Astra는 11행 중 6행에 등장(primary 4 / reviewer 2)하고 Haiku는 1행의 reviewer이므로, 대체는 **모델별로만 가능**하고 전역 대체가 아니다.
+| 매트릭스 모델 | 기본 엔진 | 기본 엔진의 모델 id | 대체 엔진 (`cursor-cli -p`) |
+|---|---|---|---|
+| Luna | codex | `gpt-5.6-luna` | `gpt-5.6-luna-{effort}` ✅ |
+| Terra | codex | `gpt-5.6-terra` | `gpt-5.6-terra-{effort}` ✅ |
+| Sol | codex | `gpt-5.6-sol` | `gpt-5.6-sol-{effort}` ✅ |
+| **Astra** | codex | `gpt-6-astra` | **없음 ❌** |
+| **Haiku** | claude | `claude-haiku-4-5-20251001` | **없음 ❌** |
+| Sonnet | claude | `claude-sonnet-5` | `claude-sonnet-5-thinking-{effort}` ✅ |
+| Opus | claude | `claude-opus-5` | `claude-opus-5-thinking-{effort}` ✅ |
+| Fable | claude | `claude-fable-5-1` | `claude-fable-5-1-thinking-{effort}` ✅ |
 
-가용성은 `engines.json`에 선언적으로 두고, `supports()`가 이 테이블을 읽는다. 지원하지 않는 조합에 대체를 시도하면 **명시적 실패**다 — 가장 가까운 모델로 말없이 바꾸지 않는다.
+**Cursor는 8모델 중 6개만 커버한다.** Astra는 11행 중 6행에 등장(primary 4 / reviewer 2)하고
+Haiku는 1행의 reviewer이므로, 대체는 **모델별로만 가능**하고 전역 대체가 아니다.
+가용성은 `engines.json`에 선언적으로 두고, `supports()`가 이 테이블을 읽는다.
+지원하지 않는 조합에 대체를 시도하면 **명시적 실패**다 — 가장 가까운 모델로 말없이 바꾸지 않는다.
+
+Cursor 쪽 id에서 S1이 확인한 두 가지(SPEC v0.1보다 정밀해진 부분):
+
+- **OpenAI 모델에는 `-thinking` 변형이 아예 없다.** §3.3의 "기본은 `-thinking` 계열" 정책은
+  Claude 3모델(sonnet·opus·fable)에만 적용된다. `gpt-5.6-*`는 `-{effort}`와 `-fast`만 있다.
+- **`claude-opus-5` 비thinking은 `low|medium|high`뿐이다.** `xhigh`·`max`는 `-thinking` 변형이
+  유일한 경로이므로, Opus에서 `-thinking` 기본값은 취향이 아니라 **커버리지 요구사항**이다.
+
+codex의 `supported_reasoning_levels`는 네 모델 모두 정규 5단계를 포함한다.
+terra·sol·astra에는 `ultra`도 있으나 매트릭스에 등장하지 않으므로 정규 어휘에 넣지 않는다(§3.3).
 
 ### 3.3 effort 정규화
 
@@ -176,6 +195,7 @@ interface EngineAdapter {
 - codex의 `ultra`는 매트릭스에 등장하지 않으므로 정규 어휘에 넣지 않는다.
 - **정규 어휘 밖의 값은 던진다.** `claude`는 잘못된 값을 경고만 내고 기본값으로 실행하므로(§0.1-2), 어댑터 검증이 유일한 방어선이다.
 - Cursor는 `-fast`/`-thinking` 변형 선택 정책을 `engines.json`에 둔다. 기본값은 `-thinking` 계열(추론 품질 우선), `fast`는 옵트인.
+  단 `-thinking`은 **Claude 3모델에만 존재한다** — `gpt-5.6-*`에는 변형 자체가 없다(§3.2).
 
 ### 3.4 argv 생성 예
 
@@ -330,7 +350,19 @@ Evaluator에는 reviewer 슬롯 모델을 쓴다 — 매트릭스의 독립 리�
 | `engines.json` | 바이너리 경로·이름 해석, 모델↔엔진 매핑, 가용성, effort 표기, cursor 변형 정책 | 수기 |
 | `limits.json` | 최대 반복 수, 최대 노드 수, 누적 비용 상한, 타임아웃 | 수기 |
 
-`matrix.json`은 생성물이다. 첫 줄에 `// GENERATED — 소스: <HTML 경로>`를 두고 수기 편집하지 않는다.
+`matrix.json`은 생성물이며 수기 편집하지 않는다.
+
+**첫 줄 주석 대신 `$generated` 키를 쓴다** (S1 변경). `// GENERATED` 주석은 `JSON.parse`를 깨뜨려
+전용 스트리퍼가 필요해지므로, 같은 정보를 **첫 키** `$generated`에 담는다:
+
+```json
+{ "$generated": { "note": "GENERATED — …", "source": "<HTML 절대경로>",
+                  "sourceSha256": "<원본 해시>", "generator": "scripts/gen-matrix.mjs" }, … }
+```
+
+대조는 `npm run matrix:check`(= `gen-matrix.mjs --check`)가 한다 — 원본에서 다시 생성해 바이트 단위로
+비교하고 다르면 실패한다. 원본 HTML이 그 머신에 없으면 **통과시키되 생략 사유를 출력한다**
+(원본은 저장소 바깥의 절대경로다). 이 대조는 pre-commit 게이트의 첫 단계다.
 
 ## 10. 테스트
 
