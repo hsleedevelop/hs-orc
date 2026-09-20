@@ -358,6 +358,10 @@ Evaluator에는 reviewer 슬롯 모델을 쓴다 — 매트릭스의 독립 리�
 
 - **1차**: 배정을 확정한 시점에 `status:"decided"`, `outcome:"pending"`, `id`, `branch`(`down|keep|up_part|up_session`)
 - **2차**: 검증이 끝난 뒤 **같은 `id`로 한 줄 더 append**. 갱신이 아니다. 쿼리는 `id`별 마지막 줄을 본다.
+- **`id` 형식은 `MMDD-HHMM-xxx`다** (S6 변경). 라우터 스키마의 `MMDD-HHMM`은 사람이 손으로 쓸 때의 이야기이고, 제품은 같은 분에 여러 작업을 돌릴 수 있어 두 작업의 4줄이 한 `id`로 섞인다 — **"id당 2줄" 불변식이 깨지는 것을 실측으로 확인했다.** 접두는 그대로 두고 16진 3자리 접미사만 붙인다.
+- 기본 경로는 라우터와 같은 `~/.claude/logs/delegation-router.jsonl`이고 `HS_ORC_DECISION_LOG`로 덮어쓴다. `note`에 `hs-orchestrator`를 넣어 사람이 쓴 줄과 구분한다.
+- `downshifted`/`branch`는 **AA 측정치로 판정한다**(§2.3). 매트릭스 모델은 벤더가 갈려 계층 이름만으로는 비교할 수 없다. 기준 세션 모델은 `HS_ORC_SESSION_MODEL`(기본 `fable`)이다.
+- 자동 증거 수집이 붙기 전까지 2차 줄의 `outcome`은 성공해도 **`unverified`다.** "성공했습니다"는 증거가 아니다(§5).
 - 남기는 경우: 위임했을 때 / 티어를 내렸을 때 / 조건에 걸렸는데 일부러 안 내렸을 때 / 제안했지만 실행되지 않았을 때(거절·차단·무응답)
 - 남기지 않는 경우: 그냥 "직접"으로 간 기본 경로
 

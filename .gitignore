@@ -15,3 +15,6 @@ build/
 # 로컬 실행 산출물
 .lavish/
 *.log
+
+# 실행별 원시 로그
+.hs-orc/

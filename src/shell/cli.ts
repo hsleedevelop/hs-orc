@@ -16,6 +16,10 @@ import { PingpongSession } from '../core/modes/pingpong.ts';
 import { runLoop } from '../core/modes/loop.ts';
 import { runGraph, type GraphNode } from '../core/modes/graph.ts';
 import { assign } from '../core/assign.ts';
+import { appendDecision, decisionLogPath } from '../core/decision-log.ts';
+import { firstLine, secondLine } from '../core/decide.ts';
+import { storeRun } from '../core/run-store.ts';
+import { reportError, reportNotice } from '../core/report.ts';
 import { GATE_CHECKS, parseGateCheck, type GateSignals } from '../core/gatekeeper.ts';
 import { classifyWithModel } from '../core/classify-llm.ts';
 import { route } from '../core/pipeline.ts';
@@ -102,14 +106,18 @@ async function main(): Promise<void> {
   }
 
   if (result.stage === 'unclassified') {
-    process.stderr.write(`${result.message}\n  --classify-llm 으로 저비용 모델 분류를 시도할 수 있다.\n`);
+    // 정상 비즈니스 상태다 — notice 로 내린다 (PLAN S6-4).
+    const note = reportNotice('pipeline', 'unclassified', result.message);
+    process.stderr.write(`${note.display}\n  --classify-llm 으로 저비용 모델 분류를 시도할 수 있다.\n`);
     process.exitCode = 1;
     return;
   }
 
   if (result.stage === 'direct') {
+    // 그냥 "직접"으로 간 기본 경로는 **결정 로그에 남기지 않는다** (SPEC §8).
+    const note = reportNotice('gatekeeper', 'gate-direct', '§1 하한선에 걸렸다. 엔진을 띄우지 않는다.');
     process.stderr.write(
-      ['판정   ② 유지 — §1 하한선에 걸렸다. 엔진을 띄우지 않는다.', ...result.reasons.map((r) => `       · ${r}`), ''].join('\n'),
+      [`판정   ② 유지 — ${note.message}`, ...result.reasons.map((r) => `       · ${r}`), ''].join('\n'),
     );
     return;
   }
@@ -204,6 +212,11 @@ async function main(): Promise<void> {
   }
 
   // --mode once (기본): primary 슬롯 1회. reviewer 왕복은 --mode pingpong|loop 다.
+  // 1차 결정 로그 — 배정을 확정한 **이 시점에** 남긴다 (SPEC §8).
+  const decision = firstLine(matrix, plan, args.task, reason);
+  appendDecision(decision);
+  process.stderr.write(`결정   ${decision.id} ${decision.branch}/${decision.tier} → ${decisionLogPath()}\n`);
+
   const adapter = createAdapter(primary.engine, catalog);
   const handle = adapter.start(
     { model: primary.model, effort: primary.effort, prompt: args.task, cwd: process.cwd(), timeoutMs: args.timeoutMs },
@@ -215,12 +228,37 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => handle.cancel());
 
   const run = await handle.result;
+
+  // 원시 로그를 먼저 보존한다 — 이후 단계가 터져도 원본은 남는다.
+  let stored = '';
+  try {
+    stored = storeRun(decision.id, 1, primary.label, {
+      rawStdout: run.rawStdout,
+      rawStderr: run.rawStderr,
+      meta: { outcome: run.outcome, exitCode: run.exitCode, durationMs: run.durationMs, usage: run.usage, costUsd: run.costUsd, modelId: primary.modelId },
+    }).dir;
+  } catch (error) {
+    // catch 후 무동작 금지 — 실패에는 사용자에게 보이는 상태가 있어야 한다.
+    process.stderr.write(`${reportError('run-store', 'persist', error).display}\n`);
+  }
+
+  // 2차 결정 로그 — **같은 id 로 append** 한다. 갱신이 아니다.
+  // 자동 증거가 없으므로 outcome 은 unverified 다. "성공했습니다"는 증거가 아니다 (SPEC §5).
+  appendDecision(
+    secondLine(
+      decision,
+      run.outcome === 'ok' ? 'unverified' : 'wrong',
+      stored ? `원시 로그 ${stored} · 운영 기준: ${plan.assignment.operatingCriterion}` : '',
+    ),
+  );
   process.stdout.write(`${args.raw ? run.rawStdout : run.text}\n`);
   process.stderr.write(
     `\n결과   ${run.outcome} · ${run.durationMs}ms` +
       (run.usage ? ` · in ${run.usage.inputTokens} / out ${run.usage.outputTokens}` : '') +
       (run.costUsd !== undefined ? ` · $${run.costUsd.toFixed(4)}` : '') +
       (run.unparsedLines.length ? ` · 파싱 실패 ${run.unparsedLines.length}줄` : '') +
+      `\n결정   ${decision.id} 2차 append 완료 (outcome=${run.outcome === 'ok' ? 'unverified' : 'wrong'})` +
+      (stored ? `\n원본   ${stored}` : '') +
       `\nreviewer ${reviewer.label} 왕복이 필요하면 --mode pingpong 또는 --mode loop 다.\n`,
   );
   if (run.outcome !== 'ok') process.exitCode = 1;

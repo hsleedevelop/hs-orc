@@ -11,6 +11,10 @@ import { loadEngines } from '../../data/engines.ts';
 import { loadLimits } from '../../data/limits.ts';
 import { route } from '../../core/pipeline.ts';
 import { createExecutor, estimateUsd } from '../../core/executor.ts';
+import { appendDecision } from '../../core/decision-log.ts';
+import { firstLine, secondLine } from '../../core/decide.ts';
+import { storeRun } from '../../core/run-store.ts';
+import { reportError } from '../../core/report.ts';
 import { Budget } from '../../core/budget.ts';
 import { Journal } from '../../core/journal.ts';
 import { claudeSessions, codexSessions, reviews, type Probe, type SessionRow } from '../integrations.ts';
@@ -59,6 +63,10 @@ function RunScreen({
     const slot = result.plan.slots.primary;
     const execute = createExecutor(loadEngines(), process.cwd(), loadLimits().runTimeoutMs);
 
+    // 1차 결정 로그 — 배정을 확정한 이 시점에 남긴다 (SPEC §8).
+    const decision = firstLine(matrix, result.plan, task, result.reason);
+    appendDecision(decision);
+
     void execute(slot, task).then((run) => {
       const charge = budget.charge(`${slot.label}·${slot.effort}`, run.actualUsd, estimateUsd(matrix, slot));
       journal.append({
@@ -74,6 +82,18 @@ function RunScreen({
         verification: '',
         charge,
       });
+      // 원시 로그를 먼저 보존하고, 실패해도 화면에 보이는 상태로 남긴다.
+      let stored = '';
+      try {
+        stored = storeRun(decision.id, journal.records.length, slot.label, {
+          rawStdout: '', rawStderr: '', meta: { outcome: run.ok ? 'ok' : 'failed', durationMs: run.durationMs, modelId: slot.modelId },
+        }).dir;
+      } catch (error) {
+        setOutput(reportError('run-store', 'persist', error).display);
+      }
+      // 2차 — 같은 id 로 append. 자동 증거가 없으므로 unverified 다 (SPEC §5).
+      appendDecision(secondLine(decision, run.ok ? 'unverified' : 'wrong', stored ? `원시 로그 ${stored}` : ''));
+
       setOutput(run.text);
       setPhase('done');
       bump((n) => n + 1);
