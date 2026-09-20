@@ -23,7 +23,18 @@ const layerBoundary = (layer, forbidden) => ({
 });
 
 export default tseslint.config(
-  { ignores: ['node_modules/**', 'dist/**', 'slides/**', 'data/matrix.json', 'src/shell/gui/renderer/bundle.js'] },
+  // `node_modules.nosync` 는 iCloud 동기화를 피하려는 구성이다 — 이름이 다르면
+  // `node_modules/**` 가 빗나가 lint 가 의존성을 통째로 훑는다(실측: 게이트가 깨졌다).
+  {
+    ignores: [
+      'node_modules/**',
+      'node_modules.nosync/**',
+      'dist/**',
+      'slides/**',
+      'data/matrix.json',
+      'src/shell/gui/renderer/bundle.js',
+    ],
+  },
 
   eslint.configs.recommended,
 

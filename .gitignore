@@ -7,7 +7,11 @@
 .idea/
 
 # 의존성·빌드 (구현 단계에서 사용)
+node_modules
 node_modules/
+# iCloud 동기화를 피하려고 node_modules 를 .nosync 로 옮기고 심볼릭 링크를 거는 구성 지원.
+# 이름이 바뀌면 `node_modules/` 패턴이 빗나가므로 둘 다 적는다 (링크는 디렉터리가 아니다).
+node_modules.nosync/
 dist/
 build/
 *.tsbuildinfo
