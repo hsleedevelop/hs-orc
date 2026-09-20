@@ -156,6 +156,12 @@ async function main(): Promise<void> {
 
   if (args.mode === 'loop') {
     const maxIterations = args.maxIterations ?? limits.maxIterations;
+    // 위에 찍힌 비용은 **1사이클**이다. 루프는 최대 maxIterations 번 돈다 —
+    // 실행 전에 최악값을 보여주지 않으면 "실행 전 비용 표시"가 거짓말이 된다.
+    const worst = Math.min(plan.cost.totalUsd * maxIterations, budgetUsd);
+    process.stderr.write(
+      `상한   최대 ${maxIterations}사이클 · 최악 $${worst.toFixed(2)}(추정, 상한 $${budgetUsd} 에서 강제 중단)\n\n`,
+    );
     const result = await runLoop(
       matrix,
       plan,
@@ -202,6 +208,18 @@ async function main(): Promise<void> {
         onFailure: n.onFailure ?? 'skip-dependents',
       };
     });
+    // 그래프의 비용은 위에 찍힌 분류 결과가 아니라 **노드별 배정의 합**이다.
+    // 실행 전에 노드별로 보여준다 (SPEC §7).
+    const total = nodes.reduce((sum, n) => sum + n.plan.cost.primaryUsd, 0);
+    process.stderr.write(
+      [
+        '그래프 노드별 예상 비용 (primary 슬롯 기준, AA 추정):',
+        ...nodes.map((n) => `       ${n.id.padEnd(10)} ${n.plan.assignment.id} ${n.plan.slots.primary.label}·${n.plan.slots.primary.effort}  $${n.plan.cost.primaryUsd}`),
+        `       ${'합계'.padEnd(10)} $${total.toFixed(2)} (상한 $${budgetUsd} 에서 강제 중단)`,
+        '',
+      ].join('\n'),
+    );
+
     const result = await runGraph(matrix, nodes, execute, { maxNodes: limits.maxNodes, budgetUsd });
     process.stderr.write(
       `\n${result.journal.render()}\n묶음   ${result.batches.map((b) => b.join('+')).join(' → ')}\n` +
