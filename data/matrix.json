@@ -1,0 +1,549 @@
+{
+  "$generated": {
+    "note": "GENERATED — 수기 편집하지 않는다. `npm run gen:matrix` 로 재생성한다.",
+    "source": "/Users/hsonpro/Documents/Codex/2026-09-20/astra-terra-fable-opus-test/outputs/gpt-5-6-claude-practical-matrix-v6.html",
+    "sourceSha256": "85cc39b4a6a7932fdcdb7453665f55e5ee51c4f49f47ab2c3fe46fe0c6f3323c",
+    "generator": "scripts/gen-matrix.mjs"
+  },
+  "tiers": {
+    "openai": [
+      "luna",
+      "terra",
+      "sol",
+      "astra"
+    ],
+    "anthropic": [
+      "haiku",
+      "sonnet",
+      "opus",
+      "fable"
+    ]
+  },
+  "profiles": {
+    "astra": {
+      "name": "GPT-6 Astra",
+      "kind": "OpenAI · frontier execution",
+      "summary": "복잡한 구현, 다중 파일 변경, 장애 RCA와 실제 terminal 실행을 primary로 맡기기 좋은 선택입니다. 장기 작업에서 Fable과 사실상 동급 코딩군이므로, 고위험 작업은 Fable을 independent reviewer로 둡니다.",
+      "stats": [
+        [
+          "Best fit",
+          "RCA · feature · security"
+        ],
+        [
+          "Effort",
+          "High → Max"
+        ],
+        [
+          "Reviewer",
+          "Fable xHigh / Max"
+        ]
+      ]
+    },
+    "sol": {
+      "name": "GPT-5.6 Sol",
+      "kind": "OpenAI · complex professional work",
+      "summary": "일반 구현보다 한 단계 깊은 복합 기능, 여러 파일 리팩터링, 테스트 설계의 primary로 적합합니다. Astra가 필요한지 판단하기 전에 명확한 수용 기준과 실행 로그를 먼저 보강하는 기본 상향 지점입니다.",
+      "stats": [
+        [
+          "Best fit",
+          "Feature · refactor · test"
+        ],
+        [
+          "Effort",
+          "High → xHigh"
+        ],
+        [
+          "Reviewer",
+          "Opus or Sonnet"
+        ]
+      ]
+    },
+    "terra": {
+      "name": "GPT-5.6 Terra",
+      "kind": "OpenAI · fast balanced work",
+      "summary": "짧고 명확한 구현, 구조화된 문서, 반복적인 보조 검증에 비용과 속도 균형이 좋습니다. Terminal-Bench 결과는 최상위군과 큰 간격이 있어, 복잡한 버그나 광범위한 리팩터링의 단독 담당은 피합니다.",
+      "stats": [
+        [
+          "Best fit",
+          "Small changes · docs"
+        ],
+        [
+          "Effort",
+          "Mid → High"
+        ],
+        [
+          "Escalate when",
+          "root cause is unclear"
+        ]
+      ]
+    },
+    "luna": {
+      "name": "GPT-5.6 Luna",
+      "kind": "OpenAI · high-volume efficiency",
+      "summary": "반복 변환, 짧은 요약, 명확한 타입·문법 확인처럼 비용 민감하고 고빈도인 업무에 맞습니다. 결과가 바로 실행·배포 경로를 바꾸면 Terra 이상으로 올리고 관련 test를 실행합니다.",
+      "stats": [
+        [
+          "Best fit",
+          "Batch · summary · routine"
+        ],
+        [
+          "Effort",
+          "Low → Mid"
+        ],
+        [
+          "Escalate when",
+          "scope expands"
+        ]
+      ]
+    },
+    "fable": {
+      "name": "Claude Fable 5.1",
+      "kind": "Anthropic · long-horizon exploration",
+      "summary": "모호한 아키텍처 설계, 대규모 레거시 분석, 장기 마이그레이션에서 primary로 적합합니다. Astra와 terminal coding 결과가 오차 범위 내로 가까워, 코딩 업무에서도 고위험 작업의 독립 검증자 역할이 강합니다.",
+      "stats": [
+        [
+          "Best fit",
+          "Legacy · design · migration"
+        ],
+        [
+          "Effort",
+          "High → Max"
+        ],
+        [
+          "Reviewer",
+          "Astra xHigh / Max"
+        ]
+      ]
+    },
+    "opus": {
+      "name": "Claude Opus 5",
+      "kind": "Anthropic · focused reasoning",
+      "summary": "비용을 낮추면서 강한 단발 추론과 코드 경로 검토를 수행하는 대안입니다. 최신 Fable보다 장기 에이전트성은 낮지만, 리팩터링·성능 최적화의 reviewer로 실용적인 균형을 제공합니다.",
+      "stats": [
+        [
+          "Best fit",
+          "Review · focused analysis"
+        ],
+        [
+          "Effort",
+          "Low → xHigh"
+        ],
+        [
+          "Use with",
+          "Astra or Terra primary"
+        ]
+      ]
+    },
+    "sonnet": {
+      "name": "Claude Sonnet 5",
+      "kind": "Anthropic · balanced daily implementation",
+      "summary": "요구사항 정리, 일상 기능 구현, 테스트 보강과 코드 리뷰에 균형 잡힌 역할입니다. 장기 탐색이나 불명확한 RCA에서는 Opus 또는 Fable로 상향하되, 먼저 로그·재현 조건을 보강합니다.",
+      "stats": [
+        [
+          "Best fit",
+          "Daily feature · review"
+        ],
+        [
+          "Effort",
+          "Mid → High"
+        ],
+        [
+          "Escalate when",
+          "multi-step investigation"
+        ]
+      ]
+    },
+    "haiku": {
+      "name": "Claude Haiku 4.5",
+      "kind": "Anthropic · fast lightweight work",
+      "summary": "짧은 질문, 요약, 문법과 타입 확인, 잘 분리된 작은 수정에 맞습니다. 현재 TB4 snapshot에는 공개 결과가 없으므로, 경량 역할의 실사용 검증은 작업 표본으로 확인해야 합니다.",
+      "stats": [
+        [
+          "Best fit",
+          "Short questions · checks"
+        ],
+        [
+          "Effort",
+          "Low → Mid"
+        ],
+        [
+          "Escalate when",
+          "change has blast radius"
+        ]
+      ]
+    }
+  },
+  "assignments": [
+    {
+      "id": "R01",
+      "task": "짧은 구현 / 타입 수정",
+      "operatingCriterion": "빠르게 수정하고 기존 test만 실행",
+      "primary": {
+        "model": "luna",
+        "vendor": "openai",
+        "efforts": [
+          "medium"
+        ],
+        "label": "Luna"
+      },
+      "reviewer": {
+        "model": "haiku",
+        "vendor": "anthropic",
+        "efforts": [
+          "low",
+          "medium"
+        ],
+        "label": "Haiku"
+      },
+      "detail": "변경이 작고 재현이 명확할 때만 Luna/Haiku로 닫습니다. 의존성이 넓거나 test가 불안정하면 Terra 또는 Sonnet으로 올립니다."
+    },
+    {
+      "id": "R02",
+      "task": "요구사항 정리 / 기술 비교",
+      "operatingCriterion": "결정 기준과 반례를 문서화",
+      "primary": {
+        "model": "terra",
+        "vendor": "openai",
+        "efforts": [
+          "high"
+        ],
+        "label": "Terra"
+      },
+      "reviewer": {
+        "model": "sonnet",
+        "vendor": "anthropic",
+        "efforts": [
+          "high"
+        ],
+        "label": "Sonnet"
+      },
+      "detail": "결론보다 결정 기준, 제외 범위, 반례를 reviewer가 확인합니다."
+    },
+    {
+      "id": "R03",
+      "task": "신규 기능 구현",
+      "operatingCriterion": "acceptance test를 먼저 고정",
+      "primary": {
+        "model": "sol",
+        "vendor": "openai",
+        "efforts": [
+          "high"
+        ],
+        "label": "Sol"
+      },
+      "reviewer": {
+        "model": "sonnet",
+        "vendor": "anthropic",
+        "efforts": [
+          "high"
+        ],
+        "label": "Sonnet"
+      },
+      "detail": "구현 전에 acceptance criteria를 적고, reviewer는 누락된 user flow와 edge case를 찾습니다."
+    },
+    {
+      "id": "R04",
+      "task": "여러 파일 리팩터링",
+      "operatingCriterion": "영향 범위와 회귀 suite 확인",
+      "primary": {
+        "model": "sol",
+        "vendor": "openai",
+        "efforts": [
+          "xhigh"
+        ],
+        "label": "Sol"
+      },
+      "reviewer": {
+        "model": "opus",
+        "vendor": "anthropic",
+        "efforts": [
+          "high"
+        ],
+        "label": "Opus"
+      },
+      "detail": "계획과 실제 diff를 분리하고, 바뀐 경로와 의존성의 회귀 test를 실행합니다."
+    },
+    {
+      "id": "R05",
+      "task": "복잡한 버그 / 장애 RCA",
+      "operatingCriterion": "가설이 아니라 로그로 반증",
+      "primary": {
+        "model": "astra",
+        "vendor": "openai",
+        "efforts": [
+          "xhigh",
+          "max"
+        ],
+        "label": "Astra"
+      },
+      "reviewer": {
+        "model": "fable",
+        "vendor": "anthropic",
+        "efforts": [
+          "xhigh"
+        ],
+        "label": "Fable"
+      },
+      "detail": "원인 가설을 로그와 재현으로 반증합니다. 리뷰어는 대안 가설을 먼저 제시합니다."
+    },
+    {
+      "id": "R06",
+      "task": "테스트 설계 / 회귀 분석",
+      "operatingCriterion": "실패 재현 -> 최소 수정 -> 회귀",
+      "primary": {
+        "model": "sol",
+        "vendor": "openai",
+        "efforts": [
+          "xhigh"
+        ],
+        "label": "Sol"
+      },
+      "reviewer": {
+        "model": "sonnet",
+        "vendor": "anthropic",
+        "efforts": [
+          "high"
+        ],
+        "label": "Sonnet"
+      },
+      "detail": "생성한 test가 아니라 수정 전 실패와 수정 후 통과를 증거로 남깁니다. 복잡한 원인은 Astra/Fable로 상향합니다."
+    },
+    {
+      "id": "R07",
+      "task": "성능 최적화",
+      "operatingCriterion": "baseline / 변경 / 재측정 3점",
+      "primary": {
+        "model": "astra",
+        "vendor": "openai",
+        "efforts": [
+          "xhigh"
+        ],
+        "label": "Astra"
+      },
+      "reviewer": {
+        "model": "opus",
+        "vendor": "anthropic",
+        "efforts": [
+          "xhigh"
+        ],
+        "label": "Opus"
+      },
+      "detail": "측정 환경과 baseline을 고정하고, 변경 전후를 같은 조건에서 재측정합니다."
+    },
+    {
+      "id": "R08",
+      "task": "대규모 레거시 분석",
+      "operatingCriterion": "경로 추적 결과를 표본 검증",
+      "primary": {
+        "model": "fable",
+        "vendor": "anthropic",
+        "efforts": [
+          "xhigh",
+          "max"
+        ],
+        "label": "Fable"
+      },
+      "reviewer": {
+        "model": "astra",
+        "vendor": "openai",
+        "efforts": [
+          "xhigh"
+        ],
+        "label": "Astra"
+      },
+      "detail": "Fable의 장기 탐색 결과를 표본 코드 경로와 실제 query로 확인합니다."
+    },
+    {
+      "id": "R09",
+      "task": "장기 마이그레이션",
+      "operatingCriterion": "작은 batch와 rollback 지점",
+      "primary": {
+        "model": "fable",
+        "vendor": "anthropic",
+        "efforts": [
+          "xhigh",
+          "max"
+        ],
+        "label": "Fable"
+      },
+      "reviewer": {
+        "model": "astra",
+        "vendor": "openai",
+        "efforts": [
+          "high"
+        ],
+        "label": "Astra"
+      },
+      "detail": "작은 batch, checkpoint, rollback 지점을 먼저 설계한 뒤 실행합니다."
+    },
+    {
+      "id": "R10",
+      "task": "아키텍처 / 설계",
+      "operatingCriterion": "대안·제약·실행계획을 분리",
+      "primary": {
+        "model": "fable",
+        "vendor": "anthropic",
+        "efforts": [
+          "high",
+          "xhigh"
+        ],
+        "label": "Fable"
+      },
+      "reviewer": {
+        "model": "astra",
+        "vendor": "openai",
+        "efforts": [
+          "xhigh"
+        ],
+        "label": "Astra"
+      },
+      "detail": "공개 설계 benchmark가 부족합니다. 산출물의 대안, 제약, 실패 모드와 실행계획을 검토합니다."
+    },
+    {
+      "id": "R11",
+      "task": "보안 / 배포 최종 검토",
+      "operatingCriterion": "독립 리뷰 + 실제 검증 필수",
+      "primary": {
+        "model": "astra",
+        "vendor": "openai",
+        "efforts": [
+          "max"
+        ],
+        "label": "Astra"
+      },
+      "reviewer": {
+        "model": "fable",
+        "vendor": "anthropic",
+        "efforts": [
+          "max"
+        ],
+        "label": "Fable"
+      },
+      "detail": "두 모델의 합의는 충분하지 않습니다. 실제 검사·test·배포 관측이 최종 증거입니다."
+    }
+  ],
+  "economics": [
+    {
+      "model": "astra",
+      "vendor": "openai",
+      "aa": 53,
+      "taskCostUsd": 3.26,
+      "firstChunkSec": 260.42,
+      "inputScope": "Text + image",
+      "note": null
+    },
+    {
+      "model": "sol",
+      "vendor": "openai",
+      "aa": 47,
+      "taskCostUsd": 1.99,
+      "firstChunkSec": 129.5,
+      "inputScope": "Text + image",
+      "note": null
+    },
+    {
+      "model": "terra",
+      "vendor": "openai",
+      "aa": 42,
+      "taskCostUsd": 1.4,
+      "firstChunkSec": 211.05,
+      "inputScope": "Text + image",
+      "note": null
+    },
+    {
+      "model": "luna",
+      "vendor": "openai",
+      "aa": 37,
+      "taskCostUsd": 0.18,
+      "firstChunkSec": 123.28,
+      "inputScope": "Text + image",
+      "note": null
+    },
+    {
+      "model": "fable",
+      "vendor": "anthropic",
+      "aa": 53,
+      "taskCostUsd": 7.63,
+      "firstChunkSec": 262.21,
+      "inputScope": "Text + image",
+      "note": "AA row는 fallback 포함 구성"
+    },
+    {
+      "model": "opus",
+      "vendor": "anthropic",
+      "aa": 51,
+      "taskCostUsd": 5.86,
+      "firstChunkSec": 56.84,
+      "inputScope": "Text + image",
+      "note": null
+    },
+    {
+      "model": "sonnet",
+      "vendor": "anthropic",
+      "aa": 38,
+      "taskCostUsd": 5.09,
+      "firstChunkSec": 131.49,
+      "inputScope": "Text + image",
+      "note": null
+    },
+    {
+      "model": "haiku",
+      "vendor": "anthropic",
+      "aa": 17,
+      "taskCostUsd": 0.21,
+      "firstChunkSec": 17.18,
+      "inputScope": "Text + image",
+      "note": null
+    }
+  ],
+  "ladder": [
+    {
+      "level": "L1",
+      "primary": {
+        "model": "luna",
+        "effort": "medium"
+      },
+      "reviewer": {
+        "model": "haiku",
+        "effort": "low"
+      },
+      "independentReview": false
+    },
+    {
+      "level": "L2",
+      "primary": {
+        "model": "terra",
+        "effort": "high"
+      },
+      "reviewer": {
+        "model": "sonnet",
+        "effort": "high"
+      },
+      "independentReview": false
+    },
+    {
+      "level": "L3",
+      "primary": {
+        "model": "sol",
+        "effort": "high"
+      },
+      "reviewer": {
+        "model": "opus",
+        "effort": "high"
+      },
+      "independentReview": false
+    },
+    {
+      "level": "L5",
+      "primary": {
+        "model": "astra",
+        "effort": "max"
+      },
+      "reviewer": {
+        "model": "fable",
+        "effort": "max"
+      },
+      "independentReview": true
+    }
+  ]
+}

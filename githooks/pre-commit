@@ -1,0 +1,18 @@
+#!/bin/sh
+# 검증 게이트 — 설정은 의도 표명일 뿐이고, 게이트가 있어야 규칙이다 (hs-engineering).
+# 원격이 없는 동안은 이 훅이 유일한 집행 지점이다. 원격이 생기면 같은 명령을 CI로 옮긴다.
+#
+# 주의: gate 는 인덱스가 아니라 **작업 트리**를 본다. 부분 스테이징 커밋에서는
+#       커밋되지 않은 수정까지 검사한다 — 의도적인 트레이드오프다(stash 는 워크트리 간 공유라 위험).
+set -e
+
+# 1) 시크릿 스캔 — 의지가 아니라 게이트로 막는다.
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks 가 없다. \`brew install gitleaks\` 후 다시 커밋하라." >&2
+  echo "            (의도적으로 건너뛰려면 git commit --no-verify)" >&2
+  exit 1
+fi
+gitleaks protect --staged --redact --no-banner
+
+# 2) matrix 대조 → type-check → lint → test
+npm run --silent gate

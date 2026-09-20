@@ -1,0 +1,26 @@
+{
+  "name": "hs-orchestrator",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "gen:matrix": "node scripts/gen-matrix.mjs",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "node --test 'src/**/__tests__/*.test.ts'",
+    "gate": "npm run matrix:check && npm run type-check && npm run lint && npm run test",
+    "secret-scan": "gitleaks protect --staged --redact --no-banner",
+    "prepare": "git config core.hooksPath githooks",
+    "matrix:check": "node scripts/gen-matrix.mjs --check"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.6.2",
+    "eslint": "10.11.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.70.0"
+  }
+}
