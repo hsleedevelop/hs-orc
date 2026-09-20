@@ -65,6 +65,11 @@ export interface InvocationOptions {
   readonly engine?: EngineName;
   /** Cursor `-fast` 옵트인 (D-023). 기본은 꺼짐 — 추론 품질 우선(SPEC §3.3). */
   readonly fast?: boolean;
+  /**
+   * 파일 쓰기 허용 (D-025). 기본은 꺼짐 — 외부 쓰기는 사람에게 올리는 조건이다(PLAN).
+   * **reviewer 슬롯에는 절대 켜지지 않는다.** 그 강제는 `createExecutor` 가 한다.
+   */
+  readonly write?: boolean;
 }
 
 export function buildInvocation(
@@ -117,6 +122,15 @@ export function buildInvocation(
     case 'modelSuffix':
       // effort 가 이미 모델 id 에 녹아 있다 (SPEC §0.1-3). 별도 플래그가 없다.
       break;
+  }
+
+  // 쓰기 권한은 **선언이 있는 엔진만** 받는다. 없으면 읽기 전용으로 떨어뜨리지 않고 던진다 —
+  // 조용히 못 쓰면 "고쳤다"는 산출물이 실제로는 아무것도 안 바꾼 채 통과한다 (D-025).
+  if (options.write === true) {
+    if (!spec.write) {
+      throw new EngineError(`${target} 에 쓰기 권한 선언이 없다 (engines.json). 읽기 전용으로 말없이 떨어뜨리지 않는다.`);
+    }
+    argv.push(...spec.write.argv);
   }
 
   return { engine: target, argv, modelId, effort };

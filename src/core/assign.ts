@@ -11,12 +11,16 @@ import { createAdapter } from '../adapters/engine.ts';
 
 declare const crossVendorBrand: unique symbol;
 
+export type SlotRole = 'primary' | 'reviewer';
+
 export interface ResolvedSlot {
   readonly model: ModelKey;
   readonly label: string;
   readonly effort: Effort;
   readonly engine: EngineName;
   readonly modelId: string;
+  /** 쓰기 권한 판정의 근거다 (D-025). reviewer 는 이 값 때문에 절대 쓰기를 못 받는다. */
+  readonly role: SlotRole;
 }
 
 export interface CrossVendorPair {
@@ -44,7 +48,7 @@ export interface AssignmentPlan {
   readonly cost: CostEstimate;
 }
 
-function resolveSlot(catalog: Engines, slot: Slot, effort: Effort): ResolvedSlot {
+function resolveSlot(catalog: Engines, slot: Slot, effort: Effort, role: SlotRole): ResolvedSlot {
   const engine = catalog.models[slot.model].defaultEngine;
   // supports() 가 유일한 가용성 판정이다 — 여기서 대체 모델을 고르지 않는다 (D-004).
   if (!createAdapter(engine, catalog).supports(slot.model, effort)) {
@@ -52,7 +56,7 @@ function resolveSlot(catalog: Engines, slot: Slot, effort: Effort): ResolvedSlot
   }
   const modelId = catalog.models[slot.model].availability[engine]?.id;
   if (!modelId) throw new AssignError(`${engine}/${slot.model} 의 모델 id 가 비어 있다 — engines.json 이 깨졌다.`);
-  return { model: slot.model, label: slot.label, effort, engine, modelId };
+  return { model: slot.model, label: slot.label, effort, engine, modelId, role };
 }
 
 /** INV-1 을 통과한 쌍만 반환한다. 위반이면 던진다 — 조용히 한쪽을 바꾸지 않는다. */
@@ -92,8 +96,8 @@ export function assign(
     return effort;
   };
 
-  const primary = resolveSlot(catalog, assignment.primary, pick(assignment.primary, options.primaryEffort));
-  const reviewer = resolveSlot(catalog, assignment.reviewer, pick(assignment.reviewer, options.reviewerEffort));
+  const primary = resolveSlot(catalog, assignment.primary, pick(assignment.primary, options.primaryEffort), 'primary');
+  const reviewer = resolveSlot(catalog, assignment.reviewer, pick(assignment.reviewer, options.reviewerEffort), 'reviewer');
   const slots = crossVendorPair(matrix, primary, reviewer);
 
   const primaryUsd = costOf(matrix.economics, primary.model);

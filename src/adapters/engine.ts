@@ -14,7 +14,10 @@ export function createAdapter(engine: EngineName, catalog: Engines = loadEngines
   const spec = catalog.engines[engine];
 
   const argvFor = (req: RunRequest): string[] => [
-    ...buildInvocation(catalog, req.model, req.effort, req.prompt, engine).argv,
+    ...buildInvocation(catalog, req.model, req.effort, req.prompt, {
+      engine,
+      ...(req.write === true ? { write: true } : {}),
+    }).argv,
     ...spec.streamArgv,
   ];
 

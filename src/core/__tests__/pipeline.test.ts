@@ -54,8 +54,8 @@ describe('INV-1', () => {
     const openaiPair = () =>
       crossVendorPair(
         matrix,
-        { model: 'sol', label: 'Sol', effort: 'high', engine: 'codex', modelId: 'gpt-5.6-sol' },
-        { model: 'astra', label: 'Astra', effort: 'max', engine: 'codex', modelId: 'gpt-6-astra' },
+        { model: 'sol', label: 'Sol', effort: 'high', engine: 'codex', modelId: 'gpt-5.6-sol', role: 'primary' },
+        { model: 'astra', label: 'Astra', effort: 'max', engine: 'codex', modelId: 'gpt-6-astra', role: 'reviewer' },
       );
     assert.throws(openaiPair, AssignError);
     assert.throws(openaiPair, /INV-1 위반/);
@@ -65,8 +65,8 @@ describe('INV-1', () => {
     assert.ok(
       crossVendorPair(
         matrix,
-        { model: 'sol', label: 'Sol', effort: 'high', engine: 'codex', modelId: 'gpt-5.6-sol' },
-        { model: 'opus', label: 'Opus', effort: 'high', engine: 'claude', modelId: 'claude-opus-5' },
+        { model: 'sol', label: 'Sol', effort: 'high', engine: 'codex', modelId: 'gpt-5.6-sol', role: 'primary' },
+        { model: 'opus', label: 'Opus', effort: 'high', engine: 'claude', modelId: 'claude-opus-5', role: 'reviewer' },
       ),
     );
   });

@@ -461,6 +461,39 @@ v1~v2 내내 실행 경로가 `npm run` 뿐이었다 — 이 저장소 안에서
 
 ---
 
+## D-025 — 쓰기 권한은 primary 슬롯만, 그것도 명시적 옵트인
+
+**배경**
+진입점 실사용에서 **primary(codex)가 read-only 샌드박스로 떠서 파일을 못 고쳤다.** "수정안"만 내고 끝났고 reviewer 가 그것을 FAIL 로 잡았다. 두 슬롯 설계는 작동했지만, 라우터가 광고하는 "실행"이 실제로는 안 되고 있었다.
+
+**결정**
+
+1. **`engines.json` 에 엔진별 쓰기 인자를 선언한다.** 실측 `--help` 기준이고, 워크스페이스 밖까지 여는 값은 선언하지 않는다.
+
+   | 엔진 | 쓴다 | 쓰지 않는다 |
+   |---|---|---|
+   | codex | `-s workspace-write` | `danger-full-access` |
+   | claude | `--permission-mode acceptEdits` | `bypassPermissions` (쉘까지 열린다) |
+   | cursor | `--force` | `--yolo` (같은 것의 별칭) |
+
+2. **reviewer 는 절대 받지 않는다.** `ResolvedSlot` 에 `role` 을 두고 `core/executor.ts` 한 곳에서 `options.write === true && slot.role === 'primary'` 로만 부여한다. 호출자가 무엇을 넘겨도 reviewer 는 읽기 전용이다. 판정 대상을 스스로 고칠 수 있는 검증자는 독립 검증자가 아니다 (D-003·INV-1).
+
+3. **기본은 꺼짐, `--write` 로 옵트인.** PLAN "사람에게 올리는 조건"에 **외부 쓰기**가 있다. `--run` 이 비용 승인이라면 `--write` 는 쓰기 승인이고, 둘은 다른 결정이다. 쓰기 여부는 **승인 전 화면에 비용과 나란히** 찍는다.
+
+4. **선언이 없는 엔진에 쓰기를 요청하면 던진다.** 읽기 전용으로 조용히 떨어뜨리면 아무것도 안 바꾼 산출물이 "고쳤다"로 통과한다 — hs-00-core 가 금지하는 조용한 폴백이다.
+
+**기각**
+- *기본을 켜짐으로* — `--run` 하나로 비용과 파일 수정을 동시에 승인하게 된다. 되돌리기 어려운 쪽을 끼워 파는 셈이다.
+- *`bypassPermissions` / `danger-full-access`* — 워크스페이스 밖 쓰기와 임의 쉘이 열린다. 얻는 것(프롬프트 0회)에 비해 잃는 것이 크다.
+- *reviewer 에게도 쓰기* — "reviewer 가 직접 고치면 빠르다"는 유혹이 있으나, 그 순간 산출물과 판정의 출처가 같아져 D-009 의 두 슬롯이 무의미해진다.
+
+**실측 (2026-09-21, `/tmp` 빈 git repo)**
+`hs-orc "broken.ts 의 타입 에러를 고쳐라" --write --run` → Luna(codex)가 **파일을 실제로 수정**(`git diff` 1 file changed, `number` → `string`), Haiku(reviewer)는 `tsc 실행 권한 미획득`을 사유로 들며 `FAIL` — reviewer 가 읽기 전용으로 남았다는 실증이다. `--write` 없이는 종전대로 수정안만 낸다.
+
+**상태** 확정
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |

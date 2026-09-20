@@ -23,6 +23,16 @@ export interface EngineSpec {
   readonly streamArgv: readonly string[];
   readonly streamFormat: 'claude' | 'codex';
   readonly variant?: { readonly default: 'thinking' | 'plain'; readonly fastOptIn: boolean };
+  /**
+   * primary 슬롯에 파일 쓰기를 허용하는 인자 (D-025). 선언이 없는 엔진에 쓰기를 요청하면 **던진다** —
+   * 읽기 전용으로 조용히 떨어뜨리면 "실행했다"가 거짓이 된다.
+   */
+  readonly write?: {
+    readonly argv: readonly string[];
+    /** 지금은 `workspace` 뿐이다. 워크스페이스 밖까지 여는 값은 선언하지 않는다. */
+    readonly scope: 'workspace';
+    readonly note: string;
+  };
 }
 
 /** 해당 엔진이 그 모델을 아예 제공하지 않으면 `null` 이다 — 말없는 치환의 자리가 아니다 (D-004). */

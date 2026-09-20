@@ -8,6 +8,35 @@ const catalog = loadEngines();
 const build = (model: Parameters<typeof buildInvocation>[1], effort: string, engine?: 'claude' | 'codex' | 'cursor') =>
   buildInvocation(catalog, model, effort, 'PROMPT', engine);
 
+describe('쓰기 권한 (D-025)', () => {
+  it('기본은 읽기 전용이다 — 쓰기 인자가 붙지 않는다', () => {
+    for (const argv of [build('sol', 'high').argv, build('fable', 'high').argv, build('opus', 'high', 'cursor').argv]) {
+      assert.doesNotMatch(argv.join(' '), /workspace-write|acceptEdits|--force/);
+    }
+  });
+
+  it('엔진별 실측 플래그를 붙인다 — 워크스페이스 밖까지 여는 값은 쓰지 않는다', () => {
+    const write = (model: Parameters<typeof buildInvocation>[1], engine: 'claude' | 'codex' | 'cursor') =>
+      buildInvocation(catalog, model, 'high', 'PROMPT', { engine, write: true }).argv;
+    assert.deepEqual(write('sol', 'codex').slice(-2), ['-s', 'workspace-write']);
+    assert.deepEqual(write('fable', 'claude').slice(-2), ['--permission-mode', 'acceptEdits']);
+    assert.deepEqual(write('opus', 'cursor').slice(-1), ['--force']);
+    for (const argv of [write('sol', 'codex'), write('fable', 'claude'), write('opus', 'cursor')]) {
+      assert.doesNotMatch(argv.join(' '), /danger-full-access|bypassPermissions|--yolo/);
+    }
+  });
+
+  it('선언이 없는 엔진에 쓰기를 요청하면 읽기 전용으로 떨어지지 않고 던진다', () => {
+    // 선언을 **지운** 카탈로그다. `write: undefined` 로는 exactOptionalPropertyTypes 가 막는다.
+    const stripped = JSON.parse(JSON.stringify(catalog)) as typeof catalog;
+    delete (stripped.engines.codex as { write?: unknown }).write;
+    assert.throws(
+      () => buildInvocation(stripped, 'sol', 'high', 'PROMPT', { engine: 'codex', write: true }),
+      /쓰기 권한 선언이 없다/,
+    );
+  });
+});
+
 describe('argv 생성', () => {
   it('codex 는 exec 서브커맨드와 -c model_reasoning_effort 를 쓴다', () => {
     assert.deepEqual(build('sol', 'xhigh').argv, [

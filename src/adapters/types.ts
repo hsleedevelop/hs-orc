@@ -8,6 +8,8 @@ export interface RunRequest {
   readonly prompt: string;
   readonly cwd: string;
   readonly timeoutMs: number;
+  /** 파일 쓰기 허용 (D-025). 기본(생략)은 읽기 전용이다. */
+  readonly write?: boolean;
 }
 
 export interface Usage {
@@ -36,7 +38,7 @@ export interface RunResult {
   readonly usage?: Usage;
   readonly costUsd?: number;
   readonly durationMs: number;
-  /** 파싱과 무관하게 보존한다 (SPEC §3.5) — 파싱 실패가 원본 손실로 이어지면 안 된다. */
+  /** 파싱과 무관하게 보존한다 (SPEC §3.6) — 파싱 실패가 원본 손실로 이어지면 안 된다. */
   readonly rawStdout: string;
   readonly rawStderr: string;
   readonly unparsedLines: readonly string[];

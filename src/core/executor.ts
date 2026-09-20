@@ -24,14 +24,30 @@ export function estimateUsd(matrix: Matrix, slot: ResolvedSlot): number {
   return matrix.economics.find((e) => e.model === slot.model)?.taskCostUsd ?? 0;
 }
 
-export function createExecutor(catalog: Engines, cwd: string, timeoutMs: number): SlotExecutor {
+export interface ExecutorOptions {
+  /**
+   * primary 슬롯에 파일 쓰기를 허용한다 (D-025). 기본은 꺼짐 — 외부 쓰기는 사람에게 올린다(PLAN).
+   * **reviewer 는 이 값이 true 여도 읽기 전용이다.** 판정 대상을 스스로 고칠 수 있으면
+   * 독립 검증(INV-1·D-003)이 성립하지 않는다. 그 강제가 아래 한 줄이고, 여기가 유일한 부여 지점이다.
+   */
+  readonly write?: boolean;
+}
+
+export function createExecutor(
+  catalog: Engines,
+  cwd: string,
+  timeoutMs: number,
+  options: ExecutorOptions = {},
+): SlotExecutor {
   return async (slot, prompt) => {
+    const write = options.write === true && slot.role === 'primary';
     const handle = createAdapter(slot.engine, catalog).start({
       model: slot.model,
       effort: slot.effort,
       prompt,
       cwd,
       timeoutMs,
+      ...(write ? { write: true } : {}),
     });
     const result = await handle.result;
     return {

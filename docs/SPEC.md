@@ -215,7 +215,21 @@ codex   exec "<prompt>" -m <id> -c model_reasoning_effort="xhigh" --output-forma
 cursor  -p "<prompt>" --model gpt-5.6-sol-xhigh --output-format stream-json
 ```
 
-### 3.5 프로세스 관리
+### 3.5 쓰기 권한 (D-025)
+
+기본은 **읽기 전용**이다. `--write` 를 켜면 **primary 슬롯만** 파일을 고칠 수 있다.
+
+| 엔진 | 인자 (실측 `--help`, 2026-09-21) | 쓰지 않는 값 |
+|---|---|---|
+| codex | `-s workspace-write` | `danger-full-access` |
+| claude | `--permission-mode acceptEdits` | `bypassPermissions` |
+| cursor | `--force` | `--yolo`(같은 것의 별칭) |
+
+- **reviewer 는 이 값이 켜져도 읽기 전용이다.** 판정 대상을 스스로 고칠 수 있으면 독립 검증(D-003·INV-1)이 성립하지 않는다. 부여 지점은 `core/executor.ts` 한 곳이고, 거기서 `slot.role === 'primary'` 로 막는다 — 호출자가 무엇을 넘기든 뚫리지 않는다.
+- 선언(`engines.json` 의 `write`)이 없는 엔진에 쓰기를 요청하면 **던진다.** 읽기 전용으로 조용히 떨어뜨리면 아무것도 안 바꾼 산출물이 "고쳤다"로 통과한다.
+- 쓰기 여부는 **승인 전 화면에 비용과 나란히** 표시한다 (PLAN "사람에게 올리는 조건: 외부 쓰기").
+
+### 3.6 프로세스 관리
 
 - 취소는 자식 프로세스를 **실제로 종료**해야 한다. 프로세스 그룹 단위 종료. 좀비 검출 테스트 필수.
 - 타임아웃은 작업 유형별 기본값을 두되 사용자가 덮어쓸 수 있다.

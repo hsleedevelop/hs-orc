@@ -2,7 +2,7 @@
  * v1 셸의 최소판 (PLAN S1~S3). TUI 는 S5다.
  *
  *   hs-orc "<작업>" [--task R01] [--effort high] [--reviewer-effort high]
- *        [--gate irreversibleChange] [--classify-llm] [--run] [--timeout 600] [--raw]
+ *        [--gate irreversibleChange] [--classify-llm] [--run] [--write] [--timeout 600] [--raw]
  *
  * 기본은 **배정 제시까지**다 (SPEC §4-4 승인 게이트). 실제 실행은 `--run` 으로만 한다.
  */
@@ -49,19 +49,20 @@ interface Parsed {
   gate: GateSignals;
   classifyLlm: boolean;
   run: boolean;
+  write: boolean;
   raw: boolean;
   timeoutMs: number;
 }
 
 const USAGE = `사용법: hs-orc "<작업>" [--task R01] [--effort high] [--reviewer-effort high]
-       [--gate <${GATE_CHECKS.join('|')}>]... [--classify-llm] [--run] [--timeout 600] [--raw]
+       [--gate <${GATE_CHECKS.join('|')}>]... [--classify-llm] [--run] [--write] [--timeout 600] [--raw]
        [--mode once|pingpong|loop|graph] [--max-iterations N] [--budget 20] [--graph <nodes.json>]
        [--verify "[phase:]<명령>"]... [--evidence <file.json>] [--crash-test]
        [--no-reviewer] [--side primary|reviewer]`;
 
 function parseArgs(argv: readonly string[]): Parsed {
   const positional: string[] = [];
-  const parsed: Parsed = { task: '', mode: 'once', gate: {}, verify: [], crashTest: false, skipReviewer: false, side: 'primary', classifyLlm: false, run: false, raw: false, timeoutMs: 900_000 };
+  const parsed: Parsed = { task: '', mode: 'once', gate: {}, verify: [], crashTest: false, skipReviewer: false, side: 'primary', classifyLlm: false, run: false, write: false, raw: false, timeoutMs: 900_000 };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -98,6 +99,7 @@ function parseArgs(argv: readonly string[]): Parsed {
       case '--gate': parsed.gate[parseGateCheck(value())] = true; break;
       case '--classify-llm': parsed.classifyLlm = true; break;
       case '--run': parsed.run = true; break;
+      case '--write': parsed.write = true; break;
       case '--raw': parsed.raw = true; break;
       case '--timeout': parsed.timeoutMs = Number(value()) * 1000; break;
       default: if (arg !== undefined) positional.push(arg);
@@ -172,6 +174,10 @@ async function main(): Promise<void> {
       `기준   ${plan.assignment.operatingCriterion}`,
       `비용   $${plan.cost.totalUsd} = primary $${plan.cost.primaryUsd} + reviewer $${plan.cost.reviewerUsd}  [${plan.cost.grade.toUpperCase()}]`,
       `       ${plan.cost.note}`,
+      // 외부 쓰기는 승인 **전에** 보여준다 — 비용과 같은 이유다 (PLAN "사람에게 올리는 조건").
+      args.write
+        ? `쓰기   primary ${primary.label} 이 ${process.cwd()} 안의 파일을 고칠 수 있다 (--write). reviewer 는 읽기 전용이다.`
+        : `쓰기   꺼짐 — 두 슬롯 다 읽기 전용이다. 파일을 고치게 하려면 --write 다.`,
       '',
     ].join('\n'),
   );
@@ -183,7 +189,7 @@ async function main(): Promise<void> {
 
   const limits = loadLimits();
   const budgetUsd = args.budgetUsd ?? limits.budgetUsd;
-  const execute = createExecutor(catalog, process.cwd(), args.timeoutMs);
+  const execute = createExecutor(catalog, process.cwd(), args.timeoutMs, { write: args.write });
 
   if (args.mode === 'pingpong') {
     // 자율 실행이 아니다 (D-015). 한 턴만 돌리고 다음 제안을 남긴 뒤 사용자에게 돌려준다.
