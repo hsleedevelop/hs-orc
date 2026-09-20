@@ -1,24 +1,28 @@
 /**
- * v1 셸의 최소판 (PLAN S1). TUI 는 S5다 — 지금은 인자 → 계획 → 프로세스 → stdout 패스스루.
+ * v1 셸의 최소판 (PLAN S1~S2). TUI 는 S5다.
  *
- *   node src/shell/cli.ts "이 타입 에러 고쳐줘" [--task R01] [--engine codex] [--effort high] [--dry-run]
+ *   node src/shell/cli.ts "<작업>" [--task R01] [--engine codex] [--effort high]
+ *                                 [--timeout 600] [--dry-run] [--raw]
  */
-import { spawn } from 'node:child_process';
 import { loadMatrix } from '../data/matrix.ts';
 import { loadEngines } from '../data/engines.ts';
-import { resolveBinary } from '../adapters/resolve.ts';
-import { planPrimary } from '../core/route.ts';
+import { createAdapter } from '../adapters/engine.ts';
+import { planPrimary, toRunRequest } from '../core/route.ts';
 
-interface Args {
-  readonly task: string;
-  readonly options: { taskId?: string; engine?: 'claude' | 'codex' | 'cursor'; effort?: string };
-  readonly dryRun: boolean;
+type EngineName = 'claude' | 'codex' | 'cursor';
+
+interface Options {
+  taskId?: string;
+  engine?: EngineName;
+  effort?: string;
 }
 
-function parseArgs(argv: readonly string[]): Args {
+function parseArgs(argv: readonly string[]): { task: string; options: Options; dryRun: boolean; raw: boolean; timeoutMs: number } {
   const positional: string[] = [];
-  const options: { taskId?: string; engine?: 'claude' | 'codex' | 'cursor'; effort?: string } = {};
+  const options: Options = {};
   let dryRun = false;
+  let raw = false;
+  let timeoutMs = 900_000;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -30,57 +34,67 @@ function parseArgs(argv: readonly string[]): Args {
     };
 
     switch (arg) {
-      case '--dry-run':
-        dryRun = true;
-        break;
-      case '--task':
-        options.taskId = value();
-        break;
-      case '--engine':
-        options.engine = value() as 'claude' | 'codex' | 'cursor';
-        break;
-      case '--effort':
-        options.effort = value();
-        break;
-      default:
-        if (arg !== undefined) positional.push(arg);
+      case '--dry-run': dryRun = true; break;
+      case '--raw': raw = true; break;
+      case '--task': options.taskId = value(); break;
+      case '--engine': options.engine = value() as EngineName; break;
+      case '--effort': options.effort = value(); break;
+      case '--timeout': timeoutMs = Number(value()) * 1000; break;
+      default: if (arg !== undefined) positional.push(arg);
     }
   }
 
   const task = positional.join(' ').trim();
-  if (!task) throw new Error('작업 문자열이 없다.\n  사용법: node src/shell/cli.ts "<작업>" [--task R01] [--engine codex] [--effort high] [--dry-run]');
-  return { task, options, dryRun };
+  if (!task) {
+    throw new Error('작업 문자열이 없다.\n  사용법: node src/shell/cli.ts "<작업>" [--task R01] [--engine codex] [--effort high] [--timeout 600] [--dry-run] [--raw]');
+  }
+  return { task, options, dryRun, raw, timeoutMs };
 }
 
-function main(): void {
-  const { task, options, dryRun } = parseArgs(process.argv.slice(2));
-  const plan = planPrimary(loadMatrix(), loadEngines(), task, options);
-  const { assignment, invocation } = plan;
+async function main(): Promise<void> {
+  const { task, options, dryRun, raw, timeoutMs } = parseArgs(process.argv.slice(2));
+  const catalog = loadEngines();
+  const plan = planPrimary(loadMatrix(), catalog, task, options);
+  const { assignment } = plan;
 
-  // 배정 근거를 먼저 보여준다 — 관찰가능성은 UI가 아니라 기본값이다.
+  // 배정 근거를 먼저 보여준다 — 관찰가능성은 UI 기능이 아니라 기본값이다.
   process.stderr.write(
     [
       `업무   ${assignment.id} ${assignment.task}  (${plan.reason})`,
-      `배정   primary ${assignment.primary.label} · ${invocation.effort}  → ${invocation.engine} / ${invocation.modelId}`,
+      `배정   primary ${assignment.primary.label} · ${plan.effort}  → ${plan.engine} / ${plan.modelId}`,
       `기준   ${assignment.operatingCriterion}`,
       `reviewer ${assignment.reviewer.label} 은 S3에서 붙는다 (이 단계는 primary 슬롯만).`,
       '',
     ].join('\n'),
   );
 
-  const bin = resolveBinary(loadEngines().engines[invocation.engine]);
-  process.stderr.write(`실행   ${bin} ${invocation.argv.join(' ')}\n\n`);
-  if (dryRun) return;
+  const adapter = createAdapter(plan.engine, catalog);
+  const request = toRunRequest(plan, task, process.cwd(), timeoutMs);
 
-  const child = spawn(bin, [...invocation.argv], { stdio: 'inherit' });
-  child.on('exit', (code, signal) => {
-    process.exitCode = signal ? 1 : (code ?? 1);
+  if (dryRun) {
+    process.stderr.write(`argv   ${adapter.buildArgv(request).join(' ')}\n`);
+    return;
+  }
+
+  const handle = adapter.start(request, (event) => {
+    if (event.kind === 'notice') process.stderr.write(`[${event.level}] ${event.message}\n`);
+    if (event.kind === 'unparsed') process.stderr.write(`[unparsed] ${event.line.slice(0, 120)}\n`);
   });
+  process.on('SIGINT', () => handle.cancel());
+
+  const result = await handle.result;
+  process.stdout.write(`${raw ? result.rawStdout : result.text}\n`);
+  process.stderr.write(
+    `\n결과   ${result.outcome} · ${result.durationMs}ms` +
+      (result.usage ? ` · in ${result.usage.inputTokens} / out ${result.usage.outputTokens}` : '') +
+      (result.costUsd !== undefined ? ` · $${result.costUsd.toFixed(4)}` : '') +
+      (result.unparsedLines.length ? ` · 파싱 실패 ${result.unparsedLines.length}줄` : '') +
+      '\n',
+  );
+  if (result.outcome !== 'ok') process.exitCode = 1;
 }
 
-try {
-  main();
-} catch (error) {
+await main().catch((error: unknown) => {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 1;
-}
+});

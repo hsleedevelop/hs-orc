@@ -19,6 +19,9 @@ export interface EngineSpec {
   readonly promptArgv: readonly string[];
   readonly modelFlag: string;
   readonly effort: EffortStyle;
+  /** 이벤트 스트림을 켜는 인자. codex 는 `--output-format` 이 아예 없고 `--json` 이다 (SPEC §0.1-6). */
+  readonly streamArgv: readonly string[];
+  readonly streamFormat: 'claude' | 'codex';
   readonly variant?: { readonly default: 'thinking' | 'plain'; readonly fastOptIn: boolean };
 }
 

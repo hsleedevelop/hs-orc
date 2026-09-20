@@ -4,59 +4,174 @@
     "collectedAt": "2026-09-20",
     "codex": "~/.codex/models_cache.json (client 0.154.0, fetched 2026-09-20T11:52:52Z) 의 slug·supported_reasoning_levels",
     "cursor": "cursor-agent --list-models (2026.09.15-d2fe57e)",
-    "claude": "claude -p --model <id> \"Reply with exactly: ok\" 를 4개 id로 실제 실행해 응답 확인 (claude 2.1.278)"
+    "claude": "claude -p --model <id> \"Reply with exactly: ok\" 를 4개 id로 실제 실행해 응답 확인 (claude 2.1.278)",
+    "stream": "claude/cursor는 --output-format stream-json (claude는 --verbose 동반), codex는 --output-format 자체가 없고 --json(JSONL). 2026-09-20 실행 캡처로 확인.",
+    "stdin": "세 CLI 모두 stdin이 TTY가 아니면 입력을 기다린다. codex는 무기한 블록, claude는 3초 경고 후 진행. 어댑터는 stdin을 닫는다."
   },
-  "efforts": ["low", "medium", "high", "xhigh", "max"],
+  "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
   "engines": {
     "claude": {
-      "binaries": ["claude"],
-      "promptArgv": ["-p"],
+      "binaries": [
+        "claude"
+      ],
+      "promptArgv": [
+        "-p"
+      ],
       "modelFlag": "--model",
-      "effort": { "kind": "flag", "flag": "--effort" }
+      "effort": {
+        "kind": "flag",
+        "flag": "--effort"
+      },
+      "streamArgv": [
+        "--output-format",
+        "stream-json",
+        "--verbose"
+      ],
+      "streamFormat": "claude"
     },
     "codex": {
-      "binaries": ["codex"],
-      "promptArgv": ["exec"],
+      "binaries": [
+        "codex"
+      ],
+      "promptArgv": [
+        "exec"
+      ],
       "modelFlag": "-m",
-      "effort": { "kind": "config", "flag": "-c", "key": "model_reasoning_effort" }
+      "effort": {
+        "kind": "config",
+        "flag": "-c",
+        "key": "model_reasoning_effort"
+      },
+      "streamArgv": [
+        "--json"
+      ],
+      "streamFormat": "codex"
     },
     "cursor": {
-      "binaries": ["cursor-cli", "cursor-agent"],
-      "promptArgv": ["-p"],
+      "binaries": [
+        "cursor-cli",
+        "cursor-agent"
+      ],
+      "promptArgv": [
+        "-p"
+      ],
       "modelFlag": "--model",
-      "effort": { "kind": "modelSuffix" },
-      "variant": { "default": "thinking", "fastOptIn": false }
+      "effort": {
+        "kind": "modelSuffix"
+      },
+      "variant": {
+        "default": "thinking",
+        "fastOptIn": false
+      },
+      "streamArgv": [
+        "--output-format",
+        "stream-json",
+        "--trust"
+      ],
+      "streamFormat": "claude"
     }
   },
   "models": {
     "luna": {
       "defaultEngine": "codex",
       "availability": {
-        "codex": { "id": "gpt-5.6-luna", "efforts": ["low", "medium", "high", "xhigh", "max"] },
-        "cursor": { "idTemplate": "gpt-5.6-luna-{effort}", "efforts": ["low", "medium", "high", "xhigh", "max"], "thinking": false },
+        "codex": {
+          "id": "gpt-5.6-luna",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "cursor": {
+          "idTemplate": "gpt-5.6-luna-{effort}",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "thinking": false
+        },
         "claude": null
       }
     },
     "terra": {
       "defaultEngine": "codex",
       "availability": {
-        "codex": { "id": "gpt-5.6-terra", "efforts": ["low", "medium", "high", "xhigh", "max"] },
-        "cursor": { "idTemplate": "gpt-5.6-terra-{effort}", "efforts": ["low", "medium", "high", "xhigh", "max"], "thinking": false },
+        "codex": {
+          "id": "gpt-5.6-terra",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "cursor": {
+          "idTemplate": "gpt-5.6-terra-{effort}",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "thinking": false
+        },
         "claude": null
       }
     },
     "sol": {
       "defaultEngine": "codex",
       "availability": {
-        "codex": { "id": "gpt-5.6-sol", "efforts": ["low", "medium", "high", "xhigh", "max"] },
-        "cursor": { "idTemplate": "gpt-5.6-sol-{effort}", "efforts": ["low", "medium", "high", "xhigh", "max"], "thinking": false },
+        "codex": {
+          "id": "gpt-5.6-sol",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "cursor": {
+          "idTemplate": "gpt-5.6-sol-{effort}",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "thinking": false
+        },
         "claude": null
       }
     },
     "astra": {
       "defaultEngine": "codex",
       "availability": {
-        "codex": { "id": "gpt-6-astra", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+        "codex": {
+          "id": "gpt-6-astra",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
         "cursor": null,
         "claude": null
       }
@@ -64,7 +179,16 @@
     "haiku": {
       "defaultEngine": "claude",
       "availability": {
-        "claude": { "id": "claude-haiku-4-5-20251001", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+        "claude": {
+          "id": "claude-haiku-4-5-20251001",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
         "cursor": null,
         "codex": null
       }
@@ -72,24 +196,81 @@
     "sonnet": {
       "defaultEngine": "claude",
       "availability": {
-        "claude": { "id": "claude-sonnet-5", "efforts": ["low", "medium", "high", "xhigh", "max"] },
-        "cursor": { "idTemplate": "claude-sonnet-5-thinking-{effort}", "efforts": ["low", "medium", "high", "xhigh", "max"], "thinking": true },
+        "claude": {
+          "id": "claude-sonnet-5",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "cursor": {
+          "idTemplate": "claude-sonnet-5-thinking-{effort}",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "thinking": true
+        },
         "codex": null
       }
     },
     "opus": {
       "defaultEngine": "claude",
       "availability": {
-        "claude": { "id": "claude-opus-5", "efforts": ["low", "medium", "high", "xhigh", "max"] },
-        "cursor": { "idTemplate": "claude-opus-5-thinking-{effort}", "efforts": ["low", "medium", "high", "xhigh", "max"], "thinking": true },
+        "claude": {
+          "id": "claude-opus-5",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "cursor": {
+          "idTemplate": "claude-opus-5-thinking-{effort}",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "thinking": true
+        },
         "codex": null
       }
     },
     "fable": {
       "defaultEngine": "claude",
       "availability": {
-        "claude": { "id": "claude-fable-5-1", "efforts": ["low", "medium", "high", "xhigh", "max"] },
-        "cursor": { "idTemplate": "claude-fable-5-1-thinking-{effort}", "efforts": ["low", "medium", "high", "xhigh", "max"], "thinking": true },
+        "claude": {
+          "id": "claude-fable-5-1",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "cursor": {
+          "idTemplate": "claude-fable-5-1-thinking-{effort}",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "thinking": true
+        },
         "codex": null
       }
     }

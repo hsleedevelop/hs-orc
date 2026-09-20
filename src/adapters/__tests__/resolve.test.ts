@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadEngines } from '../../data/engines.ts';
 import { EngineError, buildInvocation } from '../resolve.ts';
+import { adapterFor, createAdapter } from '../engine.ts';
 
 const catalog = loadEngines();
 const build = (model: Parameters<typeof buildInvocation>[1], effort: string, engine?: 'claude' | 'codex' | 'cursor') =>
@@ -41,5 +42,26 @@ describe('명시적 실패', () => {
   it('벤더가 다른 엔진에 모델을 요청하면 던진다', () => {
     assert.throws(() => build('fable', 'high', 'codex'), EngineError);
     assert.throws(() => build('sol', 'high', 'claude'), EngineError);
+  });
+});
+
+describe('supports()', () => {
+  it('cursor 는 Astra·Haiku 를 지원하지 않는다고 답한다', () => {
+    const cursor = createAdapter('cursor', catalog);
+    assert.equal(cursor.supports('astra', 'max'), false);
+    assert.equal(cursor.supports('haiku', 'low'), false);
+    assert.equal(cursor.supports('sol', 'xhigh'), true);
+  });
+
+  it('기본 엔진이 못 받는 조합은 adapterFor 가 던진다', () => {
+    assert.throws(() => adapterFor('astra', 'bogus', catalog), EngineError);
+  });
+
+  it('argv 끝에 엔진별 스트림 인자가 붙는다 — codex 는 --output-format 이 아니라 --json', () => {
+    const req = { model: 'sol', effort: 'high', prompt: 'P', cwd: '.', timeoutMs: 1000 } as const;
+    assert.deepEqual(createAdapter('codex', catalog).buildArgv(req).slice(-1), ['--json']);
+    assert.deepEqual(createAdapter('claude', catalog).buildArgv({ ...req, model: 'fable' }).slice(-3), [
+      '--output-format', 'stream-json', '--verbose',
+    ]);
   });
 });

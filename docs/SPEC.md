@@ -18,15 +18,24 @@
 | Codex | `codex` | 0.154.0 | `codex exec` | `-m` | `-c model_reasoning_effort="low\|medium\|high\|xhigh\|ultra\|max"` |
 | Cursor | `cursor-agent` | 2026.09.15 | `cursor-agent -p` | `--model` | **모델 id 접미사** (`-low`/`-medium`/`-high`/`-xhigh`/`-max`) 또는 `'name[effort=high]'` |
 
-세 엔진 모두 `--output-format`을 지원하며 `stream-json`을 받을 수 있다.
+**이벤트 스트림은 엔진마다 플래그도 스키마도 다르다** (S2 실측):
 
-### 0.1 확인된 함정 5가지
+| 엔진 | 스트림 플래그 | 이벤트 | 최종 텍스트 | 사용량 |
+|---|---|---|---|---|
+| Claude | `--output-format stream-json --verbose` | `system`/`assistant`/`result` | `result.result` | `result.usage` (snake_case) + `total_cost_usd` |
+| Cursor | `--output-format stream-json` | 같은 모양 | `result.result` | `result.usage` (**camelCase**), 비용 없음 |
+| Codex | **`--json`** (`--output-format` 자체가 없다) | `thread.started`/`turn.started`/`item.completed`/`turn.completed` | `item.type=="agent_message"` 의 `text` | `turn.completed.usage` |
+
+### 0.1 확인된 함정 7가지
 
 1. **`codex -p`는 비대화 실행이 아니다.** 최상위 `-p`는 profile이고 비대화 실행은 `codex exec`(별칭 `codex e`)다.
 2. **`claude --effort`에 잘못된 값을 주면 경고만 내고 기본 effort로 조용히 실행된다.** 실측 출력: `Warning: Unknown --effort value 'bogus' — ignoring it and using the default effort.` 어댑터가 CLI에 넘기기 **전에** 검증하지 않으면 잘못된 effort로 돌고 아무도 모른다.
 3. **Cursor는 effort가 별도 플래그가 아니라 모델 id의 일부다.** `gpt-5.6-sol-xhigh`처럼 붙는다. `-fast`와 `-thinking` 변형이 따로 있다.
 4. **`cursor-cli`라는 바이너리는 이 환경에 없다.** 설치된 것은 `cursor`와 `cursor-agent`뿐이다. 제품은 `cursor-cli`를 우선 탐색하고 없으면 `cursor-agent`로 폴백하는 해석 로직을 두며, 설정으로 덮어쓸 수 있게 한다.
 5. **`codex -m`은 없는 모델 id를 거부하지 않는다.** 실측 출력: `warning: Model metadata for \`gpt-5.6-bogus\` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.` 경고만 내고 **그대로 실행된다.** `claude --model`은 반대로 `[claude-code:unrecognized_model]`로 즉시 거부한다. 즉 모델 id의 방어선은 codex 쪽에만 없고, `supports()`가 그 자리를 메운다 — §0.1-2와 같은 계열의 조용한 폴백이다.
+6. **`codex`에는 `--output-format`이 없다.** SPEC v0.1의 "세 엔진 모두 `--output-format`을 지원한다"는 서술은 **틀렸다**(S2에서 정정). codex의 이벤트 스트림은 `--json`이고 스키마도 claude/cursor 계열과 완전히 다르다. 어댑터는 플래그와 파서를 엔진별로 갈라 `engines.json`의 `streamArgv`·`streamFormat`으로 선언한다.
+7. **세 CLI 모두 stdin이 TTY가 아니면 입력을 기다린다.** `codex`는 `Reading additional input from stdin...`에서 **무기한 블록**하고, `claude`는 3초 경고 후 진행한다. 어댑터는 `stdio[0] = 'ignore'`로 stdin을 닫는다. 추가로 `cursor-agent`는 신뢰하지 않은 디렉터리에서 **Workspace Trust 프롬프트로 막히므로** `--trust`가 필요하다 — 비대화 실행에서는 이 셋 중 하나만 빠져도 조용히 멈춘 것처럼 보인다.
+
 
 ## 1. 아키텍처
 

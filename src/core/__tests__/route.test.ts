@@ -28,21 +28,21 @@ describe('primary 배정', () => {
     );
 
     assert.deepEqual(
-      plans.map((p) => [p.assignment.id, p.invocation.engine, p.invocation.modelId, p.invocation.effort]),
+      plans.map((p) => [p.assignment.id, p.engine, p.modelId, p.effort]),
       [
         ['R01', 'codex', 'gpt-5.6-luna', 'medium'],
         ['R03', 'codex', 'gpt-5.6-sol', 'high'],
         ['R10', 'claude', 'claude-fable-5-1', 'high'],
       ],
     );
-    assert.equal(new Set(plans.map((p) => p.invocation.modelId)).size, 3);
+    assert.equal(new Set(plans.map((p) => p.modelId)).size, 3);
   });
 
   it('매트릭스가 범위를 주면 낮은 쪽을 기본으로 쓴다', () => {
     // R05 복잡한 버그 / 장애 RCA → Astra | xHigh/Max
     const plan = planPrimary(matrix, catalog, '', { taskId: 'R05' });
-    assert.equal(plan.invocation.effort, 'xhigh');
-    assert.equal(plan.invocation.modelId, 'gpt-6-astra');
+    assert.equal(plan.effort, 'xhigh');
+    assert.equal(plan.modelId, 'gpt-6-astra');
   });
 
   it('--task 로 수동 지정하면 분류기를 건너뛴다', () => {
