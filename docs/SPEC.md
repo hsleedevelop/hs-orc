@@ -288,6 +288,10 @@ cursor  -p "<prompt>" --model gpt-5.6-sol-xhigh --output-format stream-json
 R06 `reproduce`/`fix`/`regress` 단계 표기 지원), 변경 파일은 git 에서 읽는다 — 모델이 말한 목록을 믿지 않는다.
 증거가 모였을 때만 결정 로그 2차 줄의 `outcome` 이 `ok` 가 된다. 아니면 `unverified` 다.
 
+행별 **기본 검증 명령**은 `data/verify.json`(수기)에 프로젝트가 선언한다 — 제품은 추론하지 않는다.
+`default` 와 행 id 선언을 합치고 `--verify` 와 다시 합친다. **선언이 없으면 빈 배열이다**:
+업무 유형만 보고 `npm test` 를 넣으면 그 프로젝트에서 틀리고, 틀린 검증으로 닫은 완료는 거짓말이 된다.
+
 ## 6. 진행 방식 3종
 
 ### 6.1 `/pingpong` — 대화형

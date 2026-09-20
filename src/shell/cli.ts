@@ -22,6 +22,7 @@ import { storeRun } from '../core/run-store.ts';
 import { reportError, reportNotice } from '../core/report.ts';
 import { collect, type Evidence } from '../core/evidence.ts';
 import { readUnclassified, recordUnclassified, suggestRows } from '../core/unclassified.ts';
+import { defaultVerify } from '../data/verify.ts';
 import { changedFiles, loadEvidenceFile, runCommand } from '../core/evidence-gather.ts';
 import { GATE_CHECKS, parseGateCheck, type GateSignals } from '../core/gatekeeper.ts';
 import { classifyWithModel } from '../core/classify-llm.ts';
@@ -294,9 +295,15 @@ async function main(): Promise<void> {
   }
 
   // 증거 수집 (SPEC §5). 운영 기준이 요구하는 증거가 모였을 때만 완료다 (PRD G4).
+  // 프로젝트가 선언한 기본 검증 + 이번 실행의 --verify. 추론은 없다 (SPEC §5).
+  const declared = defaultVerify(plan.assignment.id);
+  const verify = [...declared, ...args.verify];
+  if (declared.length > 0) {
+    process.stderr.write(`검증   data/verify.json 선언 ${declared.length}건: ${declared.map((v) => v.cmd).join(' · ')}\n`);
+  }
   const evidence: Evidence[] = [];
-  for (const v of args.verify) evidence.push(runCommand(v.cmd, process.cwd(), v.phase));
-  if (args.verify.length > 0) evidence.push(changedFiles());
+  for (const v of verify) evidence.push(runCommand(v.cmd, process.cwd(), v.phase));
+  if (verify.length > 0) evidence.push(changedFiles());
   if (args.evidenceFile) {
     try {
       evidence.push(...loadEvidenceFile(args.evidenceFile));
