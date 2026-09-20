@@ -318,6 +318,57 @@ Goal / Planner / Executor / Evaluator / Critic / Recovery / Stop을 분리된 �
 
 ---
 
+## D-018 — TUI 프레임워크는 Ink (Q5 확정)
+
+**배경**
+v1은 TUI, v2는 GUI다(D-001). Core는 UI를 모르므로 교체 비용이 낮은 시점이다.
+
+**결정**
+**Ink 7 + React 19.** 정확한 버전으로 핀한다.
+
+**근거**
+v2 GUI가 React 계열로 갈 때 화면 구조와 상태 모델을 그대로 옮길 수 있다. 사용자 결정(2026-09-20).
+
+**상태** 확정 — Q5 종결
+
+---
+
+## D-019 — Ink을 쓰되 JSX는 쓰지 않는다
+
+**배경**
+Node 25의 타입 스트리핑은 **JSX를 처리하지 못한다.** JSX를 쓰려면 빌드 단계(esbuild/tsc emit)를 추가해야 하고, 그러면 테스트 실행 방식(`node --test` 로 `.ts` 직접 실행)까지 바뀐다.
+
+**결정**
+화면은 `createElement`(`el` 헬퍼)로 작성하고 **빌드 단계를 추가하지 않는다.** 대신 화면 로직을 **뷰모델(순수 `.ts`)로 분리**하고 Ink 렌더 층은 얇게 유지한다.
+
+**근거**
+렌더 층이 얇으면 JSX의 이득이 작고, 빌드 단계는 S0에서 세운 게이트(타입 스트리핑 기반 `node --test`)를 통째로 바꾼다. 뷰모델 분리는 Core가 UI를 모른다는 원칙(D-001)과도 같은 방향이고, 테스트가 터미널을 띄우지 않아도 된다.
+
+**영향**
+화면이 커져 `createElement` 중첩이 읽기 어려워지면 그때 esbuild를 도입한다 — **그 전까지는 렌더 층이 얇지 않다는 신호로 읽는다.**
+
+**상태** 확정
+
+---
+
+## D-020 — `codex agents`는 기계 판독 출력이 없다
+
+**배경**
+SPEC §7은 Sessions 화면을 "`codex agents` + `claude agents` 통합 조회"로 규정했다.
+
+**결정**
+`claude agents --json`만 정식 경로로 쓴다. codex 쪽은 `~/.codex/session_index.jsonl`을 읽되 **비공식 내부 색인임을 화면에 표기**한다.
+
+**근거**
+실측(2026-09-20): `claude agents --json`은 `{pid, cwd, kind, startedAt, sessionId, name, status}` 배열을 준다. `codex agents`에는 `--json`이 **없고** alt-screen TUI 브라우저다(`-c/--remote/--enable/--cd/--disable/--no-alt-screen/-h`가 전부). 통합 조회를 "둘 다 동등하게"로 구현하면 거짓말이 된다.
+
+**영향**
+codex 쪽 목록은 스키마가 바뀌면 조용히 빈다 — 그래서 **출처를 값과 함께 표시한다**(D-014·D-017과 같은 원칙). codex가 `--json`을 추가하면 이 폴백을 제거한다.
+
+**상태** 확정
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |
@@ -326,6 +377,6 @@ Goal / Planner / Executor / Evaluator / Critic / Recovery / Stop을 분리된 �
 | ~~Q2~~ | ~~`/loop` 자체 구현 확정~~ → **D-016 확정** (자체 구현) | — |
 | ~~Q3~~ | ~~누적 비용 상한 기본값~~ → **D-017 확정** ($20) | — |
 | Q4 | 매트릭스 "해당 없음" 반복 시 행 추가 정책 | S3 |
-| Q5 | TUI 프레임워크 선택 | S5 |
+| ~~Q5~~ | ~~TUI 프레임워크 선택~~ → **D-018 확정** (Ink 7 + React 19) | — |
 | Q6 | Cursor `-fast` 변형 사용 조건 | S2 |
 | Q7 | v2 GUI 기술 선택 | v1 이후 |

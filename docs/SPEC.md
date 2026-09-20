@@ -325,15 +325,18 @@ Evaluator에는 reviewer 슬롯 모델을 쓴다 — 매트릭스의 독립 리�
 
 ## 7. TUI (v1)
 
-화면 5개. 터미널 UI 프레임워크는 구현 단계에서 선택한다.
+화면 5개 + Debug. 프레임워크는 **Ink 7 + React 19**다 (D-018). **JSX는 쓰지 않는다** — Node의 타입
+스트리핑이 JSX를 처리하지 못해 빌드 단계가 생기기 때문이고, 대신 화면 판단을 순수 뷰모델
+(`src/shell/tui/model.ts`)로 빼고 렌더 층을 얇게 유지한다 (D-019).
 
 | 화면 | 내용 |
 |---|---|
 | **Run** | 작업 입력 → 분류 결과 → 배정(primary/reviewer/effort/엔진) → **예상 비용** → 승인 → 실행 스트림 |
 | **Tasks** | 작업 목록. 상태·배정·증거·누적 비용 |
 | **Dashboard** | 실행 중인 것, 배정 분포, 누적 비용, 업무 유형별 성공/재시도 |
-| **Sessions** | `codex agents` + `claude agents` 통합 조회 |
-| **Reviews** | PR·MR 목록과 CI 상태 (`gh-axi` 우선, `gh` 폴백) |
+| **Sessions** | `claude agents --json` + codex 내부 색인 (아래 주의) |
+| **Reviews** | PR 목록 (`gh-axi` 우선, `gh` 폴백) |
+| **Debug** | 런타임·상한·카탈로그. 프로덕션 빌드에도 싣는다 |
 
 표시 규칙:
 
@@ -341,6 +344,13 @@ Evaluator에는 reviewer 슬롯 모델을 쓴다 — 매트릭스의 독립 리�
 - 근거 등급 배지(`INDEPENDENT` / `VENDOR` / `POLICY`)를 섞지 않는다.
 - 디버그 화면은 프로덕션 빌드에도 포함한다.
 - 화면 타이틀에 환경 + 버전.
+
+**외부 CLI 실측 (S5, 2026-09-20) — 둘 다 SPEC v0.1의 가정과 다르다:**
+
+- **`codex agents`에는 `--json`이 없다.** alt-screen TUI 브라우저이고 플래그는 `-c/--remote/--enable/--remote-auth-token-env/-C/--disable/--no-alt-screen/-h`가 전부다. `claude agents --json`만 정식 경로이고(`{pid,cwd,kind,startedAt,sessionId,name,status}`), codex 쪽은 `~/.codex/session_index.jsonl`(`{id,thread_name,updated_at}`)을 읽는 **비공식 폴백**이다. 화면은 행마다 `[cli]` / `[internal-file]` 출처를 표시한다 (D-020).
+- **`gh-axi`와 `gh`는 인터페이스가 다르다.** `gh-axi pr list`는 `--json`을 받지 않고 `--fields`도 `number/title/state`를 모른다 — 기본 출력이 이미 그 값을 담는다:
+  `pull_requests[3]{number,title,state,author,draft,review}:` 헤더 + 들여쓴 CSV 행(제목은 따옴표). `gh`는 `--json number,title,state`다. 어느 쪽도 못 쓰면 **빈 목록이 아니라 사유를 표시한다.**
+- 출처별로 잘라서 보여준다. 한쪽 세션이 많다고 다른 쪽을 밀어내면 "통합 조회"가 아니다.
 
 ## 8. 결정 로그
 
