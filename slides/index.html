@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>hs-orchestrator — 검토 허브</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="assets/deck.css">
+<style>
+  /* 허브는 스크롤 문서 — 덱의 슬라이드 레이아웃을 쓰지 않는다 */
+  body { overflow: auto; height: auto; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 72px 48px 100px; }
+  .hero { padding-bottom: 46px; border-bottom: 1px solid var(--border); margin-bottom: 46px; }
+  .hero h1 { font-size: 66px; margin-bottom: 18px; }
+  .hero .tag { font-size: 23px; color: var(--text-secondary); line-height: 1.55; max-width: 74ch; }
+  .hero .meta { margin-top: 26px; display: flex; gap: 26px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 13px; color: #666; }
+  section { margin-bottom: 52px; }
+  section > h2 { font-size: 15px; font-family: var(--font-mono); letter-spacing: .16em; text-transform: uppercase; color: var(--accent); margin-bottom: 20px; font-weight: 500; }
+  .decks { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+  a.deck-card { display: block; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 26px 28px; text-decoration: none; transition: .16s; }
+  a.deck-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  a.deck-card .n { font-family: var(--font-mono); font-size: 12px; letter-spacing: .12em; color: var(--accent); margin-bottom: 10px; }
+  a.deck-card h3 { font-size: 27px; color: #fff; margin-bottom: 10px; letter-spacing: -.01em; }
+  a.deck-card p { font-size: 16px; color: #999; line-height: 1.6; }
+  a.deck-card .cnt { margin-top: 16px; font-family: var(--font-mono); font-size: 12px; color: #555; }
+  .keyfacts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .kf { background: #101418; border-left: 3px solid var(--accent); border-radius: 0 10px 10px 0; padding: 20px 22px; }
+  .kf .t { font-family: var(--font-mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin-bottom: 9px; }
+  .kf p { font-size: 16px; line-height: 1.6; color: #c8c8c8; }
+  .kf.warn { border-left-color: var(--warn); background: #171308; }
+  .kf.warn .t { color: var(--warn); }
+  .kf.danger { border-left-color: var(--danger); background: #170d0d; }
+  .kf.danger .t { color: var(--danger); }
+  .pipe { display: flex; gap: 9px; flex-wrap: wrap; align-items: stretch; }
+  .pipe .s { flex: 1 1 0; min-width: 118px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 15px 14px; }
+  .pipe .s .n { font-family: var(--font-mono); font-size: 11px; color: var(--accent); margin-bottom: 6px; }
+  .pipe .s .t { font-size: 15px; font-weight: 600; color: #eee; }
+  .pipe .s .d { font-size: 12.5px; color: #888; margin-top: 5px; line-height: 1.4; }
+  .pipe .ar { align-self: center; color: #444; }
+  .src { font-family: var(--font-mono); font-size: 13px; color: #666; line-height: 1.9; }
+  .src strong { color: #999; font-weight: 400; }
+  footer { border-top: 1px solid var(--border); padding-top: 26px; font-size: 13px; color: #555; line-height: 1.8; }
+  @media (max-width: 860px) { .decks, .keyfacts { grid-template-columns: 1fr; } .wrap { padding: 48px 26px 70px; } .hero h1 { font-size: 46px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <div class="overline">검토 허브 · v0.1 초안</div>
+    <h1>hs-orchestrator</h1>
+    <p class="tag">「GPT-5.6 × Claude 8모델 실무 사용 매트릭스 v6」를 <strong>실행 가능한 라우터</strong>로 바꾸는 로컬 오케스트레이터.<br>작업 1건을 분류하고, primary와 independent reviewer 두 슬롯에 배정하고, 실제 CLI 엔진을 띄워 실행하고, 그 업무가 요구하는 증거로 닫는다.</p>
+    <div class="meta">
+      <span>2026-09-20</span>
+      <span>상태: 승인 대기</span>
+      <span>v1 = TUI · v2 = GUI</span>
+      <span>결정 14 · 미해결 7</span>
+    </div>
+  </div>
+
+  <section>
+    <h2>문서 4종</h2>
+    <div class="decks">
+      <a class="deck-card" href="prd.html">
+        <div class="n">01 — Product Requirements</div>
+        <h3>PRD</h3>
+        <p>무엇을 왜 만드는가. 문제, 목표 G1~G5, 비목표, 핵심 제품 판단 5가지, 기능 요구사항 FR-1~11, 릴리스 단계, 성공 지표, 위험.</p>
+        <div class="cnt">20 슬라이드</div>
+      </a>
+      <a class="deck-card" href="spec.html">
+        <div class="n">02 — Technical Specification</div>
+        <h3>SPEC</h3>
+        <p>어떻게 만드는가. 검증된 CLI 사실과 함정 4가지, 4계층 구조, 매트릭스 11행, 엔진 어댑터와 모델별 가용성, effort 정규화, 라우팅 파이프라인, 증거 수집, 진행 방식 3종, TUI 화면, 테스트.</p>
+        <div class="cnt">26 슬라이드</div>
+      </a>
+      <a class="deck-card" href="plan.html">
+        <div class="n">03 — Implementation Plan</div>
+        <h3>PLAN</h3>
+        <p>어떤 순서로. S0 파이프라인 → S1 뼈대 e2e → S2 어댑터 → S3 라우팅 → S4 진행 방식 → S5 TUI → S6 관찰가능성 → v1 → S7 GUI. 단계마다 완료 판정과 최대 위험.</p>
+        <div class="cnt">13 슬라이드</div>
+      </a>
+      <a class="deck-card" href="decisions.html">
+        <div class="n">04 — Decision Record</div>
+        <h3>DECISIONS</h3>
+        <p>무엇을 왜 그렇게 정했는가. D-001~D-014와 미해결 Q1~Q7. 각 결정의 배경·근거·영향·상태. 실측이 바꾼 결정 표시.</p>
+        <div class="cnt">17 슬라이드</div>
+      </a>
+    </div>
+  </section>
+
+  <section>
+    <h2>파이프라인 — 순서가 설계다</h2>
+    <div class="pipe">
+      <div class="s"><div class="n">1</div><div class="t">Classifier</div><div class="d">11행 중 1행</div></div>
+      <div class="ar">→</div>
+      <div class="s"><div class="n">2</div><div class="t">Gatekeeper</div><div class="d">§1 하한선 — 걸리면 배정하지 않는다</div></div>
+      <div class="ar">→</div>
+      <div class="s"><div class="n">3</div><div class="t">Assigner</div><div class="d">primary + reviewer, INV-1</div></div>
+      <div class="ar">→</div>
+      <div class="s"><div class="n">4</div><div class="t">승인 게이트</div><div class="d">비용 제시</div></div>
+      <div class="ar">→</div>
+      <div class="s"><div class="n">5</div><div class="t">ModeRunner</div><div class="d">pingpong / loop / graph</div></div>
+      <div class="ar">→</div>
+      <div class="s"><div class="n">6</div><div class="t">Evidence</div><div class="d">운영 기준</div></div>
+      <div class="ar">→</div>
+      <div class="s"><div class="n">7</div><div class="t">DecisionLog</div><div class="d">2차 append</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>검토 시 먼저 볼 것 — 실측이 바꾼 것</h2>
+    <div class="keyfacts">
+      <div class="kf danger">
+        <div class="t">SPEC · D-011</div>
+        <p><code>claude --effort</code>에 잘못된 값을 주면 <strong>경고만 내고 기본값으로 조용히 실행된다.</strong> 어댑터 사전 검증이 유일한 방어선.</p>
+      </div>
+      <div class="kf danger">
+        <div class="t">SPEC · D-004</div>
+        <p>Cursor는 8모델 중 <strong>6개만 커버</strong>한다. <strong>Astra·Haiku가 없다.</strong> 대체는 모델별로만 성립하고 전역 대체가 아니다.</p>
+      </div>
+      <div class="kf warn">
+        <div class="t">PRD · D-009</div>
+        <p>배정은 한 슬롯이 아니라 <strong>두 슬롯</strong>이다. 11행 전부 OpenAI×Claude 교차. 단일 선택기로 축소하면 제품이 아니다.</p>
+      </div>
+      <div class="kf warn">
+        <div class="t">PRD · D-008</div>
+        <p><strong>라우터가 먼저, 매트릭스가 나중.</strong> 뒤집히면 하한선에 걸릴 작업에 Fable을 띄우게 된다.</p>
+      </div>
+      <div class="kf">
+        <div class="t">PLAN · S4</div>
+        <p>무한 루프는 <strong>비용이 직접 나간다.</strong> Fable+Astra max 합산 <strong>$10.89</strong>, 최저 조합의 28배. 상한 없는 방식은 머지하지 않는다.</p>
+      </div>
+      <div class="kf">
+        <div class="t">DECISIONS · Q1 · Q2</div>
+        <p>아직 열린 것 둘 — <code>/pingpong</code>의 "대화형" 해석(D-006), <code>/loop</code> 자체 구현 확정(D-007). 둘 다 S4를 막는다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>소스</h2>
+    <p class="src">
+      <strong>매트릭스</strong>  ~/Documents/Codex/2026-09-20/astra-terra-fable-opus-test/outputs/gpt-5-6-claude-practical-matrix-v6.html<br>
+      <strong>라우터</strong>    ~/.claude/skills/delegation-router/SKILL.md<br>
+      <strong>원본 문서</strong>  docs/PRD.md · docs/SPEC.md · docs/PLAN.md · docs/DECISIONS.md<br>
+      <strong>메타프롬프트</strong> hs-orchestrator-meta-prompt.md<br>
+      <strong>CLI 확인</strong>   claude 2.1.278 · codex 0.154.0 · cursor-agent 2026.09.15 (2026-09-20 실행 확인)
+    </p>
+  </section>
+
+  <footer>
+    각 덱에서 <kbd>←</kbd> <kbd>→</kbd> 이동 · <kbd>F</kbd> 전체화면 · <kbd>S</kbd> 발표자 노트(팝업) · <kbd>Home</kbd>/<kbd>End</kbd> 처음·끝.<br>
+    브라우저 인쇄로 PDF 내보내기 가능(가로 방향). 슬라이드 직접 진입은 <code>prd.html#s7</code> 형태.
+  </footer>
+
+</div>
+</body>
+</html>
