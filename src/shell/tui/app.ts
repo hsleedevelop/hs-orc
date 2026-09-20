@@ -45,14 +45,16 @@ function RunScreen({
   journal,
   budget,
   keys,
+  write,
 }: {
   task: string;
   journal: Journal;
   budget: Budget;
   keys: boolean;
+  write: boolean;
 }): ReactElement {
   const result = task ? route(loadMatrix(), loadEngines(), task) : null;
-  const view = runView(result, task);
+  const view = runView(result, task, { write });
   const [phase, setPhase] = useState<'idle' | 'running' | 'done'>('idle');
   const [output, setOutput] = useState('');
   const [, bump] = useState(0);
@@ -62,7 +64,7 @@ function RunScreen({
     setPhase('running');
     const matrix = loadMatrix();
     const slot = result.plan.slots.primary;
-    const execute = createExecutor(loadEngines(), process.cwd(), loadLimits().runTimeoutMs);
+    const execute = createExecutor(loadEngines(), process.cwd(), loadLimits().runTimeoutMs, { write });
 
     // 1차 결정 로그 — 배정을 확정한 이 시점에 남긴다 (SPEC §8).
     const decision = firstLine(matrix, result.plan, task, result.reason);
@@ -193,7 +195,7 @@ function DebugScreen({ keys }: { keys: boolean }): ReactElement {
   );
 }
 
-export function App({ task, initialScreen }: { task: string; initialScreen?: Screen }): ReactElement {
+export function App({ task, initialScreen, write = false }: { task: string; initialScreen?: Screen; write?: boolean }): ReactElement {
   const [screen, setScreen] = useState<Screen>(initialScreen ?? 'Run');
   const { exit } = useApp();
   // 파이프·CI 처럼 stdin 이 TTY 가 아니면 raw mode 가 없고, 가드하지 않으면 **화면이 통째로 죽는다**(실측).
@@ -215,7 +217,7 @@ export function App({ task, initialScreen }: { task: string; initialScreen?: Scr
   );
 
   const body =
-    screen === 'Run' ? h(RunScreen, { task, journal, budget, keys: keysAvailable })
+    screen === 'Run' ? h(RunScreen, { task, journal, budget, keys: keysAvailable, write })
     : screen === 'Sessions' ? h(SessionsScreen, null)
     : screen === 'Reviews' ? h(ReviewsScreen, null)
     : screen === 'Dashboard' ? h(DashboardScreen, { journal, budget })

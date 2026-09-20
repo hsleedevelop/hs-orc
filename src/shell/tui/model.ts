@@ -64,7 +64,12 @@ export interface RunView {
   readonly awaitingApproval: boolean;
 }
 
-export function runView(result: RouteResult | null, task: string): RunView {
+export interface RunViewOptions {
+  /** D-025: primary 슬롯에만 파일 쓰기를 허용할지 여부. */
+  readonly write?: boolean;
+}
+
+export function runView(result: RouteResult | null, task: string, options: RunViewOptions = {}): RunView {
   const title = titleInfo('Run');
   if (result === null) return { title, lines: [`작업: ${task || '(입력 대기)'}`], cost: null, awaitingApproval: false };
 
@@ -89,6 +94,9 @@ export function runView(result: RouteResult | null, task: string): RunView {
       `primary  ${primary.label} · ${primary.effort} → ${primary.engine} / ${primary.modelId}`,
       `reviewer ${reviewer.label} · ${reviewer.effort} → ${reviewer.engine} / ${reviewer.modelId}`,
       `기준 ${plan.assignment.operatingCriterion}`,
+      options.write === true
+        ? `쓰기   primary ${primary.label} 이 workspace 파일을 고칠 수 있음 (--write) · reviewer 는 읽기 전용`
+        : '쓰기   꺼짐 — primary와 reviewer 모두 읽기 전용 (승인 전에 --write로 켤 수 있음)',
     ],
     cost: costLine(plan),
     awaitingApproval: true,

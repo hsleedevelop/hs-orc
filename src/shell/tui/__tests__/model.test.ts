@@ -38,6 +38,15 @@ describe('Run 화면', () => {
     assert.ok(view.lines.some((l) => l.startsWith('reviewer')));
   });
 
+  it('승인 전에 write 상태와 reviewer read-only를 보여준다', () => {
+    const result = route(matrix, catalog, '이 아키텍처 설계 검토해줘');
+    const readOnly = runView(result, 'x');
+    const writable = runView(result, 'x', { write: true });
+    assert.match(readOnly.lines.at(-1) ?? '', /꺼짐/);
+    assert.match(writable.lines.at(-1) ?? '', /primary .*workspace 파일을 고칠 수 있음/);
+    assert.match(writable.lines.at(-1) ?? '', /reviewer 는 읽기 전용/);
+  });
+
   it('하한선에 걸리면 비용도 승인도 없다', () => {
     const view = runView(route(matrix, catalog, '이 아키텍처 설계 검토해줘', { gate: { irreversibleChange: true } }), 'x');
     assert.equal(view.cost, null);

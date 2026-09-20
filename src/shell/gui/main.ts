@@ -32,7 +32,7 @@ function createWindow(): void {
   void window.loadFile(path.resolve(import.meta.dirname, 'renderer', 'index.html'));
 }
 
-ipcMain.handle('plan', (_e, task: string) => service.plan(task));
+ipcMain.handle('plan', (_e, payload: { task: string; write?: boolean }) => service.plan(payload.task, payload.write === true));
 ipcMain.handle('run', (_e, payload: RunPayload) => service.run(payload));
 ipcMain.handle('sessions', () => [claudeSessions(), codexSessions()]);
 ipcMain.handle('reviews', () => reviews());

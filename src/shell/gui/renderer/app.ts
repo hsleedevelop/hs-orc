@@ -12,8 +12,8 @@ const SCREENS = ['Run', 'Dashboard', 'Sessions', 'Reviews', 'Debug'] as const;
 type Screen = (typeof SCREENS)[number];
 
 interface Bridge {
-  plan(task: string): Promise<RunView>;
-  run(payload: { task: string; verify: string[] }): Promise<RunResult>;
+  plan(payload: { task: string; write: boolean }): Promise<RunView>;
+  run(payload: { task: string; verify: string[]; write: boolean }): Promise<RunResult>;
   sessions(): Promise<Probe<SessionRow>[]>;
   reviews(): Promise<Probe<ReviewRow>>;
   dashboard(): Promise<DashboardView>;
@@ -41,6 +41,7 @@ const text = (s: string, className?: string) => h('div', className ? { className
 function RunScreen(): ReactElement {
   const [task, setTask] = useState('');
   const [verify, setVerify] = useState('');
+  const [write, setWrite] = useState(false);
   const [view, setView] = useState<RunView | null>(null);
   const [result, setResult] = useState<RunResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -48,18 +49,18 @@ function RunScreen(): ReactElement {
   useEffect(() => {
     if (!task.trim()) { setView(null); return; }
     let live = true;
-    void orc.plan(task).then((v) => { if (live) setView(v); });
+    void orc.plan({ task, write }).then((v) => { if (live) setView(v); });
     return () => { live = false; };
-  }, [task]);
+  }, [task, write]);
 
   const approve = useCallback(() => {
     setBusy(true);
     setResult(null);
     void orc
-      .run({ task, verify: verify.split('\n').map((v) => v.trim()).filter(Boolean) })
+      .run({ task, verify: verify.split('\n').map((v) => v.trim()).filter(Boolean), write })
       .then(setResult)
       .finally(() => setBusy(false));
-  }, [task, verify]);
+  }, [task, verify, write]);
 
   return h(
     'div',
@@ -68,6 +69,10 @@ function RunScreen(): ReactElement {
     h('input', { value: task, placeholder: '예) 이 아키텍처 설계 검토해줘', onChange: (e: { target: { value: string } }) => setTask(e.target.value) }),
     h('h1', { style: { marginTop: 16 } }, '검증 명령 (한 줄에 하나 — 증거가 없으면 완료로 닫지 않는다)'),
     h('textarea', { rows: 2, value: verify, placeholder: 'npm test', onChange: (e: { target: { value: string } }) => setVerify(e.target.value) }),
+    h('label', { style: { display: 'block', marginTop: 12 } },
+      h('input', { type: 'checkbox', checked: write, onChange: (e: { target: { checked: boolean } }) => setWrite(e.target.checked) }),
+      ' primary 슬롯 파일 쓰기 허용 (--write) · reviewer는 항상 읽기 전용',
+    ),
     view ? h('div', { style: { marginTop: 16 } }, ...view.lines.map((l) => text(l))) : null,
     view?.cost
       ? h(

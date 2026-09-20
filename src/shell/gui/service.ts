@@ -23,6 +23,8 @@ import { dashboardView, runView, titleInfo, type RunView } from '../tui/model.ts
 export interface RunPayload {
   readonly task: string;
   readonly verify: readonly string[];
+  /** D-025: primary 슬롯에만 파일 쓰기를 허용한다. */
+  readonly write?: boolean;
 }
 
 export interface RunOutcome {
@@ -40,16 +42,16 @@ export interface RunOutcome {
 export class GuiService {
   readonly journal = new Journal();
   readonly budget: Budget;
-  private readonly execute: SlotExecutor;
+  private readonly execute: SlotExecutor | undefined;
 
   constructor(execute?: SlotExecutor, budgetUsd = loadLimits().budgetUsd) {
     this.budget = new Budget(budgetUsd);
-    this.execute = execute ?? createExecutor(loadEngines(), process.cwd(), loadLimits().runTimeoutMs);
+    this.execute = execute;
   }
 
   /** v1 의 뷰모델을 그대로 쓴다 (D-021). 여기 Ink 타입이 새어 있으면 이 파일이 안 컴파일된다. */
-  plan(task: string): RunView {
-    return runView(task.trim() ? route(loadMatrix(), loadEngines(), task) : null, task);
+  plan(task: string, write = false): RunView {
+    return runView(task.trim() ? route(loadMatrix(), loadEngines(), task) : null, task, { write });
   }
 
   dashboard() {
@@ -81,15 +83,19 @@ export class GuiService {
     const matrix = loadMatrix();
     const catalog = loadEngines();
     const result = route(matrix, catalog, payload.task);
-    if (result.stage !== 'assigned') return { ok: false, text: '', view: runView(result, payload.task) };
+    if (result.stage !== 'assigned')
+      return { ok: false, text: '', view: runView(result, payload.task, { write: payload.write === true }) };
 
     const slot = result.plan.slots.primary;
+    const execute =
+      this.execute ??
+      createExecutor(loadEngines(), process.cwd(), loadLimits().runTimeoutMs, { write: payload.write === true });
     // 1차 결정 로그 — 배정을 확정한 이 시점에 남긴다 (SPEC §8).
     const decision = firstLine(matrix, result.plan, payload.task, result.reason);
     appendDecision(decision);
 
     // **두 슬롯을 실제로 돌린다** (D-009) — primary 만 돌리면 단일 엔진 선택기다.
-    const duo = await runDuo(matrix, result.plan, this.execute, payload.task, this.budget);
+    const duo = await runDuo(matrix, result.plan, execute, payload.task, this.budget);
     const run = duo.primary;
     const charge = this.budget.charges.at(-1);
 

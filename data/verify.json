@@ -2,11 +2,18 @@
   "$note": "수기 파일이다. 업무 행별 **기본 검증 명령**을 프로젝트가 선언한다 — 제품은 추론하지 않는다 (SPEC §5).",
   "$howto": "키는 매트릭스 행 id(R01~R11) 또는 'default'. 값은 명령 배열이고 'phase:명령' 으로 단계를 붙인다(R05 before/after, R06 reproduce/fix/regress). --verify 로 준 것과 합쳐진다.",
   "$example": { "default": ["npm run lint"], "R01": ["npm test"], "R05": ["before:npm test", "after:npm test"] },
+  "$declared": "아래 값은 이 저장소(hs-orchestrator)의 선언이다. 다른 프로젝트에 설치하면 그 프로젝트가 자기 명령을 적는다.",
   "$empty": "기본값을 비워 두는 것이 기본값이다. 선언하지 않은 행은 --verify 로만 증거가 들어오고, 증거가 없으면 outcome 은 unverified 로 남는다.",
   "default": [],
-  "R01": [],
-  "R04": [],
+  "R01": [
+    "npm test"
+  ],
+  "R04": [
+    "npm run gate"
+  ],
   "R05": [],
-  "R06": [],
+  "R06": [
+    "npm test"
+  ],
   "R11": []
 }
