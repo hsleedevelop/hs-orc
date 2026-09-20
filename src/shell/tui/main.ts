@@ -1,6 +1,6 @@
 /**
  * TUI 진입점 (SPEC §7).
- *   node src/shell/tui/main.ts ["<작업>"] [--screen Run|Tasks|Dashboard|Sessions|Reviews|Debug]
+ *   hs-orc tui ["<작업>"] [--screen Run|Tasks|Dashboard|Sessions|Reviews|Debug]
  *
  * `--screen` 은 시작 화면을 고른다. 파이프로 띄웠을 때(키 입력 불가) 화면을 확인하는 경로이기도 하다.
  */

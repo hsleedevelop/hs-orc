@@ -79,9 +79,10 @@ export default tseslint.config(
   layerBoundary('adapters', ['core', 'shell']),
   layerBoundary('data', ['core', 'adapters', 'shell']),
 
-  // 빌드 스크립트는 node 용 순수 ESM. 타입 인지 린트 대상이 아니다.
+  // 진입점·빌드 스크립트는 node 용 순수 ESM. 타입 인지 린트 대상이 아니다.
+  // (bin/ 은 .ts 를 그대로 띄우는 래퍼라 tsconfig 의 src/** 에 들어가지 않는다 — D-019.)
   {
-    files: ['scripts/**/*.mjs', 'eslint.config.js'],
+    files: ['bin/**/*.mjs', 'scripts/**/*.mjs', 'eslint.config.js'],
     languageOptions: { globals: { console: 'readonly', process: 'readonly' } },
   },
 );

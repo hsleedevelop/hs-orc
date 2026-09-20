@@ -1,7 +1,7 @@
 /**
  * v1 셸의 최소판 (PLAN S1~S3). TUI 는 S5다.
  *
- *   node src/shell/cli.ts "<작업>" [--task R01] [--effort high] [--reviewer-effort high]
+ *   hs-orc "<작업>" [--task R01] [--effort high] [--reviewer-effort high]
  *        [--gate irreversibleChange] [--classify-llm] [--run] [--timeout 600] [--raw]
  *
  * 기본은 **배정 제시까지**다 (SPEC §4-4 승인 게이트). 실제 실행은 `--run` 으로만 한다.
@@ -53,7 +53,7 @@ interface Parsed {
   timeoutMs: number;
 }
 
-const USAGE = `사용법: node src/shell/cli.ts "<작업>" [--task R01] [--effort high] [--reviewer-effort high]
+const USAGE = `사용법: hs-orc "<작업>" [--task R01] [--effort high] [--reviewer-effort high]
        [--gate <${GATE_CHECKS.join('|')}>]... [--classify-llm] [--run] [--timeout 600] [--raw]
        [--mode once|pingpong|loop|graph] [--max-iterations N] [--budget 20] [--graph <nodes.json>]
        [--verify "[phase:]<명령>"]... [--evidence <file.json>] [--crash-test]

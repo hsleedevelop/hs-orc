@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "hs-orc": "./bin/hs-orc.mjs"
+  },
   "engines": {
     "node": ">=22.6"
   },
@@ -15,9 +18,9 @@
     "secret-scan": "gitleaks protect --staged --redact --no-banner",
     "prepare": "git config core.hooksPath githooks",
     "matrix:check": "node scripts/gen-matrix.mjs --check",
-    "tui": "node src/shell/tui/main.ts",
-    "build:gui": "esbuild src/shell/gui/renderer/app.ts --bundle --format=esm --outfile=src/shell/gui/renderer/bundle.js --log-level=warning",
-    "gui": "npm run build:gui && electron src/shell/gui/main.ts"
+    "tui": "node bin/hs-orc.mjs tui",
+    "build:gui": "node bin/hs-orc.mjs build-gui",
+    "gui": "node bin/hs-orc.mjs gui"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

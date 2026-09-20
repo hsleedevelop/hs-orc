@@ -220,6 +220,27 @@ PRD §8 지표를 실제 실행으로 확인한다. **2026-09-20 실측 (커밋 
 
 ---
 
+## S8 — 진입점  ✅ 2026-09-21
+
+`bin/hs-orc.mjs` 하나. `shell/` 에만 붙는다(D-001) — Core·adapters·data 무변경. 빌드 산출물 없음(D-019, D-024).
+
+**완료 판정 — 실측 (저장소 바깥 `/tmp` 의 빈 git repo, `~/…/bin` 대신 임시 PATH 디렉터리의 심볼릭 링크로 호출):**
+
+- [x] `hs-orc "broken.ts 의 타입 에러를 고쳐라"` → `R01` 분류 · `primary Luna·medium(codex)` / `reviewer Haiku·low(claude)` · `$0.39` 제시
+- [x] `--run` 이 **두 슬롯을 실제로** 띄웠다 — Luna 실행 65.6s → Haiku 독립 검증 `FAIL`(누락 3건 지적)
+- [x] 그 디렉터리에 `.hs-orc/runs/0921-0107-df6/{01-Luna,02-Haiku}.{stdout,stderr,meta.json}` 생성
+- [x] 결정 로그 2줄(`pending` → `unverified`) — 증거(기존 test exit code)가 없으니 `unverified` 가 정답이다
+- [x] 심볼릭 링크로 불러도 설치 위치를 찾는다 (Node 가 main 을 realpath 로 해석한다)
+- [x] 게이트 `matrix:check → type-check → lint → test` **exit 0, 173 pass / 0 fail**
+
+**실사용에서 드러난 것 (진입점 결함이 아니다):**
+codex 슬롯이 read-only 샌드박스로 떠서 파일을 고치지 못하고 "수정안"만 냈다. reviewer 가 그것을 `FAIL` 로 잡았다 —
+두 슬롯 설계가 의도대로 작동한 증거이지만, **primary 에 쓰기 권한을 주는 방법이 SPEC 에 없다.** 다음 작업이다.
+
+**남는 것:** `~/.local/bin` 실설치(브랜치 머지 후), 실사용 1건, 비용 실비화, README.
+
+---
+
 ## 단계별 위험 요약
 
 | 단계 | 최대 위험 | 완화 |

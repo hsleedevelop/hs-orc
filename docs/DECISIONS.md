@@ -433,6 +433,34 @@ Cursor가 커버하는 6모델 중 **2개에 `-fast`가 아예 없다.** 전역 
 
 ---
 
+## D-024 — 진입점은 `.mjs` 래퍼 하나이고 빌드 산출물을 만들지 않는다
+
+**배경**
+v1~v2 내내 실행 경로가 `npm run` 뿐이었다 — 이 저장소 안에서만 돈다. 라우터는 **작업 중인 다른 프로젝트**에서 불려야 쓸모가 있다.
+
+**결정**
+`bin/hs-orc.mjs` 하나를 `package.json` 의 `bin` 으로 노출하고, 이 파일이 `src/shell/` 의 `.ts` 를 **그대로** 띄운다. `dist/` 를 만들지 않는다(D-019). 래퍼 자신만 `.mjs` 다 — 진입점은 타입 스트리핑 없이 떠야 하기 때문이다.
+
+- `hs-orc "<작업>"` → `src/shell/cli.ts` · `hs-orc tui` → `tui/main.ts` · `hs-orc gui` → 렌더러 번들 → `electron gui/main.ts`
+- cli·tui 는 **하위 프로세스를 더 띄우지 않는다.** `process.argv` 만 실제 호출 모양으로 바꾸고 `import()` 한다 — 래퍼가 한 겹 끼면 TUI 의 raw mode 와 엔진 프로세스 그룹 종료(SPEC §3)가 그만큼 멀어진다.
+- `npm run tui|gui|build:gui` 도 이 래퍼를 부른다. 실행 경로를 둘로 두지 않는다.
+
+**경로 해석은 두 기준으로 갈리고, 그게 의도다**
+
+| 대상 | 기준 | 이유 |
+|---|---|---|
+| `data/{matrix,engines,limits,verify}.json` | **설치 위치** (`import.meta.dirname`) | 어디서 부르든 같은 매트릭스여야 한다 |
+| `.hs-orc/runs`, `.hs-orc/unclassified.jsonl` | **cwd** | 실행 산출물은 작업 중인 프로젝트에 쌓여야 한다 |
+| 결정 로그 | `~/.claude/logs/` (`HS_ORC_DECISION_LOG` 로 분리) | 프로젝트를 가로지르는 기록이다 |
+
+한쪽이 뒤집히면 "다른 디렉터리에서 쓸 수 있다"가 조용히 거짓이 되므로 `src/shell/__tests__/bin.test.ts` 가 프로세스 수준에서 고정한다.
+
+**타입 스트리핑은 capability 로 판정한다.** `process.features.typescript` 를 보고 꺼져 있으면 즉시 던진다. Node 버전 표를 코드에 적지 않는다 — 표는 낡고, 낡은 표는 조용한 오진이 된다.
+
+**상태** 확정 — 2026-09-21 실측
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |
