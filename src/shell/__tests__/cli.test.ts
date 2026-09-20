@@ -69,7 +69,27 @@ describe('CLI 순서 보장', () => {
     const r = cli(['오늘 점심 뭐 먹지'], NO_PATH);
     assert.notEqual(r.code, 0);
     assert.match(r.err, /분류하지 못했다/);
-    assert.match(r.err, /--classify-llm/);
+    assert.match(r.err, /--task <R01\.\.R11>/);
+  });
+
+  it('규칙이 빗나가면 LLM 폴백이 기본으로 돈다 — 돌았다는 사실과 비용을 찍는다 (D-026)', () => {
+    // PATH 가 비어 폴백 자체는 실패한다. 그래도 **시도했다는 것**과 실패 사유가 보여야 한다.
+    const r = cli(['오늘 점심 뭐 먹지'], NO_PATH);
+    assert.match(r.err, /규칙 무매치 → Haiku·low/);
+    assert.match(r.err, /\+\$0\.001/, '유료 호출을 비용 표기 없이 돌리면 안 된다.');
+    assert.match(r.err, /classify-fallback/, '폴백 실패를 삼키면 안 된다.');
+  });
+
+  it('--no-classify-llm 은 폴백을 아예 시작하지 않는다', () => {
+    const r = cli(['오늘 점심 뭐 먹지', '--no-classify-llm'], NO_PATH);
+    assert.doesNotMatch(r.err, /Haiku·low/, '끈 폴백이 돌았다 — 말없이 돈 유료 호출이다.');
+    assert.match(r.err, /--no-classify-llm 으로 꺼져 있다/);
+  });
+
+  it('모르는 옵션은 작업 문자열로 섞이지 않고 던진다', () => {
+    const r = cli(['이 아키텍처 설계 검토해줘', '--wrlte'], NO_PATH);
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /모르는 옵션이다: --wrlte/);
   });
 
   it('모르는 하한선 항목은 던진다', () => {

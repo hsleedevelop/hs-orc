@@ -2,7 +2,7 @@
  * v1 셸의 최소판 (PLAN S1~S3). TUI 는 S5다.
  *
  *   hs-orc "<작업>" [--task R01] [--effort high] [--reviewer-effort high]
- *        [--gate irreversibleChange] [--classify-llm] [--run] [--write] [--timeout 600] [--raw]
+ *        [--gate irreversibleChange] [--no-classify-llm] [--run] [--write] [--timeout 600] [--raw]
  *
  * 기본은 **배정 제시까지**다 (SPEC §4-4 승인 게이트). 실제 실행은 `--run` 으로만 한다.
  */
@@ -55,14 +55,14 @@ interface Parsed {
 }
 
 const USAGE = `사용법: hs-orc "<작업>" [--task R01] [--effort high] [--reviewer-effort high]
-       [--gate <${GATE_CHECKS.join('|')}>]... [--classify-llm] [--run] [--write] [--timeout 600] [--raw]
+       [--gate <${GATE_CHECKS.join('|')}>]... [--no-classify-llm] [--run] [--write] [--timeout 600] [--raw]
        [--mode once|pingpong|loop|graph] [--max-iterations N] [--budget 20] [--graph <nodes.json>]
        [--verify "[phase:]<명령>"]... [--evidence <file.json>] [--crash-test]
        [--no-reviewer] [--side primary|reviewer]`;
 
 function parseArgs(argv: readonly string[]): Parsed {
   const positional: string[] = [];
-  const parsed: Parsed = { task: '', mode: 'once', gate: {}, verify: [], crashTest: false, skipReviewer: false, side: 'primary', classifyLlm: false, run: false, write: false, raw: false, timeoutMs: 900_000 };
+  const parsed: Parsed = { task: '', mode: 'once', gate: {}, verify: [], crashTest: false, skipReviewer: false, side: 'primary', classifyLlm: true, run: false, write: false, raw: false, timeoutMs: 900_000 };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -97,12 +97,19 @@ function parseArgs(argv: readonly string[]): Parsed {
       case '--effort': parsed.primaryEffort = value() as Effort; break;
       case '--reviewer-effort': parsed.reviewerEffort = value() as Effort; break;
       case '--gate': parsed.gate[parseGateCheck(value())] = true; break;
+      // Q8/D-026: 자동 폴백이 기본이다. 옛 플래그는 계속 받는다 — 지우면 스크립트에서
+      // 그 낱말이 **작업 문자열로 섞여 들어간다**(조용한 오작동).
       case '--classify-llm': parsed.classifyLlm = true; break;
+      case '--no-classify-llm': parsed.classifyLlm = false; break;
       case '--run': parsed.run = true; break;
       case '--write': parsed.write = true; break;
       case '--raw': parsed.raw = true; break;
       case '--timeout': parsed.timeoutMs = Number(value()) * 1000; break;
-      default: if (arg !== undefined) positional.push(arg);
+      default:
+        if (arg === undefined) break;
+        // `--오타` 가 조용히 **작업 문자열**이 되던 자리다. 던진다 (hs-00-core 조용한 폴백 금지).
+        if (arg.startsWith('--')) throw new Error(`모르는 옵션이다: ${arg}\n  ${USAGE}`);
+        positional.push(arg);
     }
   }
 
@@ -133,19 +140,28 @@ async function main(): Promise<void> {
 
   let result = route(matrix, catalog, args.task, options);
 
-  // 규칙으로 못 붙었을 때만 저비용 모델에 분류만 시킨다 (PLAN S3-6).
+  // 규칙으로 못 붙으면 저비용 모델에 **분류만** 시킨다 (PLAN S3-6, D-026).
+  // 기본이 켜짐인 이유: 규칙 표는 명령형 어미 몇 개에 의존해 평범한 작업 문장을 놓친다(S9-2 실측).
+  // 대신 폴백이 돌았다는 사실과 비용을 **반드시 찍는다** — 말없이 도는 유료 호출은 없다.
   if (result.stage === 'unclassified' && args.classifyLlm) {
-    process.stderr.write('분류   규칙 무매치 → Haiku·low 로 분류만 재시도\n');
-    const guessed = await classifyWithModel(matrix, catalog, args.task);
-    if (guessed) {
-      result = route(matrix, catalog, args.task, { ...options, taskId: guessed.id, reasonLabel: 'Haiku·low 분류' });
+    process.stderr.write('분류   규칙 무매치 → Haiku·low 로 분류만 재시도 (+$0.001 내외 · --no-classify-llm 으로 끈다)\n');
+    try {
+      const guessed = await classifyWithModel(matrix, catalog, args.task);
+      if (guessed) {
+        result = route(matrix, catalog, args.task, { ...options, taskId: guessed.id, reasonLabel: 'Haiku·low 분류' });
+      }
+    } catch (error) {
+      // 폴백 실패가 전체를 죽이면 안 되지만 침묵해서도 안 된다 — 아래 미분류 경로로 내려간다.
+      process.stderr.write(`${reportNotice('pipeline', 'classify-fallback', `LLM 분류를 시도하지 못했다: ${error instanceof Error ? error.message : String(error)}`).display}\n`);
     }
   }
 
   if (result.stage === 'unclassified') {
     // 정상 비즈니스 상태다 — notice 로 내린다 (PLAN S6-4).
     const note = reportNotice('pipeline', 'unclassified', result.message);
-    process.stderr.write(`${note.display}\n  --classify-llm 으로 저비용 모델 분류를 시도할 수 있다.\n`);
+    process.stderr.write(
+      `${note.display}\n  ${args.classifyLlm ? 'LLM 폴백도 맞는 행을 고르지 못했다.' : 'LLM 폴백은 --no-classify-llm 으로 꺼져 있다.'}\n`,
+    );
 
     // 누적만 한다. 행 추가는 원본 편집으로만 (D-022).
     recordUnclassified(args.task);
