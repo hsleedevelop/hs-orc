@@ -10,7 +10,6 @@ import { readFileSync } from 'node:fs';
 import { loadMatrix } from '../data/matrix.ts';
 import { loadEngines } from '../data/engines.ts';
 import { loadLimits } from '../data/limits.ts';
-import { createAdapter } from '../adapters/engine.ts';
 import { createExecutor } from '../core/executor.ts';
 import { PingpongSession } from '../core/modes/pingpong.ts';
 import { runLoop } from '../core/modes/loop.ts';
@@ -23,6 +22,8 @@ import { reportError, reportNotice } from '../core/report.ts';
 import { collect, type Evidence } from '../core/evidence.ts';
 import { readUnclassified, recordUnclassified, suggestRows } from '../core/unclassified.ts';
 import { defaultVerify } from '../data/verify.ts';
+import { runDuo } from '../core/duo.ts';
+import { Budget } from '../core/budget.ts';
 import { changedFiles, loadEvidenceFile, runCommand } from '../core/evidence-gather.ts';
 import { GATE_CHECKS, parseGateCheck, type GateSignals } from '../core/gatekeeper.ts';
 import { classifyWithModel } from '../core/classify-llm.ts';
@@ -40,6 +41,8 @@ interface Parsed {
   verify: { cmd: string; phase?: string }[];
   evidenceFile?: string;
   crashTest: boolean;
+  skipReviewer: boolean;
+  side: 'primary' | 'reviewer';
   taskId?: string;
   primaryEffort?: Effort;
   reviewerEffort?: Effort;
@@ -53,11 +56,12 @@ interface Parsed {
 const USAGE = `사용법: node src/shell/cli.ts "<작업>" [--task R01] [--effort high] [--reviewer-effort high]
        [--gate <${GATE_CHECKS.join('|')}>]... [--classify-llm] [--run] [--timeout 600] [--raw]
        [--mode once|pingpong|loop|graph] [--max-iterations N] [--budget 20] [--graph <nodes.json>]
-       [--verify "[phase:]<명령>"]... [--evidence <file.json>] [--crash-test]`;
+       [--verify "[phase:]<명령>"]... [--evidence <file.json>] [--crash-test]
+       [--no-reviewer] [--side primary|reviewer]`;
 
 function parseArgs(argv: readonly string[]): Parsed {
   const positional: string[] = [];
-  const parsed: Parsed = { task: '', mode: 'once', gate: {}, verify: [], crashTest: false, classifyLlm: false, run: false, raw: false, timeoutMs: 900_000 };
+  const parsed: Parsed = { task: '', mode: 'once', gate: {}, verify: [], crashTest: false, skipReviewer: false, side: 'primary', classifyLlm: false, run: false, raw: false, timeoutMs: 900_000 };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -86,6 +90,8 @@ function parseArgs(argv: readonly string[]): Parsed {
       }
       case '--evidence': parsed.evidenceFile = value(); break;
       case '--crash-test': parsed.crashTest = true; break;
+      case '--no-reviewer': parsed.skipReviewer = true; break;
+      case '--side': parsed.side = value() as 'primary' | 'reviewer'; break;
       case '--task': parsed.taskId = value(); break;
       case '--effort': parsed.primaryEffort = value() as Effort; break;
       case '--reviewer-effort': parsed.reviewerEffort = value() as Effort; break;
@@ -182,7 +188,7 @@ async function main(): Promise<void> {
   if (args.mode === 'pingpong') {
     // 자율 실행이 아니다 (D-015). 한 턴만 돌리고 다음 제안을 남긴 뒤 사용자에게 돌려준다.
     const session = new PingpongSession(matrix, plan, execute, budgetUsd);
-    const turn = await session.turn({ prompt: args.task, side: 'primary' });
+    const turn = await session.turn({ prompt: args.task, side: args.side });
     process.stdout.write(`${turn.text}\n`);
     process.stderr.write(`\n${session.journal.render()}\n누적   ${turn.budget}\n제안   ${turn.suggestion}\n`);
     return;
@@ -269,26 +275,47 @@ async function main(): Promise<void> {
   appendDecision(decision);
   process.stderr.write(`결정   ${decision.id} ${decision.branch}/${decision.tier} → ${decisionLogPath()}\n`);
 
-  const adapter = createAdapter(primary.engine, catalog);
-  const handle = adapter.start(
-    { model: primary.model, effort: primary.effort, prompt: args.task, cwd: process.cwd(), timeoutMs: args.timeoutMs },
-    (event) => {
-      if (event.kind === 'notice') process.stderr.write(`[${event.level}] ${event.message}\n`);
-      if (event.kind === 'unparsed') process.stderr.write(`[unparsed] ${event.line.slice(0, 120)}\n`);
-    },
-  );
-  process.on('SIGINT', () => handle.cancel());
+  // **두 슬롯을 실제로 돌린다** (D-009). primary 만 돌리면 이 제품은 단일 엔진 선택기다.
+  const duoBudget = new Budget(budgetUsd);
+  const duo = await runDuo(matrix, plan, execute, args.task, duoBudget, { skipReviewer: args.skipReviewer });
+  const run = {
+    outcome: duo.primary.ok ? ('ok' as const) : ('error' as const),
+    text: duo.primary.text,
+    exitCode: null,
+    durationMs: duo.primary.durationMs,
+    rawStdout: duo.primary.text,
+    rawStderr: '',
+    costUsd: duo.primary.actualUsd,
+    unparsedLines: [] as string[],
+  };
 
-  const run = await handle.result;
+  if (args.skipReviewer) {
+    process.stderr.write(`검증   reviewer ${reviewer.label} 생략됨 (--no-reviewer) — 독립 검증 없이 닫는다\n`);
+  } else if (duo.review) {
+    process.stderr.write(
+      `\n검증   reviewer ${reviewer.label}·${reviewer.effort} → ${duo.verdict.toUpperCase()}\n` +
+        `${duo.review.text.slice(0, 600)}\n`,
+    );
+  } else if (duo.primary.ok) {
+    process.stderr.write(`검증   reviewer 를 시작하지 못했다 (비용 상한 또는 primary 실패)\n`);
+  }
 
   // 원시 로그를 먼저 보존한다 — 이후 단계가 터져도 원본은 남는다.
   let stored = '';
   try {
     stored = storeRun(decision.id, 1, primary.label, {
-      rawStdout: run.rawStdout,
-      rawStderr: run.rawStderr,
-      meta: { outcome: run.outcome, exitCode: run.exitCode, durationMs: run.durationMs, usage: run.usage, costUsd: run.costUsd, modelId: primary.modelId },
+      rawStdout: duo.primary.text,
+      rawStderr: '',
+      meta: { slot: 'primary', outcome: run.outcome, durationMs: duo.primary.durationMs, costUsd: duo.primary.actualUsd, modelId: primary.modelId },
     }).dir;
+    // reviewer 산출물도 실행별로 남긴다 — 독립 검증 기록이 사라지면 "검증했다"를 증명할 수 없다.
+    if (duo.review) {
+      storeRun(decision.id, 2, reviewer.label, {
+        rawStdout: duo.review.text,
+        rawStderr: '',
+        meta: { slot: 'reviewer', verdict: duo.verdict, durationMs: duo.review.durationMs, costUsd: duo.review.actualUsd, modelId: reviewer.modelId },
+      });
+    }
   } catch (error) {
     // catch 후 무동작 금지 — 실패에는 사용자에게 보이는 상태가 있어야 한다.
     process.stderr.write(`${reportError('run-store', 'persist', error).display}\n`);
@@ -301,7 +328,7 @@ async function main(): Promise<void> {
   if (declared.length > 0) {
     process.stderr.write(`검증   data/verify.json 선언 ${declared.length}건: ${declared.map((v) => v.cmd).join(' · ')}\n`);
   }
-  const evidence: Evidence[] = [];
+  const evidence: Evidence[] = [...duo.evidence];
   for (const v of verify) evidence.push(runCommand(v.cmd, process.cwd(), v.phase));
   if (verify.length > 0) evidence.push(changedFiles());
   if (args.evidenceFile) {
@@ -342,12 +369,12 @@ async function main(): Promise<void> {
   process.stdout.write(`${args.raw ? run.rawStdout : run.text}\n`);
   process.stderr.write(
     `\n결과   ${run.outcome} · ${run.durationMs}ms` +
-      (run.usage ? ` · in ${run.usage.inputTokens} / out ${run.usage.outputTokens}` : '') +
       (run.costUsd !== undefined ? ` · $${run.costUsd.toFixed(4)}` : '') +
       (run.unparsedLines.length ? ` · 파싱 실패 ${run.unparsedLines.length}줄` : '') +
+      `\n누적   ${duoBudget.summary()}` +
       `\n결정   ${decision.id} 2차 append 완료 (outcome=${outcome})` +
       (stored ? `\n원본   ${stored}` : '') +
-      `\nreviewer ${reviewer.label} 왕복이 필요하면 --mode pingpong 또는 --mode loop 다.\n`,
+      '\n',
   );
   if (run.outcome !== 'ok') process.exitCode = 1;
 }

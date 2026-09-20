@@ -11,7 +11,11 @@ import type { SlotExecutor } from '../../../core/executor.ts';
 import { readDecisions } from '../../../core/decision-log.ts';
 import { GuiService } from '../service.ts';
 
-const fake: SlotExecutor = (_slot, prompt) => Promise.resolve({ ok: true, text: `ran:${prompt}`, durationMs: 1 });
+const calls: string[] = [];
+const fake: SlotExecutor = (slot, prompt) => {
+  calls.push(slot.label);
+  return Promise.resolve({ ok: true, text: slot.label === 'Haiku' ? 'PASS' : `ran:${prompt}`, durationMs: 1 });
+};
 
 const isolated = () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-gui-'));
@@ -84,6 +88,15 @@ describe('GUI — S5 시나리오', () => {
     assert.deepEqual(view.distribution, [{ model: 'Luna', count: 1 }]);
     assert.equal(view.unverified, 1, '증거 없이 닫힌 사이클은 따로 세어야 한다');
     assert.match(view.spent, /추정 포함/);
+  });
+
+  it('GUI 도 두 슬롯을 실제로 띄운다 (D-009)', async () => {
+    isolated();
+    calls.length = 0;
+    const result = await new GuiService(fake).run({ task: '이 타입 에러 고쳐줘', verify: [] });
+    assert.deepEqual(calls, ['Luna', 'Haiku'], 'GUI 에서 reviewer 가 안 돌면 단일 엔진 선택기다');
+    assert.equal(result.verdict, 'pass');
+    assert.equal(result.report?.accepted.some((e) => e.kind === 'review'), true);
   });
 
   it('고의 크래시가 리포팅 경로를 보여준다', () => {

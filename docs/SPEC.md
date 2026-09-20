@@ -241,7 +241,9 @@ cursor  -p "<prompt>" --model gpt-5.6-sol-xhigh --output-format stream-json
   │
   ├─ 4. 승인 게이트      → 배정·비용 제시 후 사용자 승인
   │
-  ├─ 5. ModeRunner      → pingpong | loop | graph
+  ├─ 5. ModeRunner      → once(기본, 두 슬롯) | pingpong | loop | graph
+  │                        once: primary 실행 → reviewer 독립 검증 → PASS/FAIL
+  │                        reviewer 판정은 §5 의 `review` 증거가 된다
   │
   ├─ 6. EvidenceCollector → 해당 행의 `운영 기준`이 요구하는 증거 수집
   │
@@ -278,6 +280,12 @@ cursor  -p "<prompt>" --model gpt-5.6-sol-xhigh --output-format stream-json
 | 9 | batch 경계 + checkpoint + rollback 지점 정의 |
 | 10 | 대안 / 제약 / 실행계획 세 절이 분리된 산출물 |
 | 11 | 독립 리뷰 결과 + 실제 검사·test·배포 관측 |
+
+`review` 증거는 **reviewer 슬롯이 실제로 돌아야** 생긴다 — 배정만 두 슬롯이고 실행이 한 슬롯이면
+이 제품은 단일 엔진 선택기다(D-009, S3 최대 위험). reviewer 프롬프트는 작업을 다시 시키지 않고
+산출물의 누락·반례를 먼저 요구한 뒤 마지막 줄에 `PASS`/`FAIL` 한 단어를 받는다. **읽지 못하면
+`unknown` 이고 pass 로 봐주지 않는다.** primary 가 실패했거나 비용 상한을 넘겼으면 reviewer 를
+시작하지 않는다 — 검증할 산출물이 없거나 쓸 돈이 없다.
 
 **"성공했습니다"라는 산문은 증거가 아니다.** `file:line`, 실행 명령과 exit code, 수정 경로, 인용 원문을 받는다.
 

@@ -10,7 +10,8 @@ import { loadMatrix } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
 import { loadLimits } from '../../data/limits.ts';
 import { route } from '../../core/pipeline.ts';
-import { createExecutor, estimateUsd } from '../../core/executor.ts';
+import { createExecutor } from '../../core/executor.ts';
+import { runDuo } from '../../core/duo.ts';
 import { appendDecision } from '../../core/decision-log.ts';
 import { firstLine, secondLine } from '../../core/decide.ts';
 import { storeRun } from '../../core/run-store.ts';
@@ -67,8 +68,10 @@ function RunScreen({
     const decision = firstLine(matrix, result.plan, task, result.reason);
     appendDecision(decision);
 
-    void execute(slot, task).then((run) => {
-      const charge = budget.charge(`${slot.label}·${slot.effort}`, run.actualUsd, estimateUsd(matrix, slot));
+    // **두 슬롯을 실제로 돌린다** (D-009).
+    void runDuo(matrix, result.plan, execute, task, budget).then((duo) => {
+      const run = duo.primary;
+      const charge = budget.charges.at(-1);
       journal.append({
         index: journal.records.length + 1,
         unit: '실행',
@@ -78,9 +81,9 @@ function RunScreen({
         // 운영 기준이 완료의 정의다 (D-010). 무엇을 요구했는지 기록에 남긴다.
         evidence: `운영 기준: ${result.plan.assignment.operatingCriterion}`,
         change: run.text.slice(0, 200),
-        // 자동 검증은 S6 EvidenceCollector 다. 비어 있으면 "통과"가 아니라 "검증 안 함"이다.
-        verification: '',
-        charge,
+        // reviewer 판정이 있으면 그것이 검증이다. 없으면 빈 칸이고 "통과"가 아니다.
+        verification: duo.verdict === 'unknown' ? '' : `reviewer ${result.plan.slots.reviewer.label}: ${duo.verdict.toUpperCase()}`,
+        ...(charge ? { charge } : {}),
       });
       // 원시 로그를 먼저 보존하고, 실패해도 화면에 보이는 상태로 남긴다.
       let stored = '';
@@ -94,7 +97,7 @@ function RunScreen({
       // 2차 — 같은 id 로 append. 자동 증거가 없으므로 unverified 다 (SPEC §5).
       appendDecision(secondLine(decision, run.ok ? 'unverified' : 'wrong', stored ? `원시 로그 ${stored}` : ''));
 
-      setOutput(run.text);
+      setOutput(duo.review ? `${run.text}\n\n--- reviewer ${result.plan.slots.reviewer.label} → ${duo.verdict.toUpperCase()} ---\n${duo.review.text}` : run.text);
       setPhase('done');
       bump((n) => n + 1);
     });

@@ -8,7 +8,8 @@ import { loadMatrix } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
 import { loadLimits } from '../../data/limits.ts';
 import { route } from '../../core/pipeline.ts';
-import { createExecutor, estimateUsd, type SlotExecutor } from '../../core/executor.ts';
+import { createExecutor, type SlotExecutor } from '../../core/executor.ts';
+import { runDuo } from '../../core/duo.ts';
 import { Budget } from '../../core/budget.ts';
 import { Journal } from '../../core/journal.ts';
 import { appendDecision } from '../../core/decision-log.ts';
@@ -29,6 +30,8 @@ export interface RunOutcome {
   readonly text: string;
   readonly outcome?: 'ok' | 'unverified' | 'wrong';
   readonly report?: EvidenceReport;
+  readonly verdict?: 'pass' | 'fail' | 'unknown';
+  readonly review?: string;
   readonly budget?: string;
   readonly journal?: string;
   readonly view?: RunView;
@@ -85,22 +88,24 @@ export class GuiService {
     const decision = firstLine(matrix, result.plan, payload.task, result.reason);
     appendDecision(decision);
 
-    const run = await this.execute(slot, payload.task);
-    const charge = this.budget.charge(`${slot.label}·${slot.effort}`, run.actualUsd, estimateUsd(matrix, slot));
+    // **두 슬롯을 실제로 돌린다** (D-009) — primary 만 돌리면 단일 엔진 선택기다.
+    const duo = await runDuo(matrix, result.plan, this.execute, payload.task, this.budget);
+    const run = duo.primary;
+    const charge = this.budget.charges.at(-1);
 
     let stored = '';
     try {
       stored = storeRun(decision.id, this.journal.records.length + 1, slot.label, {
         rawStdout: '',
         rawStderr: '',
-        meta: { outcome: run.ok ? 'ok' : 'failed', durationMs: run.durationMs, modelId: slot.modelId },
+        meta: { outcome: run.ok ? 'ok' : 'failed', durationMs: run.durationMs, modelId: slot.modelId, verdict: duo.verdict },
       }).dir;
     } catch (error) {
       // catch 후 무동작 금지.
       process.stderr.write(`${reportError('run-store', 'persist', error).display}\n`);
     }
 
-    const evidence: Evidence[] = payload.verify.filter((v) => v.trim()).map((v) => runCommand(v, process.cwd()));
+    const evidence: Evidence[] = [...duo.evidence, ...payload.verify.filter((v) => v.trim()).map((v) => runCommand(v, process.cwd()))];
     if (evidence.length > 0) evidence.push(changedFiles());
     const report = collect(result.plan.assignment, evidence);
 
@@ -114,7 +119,7 @@ export class GuiService {
       change: run.text.slice(0, 200),
       // 증거가 모였을 때만 채운다. 빈 값은 "통과"가 아니라 "검증 안 함"이다.
       verification: report.satisfied ? report.summary : '',
-      charge,
+      ...(charge ? { charge } : {}),
     });
 
     // 2차 — 같은 id 로 append. 증거가 모였을 때만 ok 다 (SPEC §5).
@@ -123,6 +128,15 @@ export class GuiService {
       secondLine(decision, outcome, [stored && `원시 로그 ${stored}`, report.summary].filter(Boolean).join(' · ')),
     );
 
-    return { ok: run.ok, text: run.text, outcome, report, budget: this.budget.summary(), journal: this.journal.render() };
+    return {
+      ok: run.ok,
+      text: run.text,
+      outcome,
+      report,
+      verdict: duo.verdict,
+      ...(duo.review ? { review: duo.review.text.slice(0, 2000) } : {}),
+      budget: this.budget.summary(),
+      journal: this.journal.render(),
+    };
   }
 }
