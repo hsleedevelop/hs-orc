@@ -1,18 +1,39 @@
-import { describe, it } from 'node:test';
+import { after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 /**
  * 하한선에 걸린 입력이 **엔진을 띄우지 않는지**를 프로세스 수준에서 증명한다 (PLAN S3 완료 판정).
  * 증명 방법: PATH 를 비운 채 실행한다. 엔진을 띄우려 했다면 바이너리 해석이 반드시 실패하고
  * "실행 가능한 바이너리를 찾지 못했다" 가 나온다. 그 문구가 없으면 spawn 시도 자체가 없었다는 뜻이다.
+ *
+ * **자식은 샌드박스에서 돈다.** 유닛 테스트와 달리 여기서는 진짜 CLI 가 뜨므로 기본 경로가
+ * 그대로 적용된다 — 격리하지 않으면 매 `npm test` 가 저장소의 `.hs-orc/` 와
+ * **사용자의 개인 결정 로그**(`~/.claude/logs/delegation-router.jsonl`)에 줄을 쌓는다.
+ * 실측으로 그 일이 벌어졌다: 미분류 누적이 테스트 쓰레기로 임계치를 넘겨 제품이 사용자에게
+ * 가짜 "행 추가 제안"을 냈고, 개인 로그에는 일어나지도 않은 $10.89 실행이 38줄 남았다(PLAN S9-3).
+ * 그래서 cwd 기준 경로(`.hs-orc/`)는 **임시 cwd** 로, 홈 기준 경로(결정 로그)는 **환경변수**로 돌린다.
  */
+const CLI = path.resolve(import.meta.dirname, '..', 'cli.ts');
+const sandbox = mkdtempSync(path.join(os.tmpdir(), 'hs-orc-cli-'));
+const decisionLog = path.join(sandbox, 'decisions.jsonl');
+after(() => rmSync(sandbox, { recursive: true, force: true }));
+
+/** 이 파일이 저장소를 건드렸는지 재는 기준선. 자식을 띄우기 **전에** 찍는다. */
+const repoUnclassified = path.resolve(import.meta.dirname, '..', '..', '..', '.hs-orc', 'unclassified.jsonl');
+const sizeOf = (file: string): number => (existsSync(file) ? readFileSync(file, 'utf8').length : -1);
+const repoBefore = sizeOf(repoUnclassified);
+
 // spawnSync 를 쓴다 — execFileSync 는 성공했을 때 stderr 를 돌려주지 않아
 // "조용히 끝났다" 를 확인할 수가 없다(실측: 그래서 초록 거짓말이 날 뻔했다).
 const cli = (args: readonly string[], env: NodeJS.ProcessEnv = {}) => {
-  const r = spawnSync(process.execPath, ['src/shell/cli.ts', ...args], {
+  const r = spawnSync(process.execPath, [CLI, ...args], {
+    cwd: sandbox,
     encoding: 'utf8',
-    env: { ...process.env, ...env },
+    env: { ...process.env, HS_ORC_DECISION_LOG: decisionLog, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   return { code: r.status, out: r.stdout ?? '', err: r.stderr ?? '' };
@@ -55,5 +76,19 @@ describe('CLI 순서 보장', () => {
     const r = cli(['아무거나', '--gate', 'bogus'], NO_PATH);
     assert.notEqual(r.code, 0);
     assert.match(r.err, /그런 하한선 항목이 없다/);
+  });
+
+  /**
+   * 위 테스트들이 남긴 흔적이 **샌드박스 안에만** 있는지 본다.
+   * 이 검사가 없으면 격리가 조용히 풀려도 초록이 뜨고, 그 대가는 사용자의 개인 로그다.
+   */
+  it('테스트가 남긴 흔적은 전부 샌드박스 안에 있다 — 저장소도 홈도 건드리지 않는다', () => {
+    assert.ok(existsSync(path.join(sandbox, '.hs-orc', 'unclassified.jsonl')), '미분류 로그가 샌드박스 밖으로 샜다.');
+    assert.ok(existsSync(decisionLog), '결정 로그가 샌드박스 밖으로 샜다 — 기본 경로는 사용자의 개인 로그다.');
+    assert.equal(
+      sizeOf(repoUnclassified),
+      repoBefore,
+      '저장소의 미분류 로그가 이 테스트 때문에 늘었다 — 제품의 "행 추가 제안"이 테스트 쓰레기로 오염된다.',
+    );
   });
 });
