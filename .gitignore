@@ -1,0 +1,17 @@
+# macOS / iCloud
+.DS_Store
+.icloud
+
+# 에디터
+.vscode/
+.idea/
+
+# 의존성·빌드 (구현 단계에서 사용)
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# 로컬 실행 산출물
+.lavish/
+*.log
