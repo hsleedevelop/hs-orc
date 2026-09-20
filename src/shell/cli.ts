@@ -6,16 +6,29 @@
  *
  * 기본은 **배정 제시까지**다 (SPEC §4-4 승인 게이트). 실제 실행은 `--run` 으로만 한다.
  */
+import { readFileSync } from 'node:fs';
 import { loadMatrix } from '../data/matrix.ts';
 import { loadEngines } from '../data/engines.ts';
+import { loadLimits } from '../data/limits.ts';
 import { createAdapter } from '../adapters/engine.ts';
+import { createExecutor } from '../core/executor.ts';
+import { PingpongSession } from '../core/modes/pingpong.ts';
+import { runLoop } from '../core/modes/loop.ts';
+import { runGraph, type GraphNode } from '../core/modes/graph.ts';
+import { assign } from '../core/assign.ts';
 import { GATE_CHECKS, parseGateCheck, type GateSignals } from '../core/gatekeeper.ts';
 import { classifyWithModel } from '../core/classify-llm.ts';
 import { route } from '../core/pipeline.ts';
 import type { Effort } from '../data/matrix.ts';
 
+type Mode = 'once' | 'pingpong' | 'loop' | 'graph';
+
 interface Parsed {
   task: string;
+  mode: Mode;
+  maxIterations?: number;
+  budgetUsd?: number;
+  graphFile?: string;
   taskId?: string;
   primaryEffort?: Effort;
   reviewerEffort?: Effort;
@@ -27,11 +40,12 @@ interface Parsed {
 }
 
 const USAGE = `사용법: node src/shell/cli.ts "<작업>" [--task R01] [--effort high] [--reviewer-effort high]
-       [--gate <${GATE_CHECKS.join('|')}>]... [--classify-llm] [--run] [--timeout 600] [--raw]`;
+       [--gate <${GATE_CHECKS.join('|')}>]... [--classify-llm] [--run] [--timeout 600] [--raw]
+       [--mode once|pingpong|loop|graph] [--max-iterations N] [--budget 20] [--graph <nodes.json>]`;
 
 function parseArgs(argv: readonly string[]): Parsed {
   const positional: string[] = [];
-  const parsed: Parsed = { task: '', gate: {}, classifyLlm: false, run: false, raw: false, timeoutMs: 900_000 };
+  const parsed: Parsed = { task: '', mode: 'once', gate: {}, classifyLlm: false, run: false, raw: false, timeoutMs: 900_000 };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -43,6 +57,10 @@ function parseArgs(argv: readonly string[]): Parsed {
     };
 
     switch (arg) {
+      case '--mode': parsed.mode = value() as Mode; break;
+      case '--max-iterations': parsed.maxIterations = Number(value()); break;
+      case '--budget': parsed.budgetUsd = Number(value()); break;
+      case '--graph': parsed.graphFile = value(); break;
       case '--task': parsed.taskId = value(); break;
       case '--effort': parsed.primaryEffort = value() as Effort; break;
       case '--reviewer-effort': parsed.reviewerEffort = value() as Effort; break;
@@ -115,7 +133,77 @@ async function main(): Promise<void> {
     return;
   }
 
-  // S3 범위에서는 primary 슬롯만 실제로 돌린다 — reviewer 왕복은 S4 ModeRunner 다.
+  const limits = loadLimits();
+  const budgetUsd = args.budgetUsd ?? limits.budgetUsd;
+  const execute = createExecutor(catalog, process.cwd(), args.timeoutMs);
+
+  if (args.mode === 'pingpong') {
+    // 자율 실행이 아니다 (D-015). 한 턴만 돌리고 다음 제안을 남긴 뒤 사용자에게 돌려준다.
+    const session = new PingpongSession(matrix, plan, execute, budgetUsd);
+    const turn = await session.turn({ prompt: args.task, side: 'primary' });
+    process.stdout.write(`${turn.text}\n`);
+    process.stderr.write(`\n${session.journal.render()}\n누적   ${turn.budget}\n제안   ${turn.suggestion}\n`);
+    return;
+  }
+
+  if (args.mode === 'loop') {
+    const maxIterations = args.maxIterations ?? limits.maxIterations;
+    const result = await runLoop(
+      matrix,
+      plan,
+      execute,
+      {
+        plan: (ctx) => (ctx.iteration === 1 ? args.task : `${args.task} — 직전 사이클의 지적을 반영하라`),
+        // Evaluator 는 reviewer 슬롯이 돈다 (D-003). 판정은 기계적으로 읽는다.
+        evaluate: async (_ctx, output) => {
+          const check = await execute(
+            plan.slots.reviewer,
+            `다음 산출물이 목표 "${args.task}" 를 충족하면 PASS, 아니면 FAIL 만 한 줄로 답하라.\n\n${output}`,
+          );
+          return { passed: /\bPASS\b/i.test(check.text), verification: `reviewer ${plan.slots.reviewer.label}: ${check.text.slice(0, 80)}` };
+        },
+        stop: (_ctx, verdict) => verdict.passed,
+        recover: () => 'abort',
+      },
+      { goal: args.task, maxIterations, budgetUsd },
+    );
+    process.stderr.write(
+      `\n${result.journal.render()}\n중단   ${result.stopReason} · ${result.iterations}회\n누적   ${result.budget.summary()}\n`,
+    );
+    if (result.journal.unverified.length > 0) {
+      process.stderr.write(`경고   검증 기록이 빈 사이클 ${result.journal.unverified.length}건 — "통과"가 아니다.\n`);
+    }
+    if (result.stopReason !== 'goal-reached') process.exitCode = 1;
+    return;
+  }
+
+  if (args.mode === 'graph') {
+    if (!args.graphFile) throw new Error('--mode graph 에는 --graph <nodes.json> 이 필요하다.');
+    const spec = JSON.parse(readFileSync(args.graphFile, 'utf8')) as {
+      nodes: { id: string; prompt: string; task: string; dependsOn?: string[]; writes?: string[]; onFailure?: GraphNode['onFailure'] }[];
+    };
+    const nodes: GraphNode[] = spec.nodes.map((n) => {
+      const row = matrix.assignments.find((a) => a.id === n.task);
+      if (!row) throw new Error(`${n.id}: 그런 업무 행이 없다: ${n.task}`);
+      return {
+        id: n.id,
+        prompt: n.prompt,
+        plan: assign(matrix, catalog, row),
+        dependsOn: n.dependsOn ?? [],
+        writes: n.writes ?? [],
+        onFailure: n.onFailure ?? 'skip-dependents',
+      };
+    });
+    const result = await runGraph(matrix, nodes, execute, { maxNodes: limits.maxNodes, budgetUsd });
+    process.stderr.write(
+      `\n${result.journal.render()}\n묶음   ${result.batches.map((b) => b.join('+')).join(' → ')}\n` +
+        `건너뜀 ${result.skipped.join(', ') || '없음'}\n중단   ${result.stopReason}\n누적   ${result.budget.summary()}\n`,
+    );
+    if (result.stopReason !== 'completed') process.exitCode = 1;
+    return;
+  }
+
+  // --mode once (기본): primary 슬롯 1회. reviewer 왕복은 --mode pingpong|loop 다.
   const adapter = createAdapter(primary.engine, catalog);
   const handle = adapter.start(
     { model: primary.model, effort: primary.effort, prompt: args.task, cwd: process.cwd(), timeoutMs: args.timeoutMs },
@@ -133,7 +221,7 @@ async function main(): Promise<void> {
       (run.usage ? ` · in ${run.usage.inputTokens} / out ${run.usage.outputTokens}` : '') +
       (run.costUsd !== undefined ? ` · $${run.costUsd.toFixed(4)}` : '') +
       (run.unparsedLines.length ? ` · 파싱 실패 ${run.unparsedLines.length}줄` : '') +
-      `\nreviewer ${reviewer.label} 왕복은 S4에서 붙는다.\n`,
+      `\nreviewer ${reviewer.label} 왕복이 필요하면 --mode pingpong 또는 --mode loop 다.\n`,
   );
   if (run.outcome !== 'ok') process.exitCode = 1;
 }
