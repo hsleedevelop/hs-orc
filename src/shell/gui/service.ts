@@ -14,11 +14,27 @@ import { Budget } from '../../core/budget.ts';
 import { Journal } from '../../core/journal.ts';
 import { appendDecision } from '../../core/decision-log.ts';
 import { firstLine, secondLine } from '../../core/decide.ts';
-import { storeRun } from '../../core/run-store.ts';
+import { runStoreRoot, storeRun } from '../../core/run-store.ts';
 import { collect, type Evidence, type EvidenceReport } from '../../core/evidence.ts';
 import { changedFiles, runCommand } from '../../core/evidence-gather.ts';
 import { reportError } from '../../core/report.ts';
 import { dashboardView, runView, titleInfo, type RunView } from '../tui/model.ts';
+import {
+  describeProject,
+  forgetProject,
+  loadProjects,
+  rememberProject,
+  validateProject,
+  type ProjectInfo,
+} from './projects.ts';
+import {
+  createWorktree,
+  listWorktrees,
+  mainWorktree,
+  removeWorktree,
+  samePath,
+  type WorktreeInfo,
+} from './worktree.ts';
 
 export interface PlanOptions {
   /** D-025: primary 슬롯에만 파일 쓰기를 허용한다. */
@@ -44,14 +60,61 @@ export interface RunOutcome {
   readonly view?: RunView;
 }
 
+export interface ProjectState {
+  /** 엔진·검증 명령·`.hs-orc/runs`·git 변경 파일이 **전부 이 폴더 기준**이다. */
+  readonly current: ProjectInfo;
+  readonly recent: readonly ProjectInfo[];
+}
+
+export interface WorktreeState {
+  /** **본체** 작업 트리. git 저장소가 아니면 null — 화면은 "저장소가 아니다"를 그대로 보여준다. */
+  readonly repo: string | null;
+  readonly items: readonly WorktreeInfo[];
+  /** 지금 작업 폴더가 이 목록의 어느 것인가. 어느 것도 아니면 빈 문자열이다. */
+  readonly current: string;
+}
+
 export class GuiService {
   readonly journal = new Journal();
   readonly budget: Budget;
   private readonly execute: SlotExecutor | undefined;
+  /**
+   * 작업 폴더. **`process.cwd()` 를 직접 읽는 곳이 이 클래스에 더 있으면 안 된다** — 화면에서
+   * 폴더를 바꿔도 엔진이나 검증 명령이 예전 폴더에서 돌면 그게 가장 위험한 종류의 버그다.
+   */
+  private workdir: string;
 
-  constructor(execute?: SlotExecutor, budgetUsd = loadLimits().budgetUsd) {
+  constructor(execute?: SlotExecutor, budgetUsd = loadLimits().budgetUsd, cwd = process.cwd()) {
     this.budget = new Budget(budgetUsd);
     this.execute = execute;
+    this.workdir = cwd;
+  }
+
+  get cwd(): string {
+    return this.workdir;
+  }
+
+  /** 현재 폴더 + 최근 목록. 최근 목록을 못 읽어도 현재 폴더는 늘 나온다. */
+  projects(): ProjectState {
+    return {
+      current: describeProject(this.workdir),
+      recent: loadProjects().map((d) => describeProject(d)),
+    };
+  }
+
+  /**
+   * 폴더를 바꾼다. **검증이 먼저다** — 폴더가 아니면 바꾸지 않고 던진다.
+   * 누적 비용(`budget`)과 journal 은 **초기화하지 않는다**: 이 세션에서 쓴 돈은 폴더를 옮겨도 쓴 돈이다.
+   */
+  useProject(dir: string): ProjectState {
+    this.workdir = validateProject(dir);
+    try {
+      rememberProject(this.workdir);
+    } catch (error) {
+      // 최근 목록 저장 실패가 폴더 전환을 막지는 않는다. 다만 조용히 넘어가지도 않는다.
+      process.stderr.write(`${reportError('gui/projects', 'remember', error).display}\n`);
+    }
+    return this.projects();
   }
 
   /**
@@ -77,7 +140,7 @@ export class GuiService {
       node: process.version,
       electron: process.versions['electron'] ?? '?',
       pid: process.pid,
-      cwd: process.cwd(),
+      cwd: this.workdir,
       limits: loadLimits(),
     };
   }
@@ -89,6 +152,42 @@ export class GuiService {
     } catch (error) {
       return reportError('gui/main', 'crash-test', error).display;
     }
+  }
+
+  /** 현재 폴더가 속한 저장소의 워크트리 목록. */
+  worktrees(): WorktreeState {
+    const items = listWorktrees(this.workdir);
+    const mine = items.find((w) => samePath(w.dir, this.workdir));
+    return { repo: mainWorktree(this.workdir), items, current: mine?.dir ?? '' };
+  }
+
+  /**
+   * 워크트리를 만들고 **그 안으로 들어간다.** 만들기만 하고 현재 폴더를 그대로 두면
+   * 쓰기를 가두려던 목적이 그대로 새 나간다.
+   */
+  createWorktree(name: string, from?: string): ProjectState {
+    const made = createWorktree(this.workdir, name, from === undefined ? {} : { from });
+    return this.useProject(made.dir);
+  }
+
+  /**
+   * 워크트리를 지운다. **파괴적이라 화면에서 한 번 더 확인받은 뒤에만 부른다.**
+   * 지금 그 안에 있으면 **먼저 본체로 나온다** — 발밑을 지울 수는 없다.
+   */
+  removeWorktree(dir: string): { project: ProjectState; worktrees: WorktreeState; note: string } {
+    if (samePath(dir, this.workdir)) {
+      const main = mainWorktree(this.workdir);
+      if (main === null) throw new Error(`git 저장소가 아니다: ${this.workdir}`);
+      this.useProject(main);
+    }
+    const result = removeWorktree(this.workdir, dir);
+    // 지운 폴더가 최근 목록에 "(없음)" 으로 남지 않게 한다.
+    try {
+      forgetProject(result.dir);
+    } catch (error) {
+      process.stderr.write(`${reportError('gui/projects', 'forget', error).display}\n`);
+    }
+    return { project: this.projects(), worktrees: this.worktrees(), note: result.note };
   }
 
   /** S5 시나리오: 분류 → 배정·비용 → (승인) → 실행 → 증거 → 결정 로그 2회. */
@@ -106,7 +205,7 @@ export class GuiService {
     const slot = result.plan.slots.primary;
     const execute =
       this.execute ??
-      createExecutor(loadEngines(), process.cwd(), loadLimits().runTimeoutMs, { write: payload.write === true });
+      createExecutor(loadEngines(), this.workdir, loadLimits().runTimeoutMs, { write: payload.write === true });
     // 1차 결정 로그 — 배정을 확정한 이 시점에 남긴다 (SPEC §8).
     const decision = firstLine(matrix, result.plan, payload.task, result.reason);
     appendDecision(decision);
@@ -122,14 +221,14 @@ export class GuiService {
         rawStdout: '',
         rawStderr: '',
         meta: { outcome: run.ok ? 'ok' : 'failed', durationMs: run.durationMs, modelId: slot.modelId, verdict: duo.verdict },
-      }).dir;
+      }, runStoreRoot(this.workdir)).dir;
     } catch (error) {
       // catch 후 무동작 금지.
       process.stderr.write(`${reportError('run-store', 'persist', error).display}\n`);
     }
 
-    const evidence: Evidence[] = [...duo.evidence, ...payload.verify.filter((v) => v.trim()).map((v) => runCommand(v, process.cwd()))];
-    if (evidence.length > 0) evidence.push(changedFiles());
+    const evidence: Evidence[] = [...duo.evidence, ...payload.verify.filter((v) => v.trim()).map((v) => runCommand(v, this.workdir))];
+    if (evidence.length > 0) evidence.push(changedFiles(this.workdir));
     const report = collect(result.plan.assignment, evidence);
 
     this.journal.append({
