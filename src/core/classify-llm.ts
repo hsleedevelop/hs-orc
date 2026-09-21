@@ -32,7 +32,17 @@ export async function classifyWithModel(
   matrix: Matrix,
   catalog: Engines,
   task: string,
-  options: { model?: ModelKey; effort?: 'low' | 'medium'; timeoutMs?: number } = {},
+  options: {
+    model?: ModelKey;
+    effort?: 'low' | 'medium';
+    timeoutMs?: number;
+    /**
+     * 분류기를 띄울 폴더 (D-029). 기본은 `process.cwd()` 다.
+     * 셸이 폴더를 바꿀 수 있으면(GUI) **그 폴더를 넘겨야 한다** — 분류만 옛 폴더에서 돌면
+     * 화면이 말하는 폴더와 실제로 띄운 폴더가 갈린다.
+     */
+    cwd?: string;
+  } = {},
 ): Promise<Assignment | null> {
   const model = options.model ?? 'haiku';
   if (!CLASSIFIER_MODELS.includes(model)) {
@@ -45,7 +55,7 @@ export async function classifyWithModel(
     model,
     effort,
     prompt: buildClassifyPrompt(matrix, task),
-    cwd: process.cwd(),
+    cwd: options.cwd ?? process.cwd(),
     timeoutMs: options.timeoutMs ?? 120_000,
   });
   const result = await handle.result;
