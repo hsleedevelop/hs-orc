@@ -26,8 +26,7 @@ import { runDuo } from '../core/duo.ts';
 import { Budget } from '../core/budget.ts';
 import { changedFiles, loadEvidenceFile, runCommand } from '../core/evidence-gather.ts';
 import { GATE_CHECKS, parseGateCheck, type GateSignals } from '../core/gatekeeper.ts';
-import { classifyWithModel } from '../core/classify-llm.ts';
-import { route } from '../core/pipeline.ts';
+import { routeWithFallback } from '../core/pipeline.ts';
 import type { Effort } from '../data/matrix.ts';
 
 type Mode = 'once' | 'pingpong' | 'loop' | 'graph';
@@ -138,22 +137,17 @@ async function main(): Promise<void> {
     gate: args.gate,
   };
 
-  let result = route(matrix, catalog, args.task, options);
-
-  // 규칙으로 못 붙으면 저비용 모델에 **분류만** 시킨다 (PLAN S3-6, D-026).
-  // 기본이 켜짐인 이유: 규칙 표는 명령형 어미 몇 개에 의존해 평범한 작업 문장을 놓친다(S9-2 실측).
-  // 대신 폴백이 돌았다는 사실과 비용을 **반드시 찍는다** — 말없이 도는 유료 호출은 없다.
-  if (result.stage === 'unclassified' && args.classifyLlm) {
-    process.stderr.write('분류   규칙 무매치 → Haiku·low 로 분류만 재시도 (+$0.001 내외 · --no-classify-llm 으로 끈다)\n');
-    try {
-      const guessed = await classifyWithModel(matrix, catalog, args.task);
-      if (guessed) {
-        result = route(matrix, catalog, args.task, { ...options, taskId: guessed.id, reasonLabel: 'Haiku·low 분류' });
-      }
-    } catch (error) {
-      // 폴백 실패가 전체를 죽이면 안 되지만 침묵해서도 안 된다 — 아래 미분류 경로로 내려간다.
-      process.stderr.write(`${reportNotice('pipeline', 'classify-fallback', `LLM 분류를 시도하지 못했다: ${error instanceof Error ? error.message : String(error)}`).display}\n`);
-    }
+  // 분류·하한선·배정 + LLM 폴백. 순서의 소유자는 Core 다 (SPEC §4, D-026).
+  const routed = await routeWithFallback(matrix, catalog, args.task, { ...options, classifyLlm: args.classifyLlm });
+  const result = routed.result;
+  // 폴백이 돌았으면 **반드시 보여준다** — 말없이 도는 유료 호출은 없다.
+  if (routed.fallback) {
+    const line = `분류   ${routed.fallback.line}`;
+    process.stderr.write(
+      routed.fallback.outcome === 'failed'
+        ? `${reportNotice('pipeline', 'classify-fallback', routed.fallback.line).display}\n`
+        : `${line}\n`,
+    );
   }
 
   if (result.stage === 'unclassified') {

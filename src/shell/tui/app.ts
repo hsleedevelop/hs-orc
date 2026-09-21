@@ -4,12 +4,12 @@
  * **이 파일은 얇게 유지한다.** 판단은 전부 `model.ts`(순수 함수)에 있고 여기서는 그린다.
  * `createElement` 중첩이 읽기 어려워지면 그건 렌더 층이 두꺼워졌다는 신호다 (D-019).
  */
-import { createElement as h, useCallback, useState, type ReactElement } from 'react';
+import { createElement as h, useCallback, useEffect, useState, type ReactElement } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { loadMatrix } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
 import { loadLimits } from '../../data/limits.ts';
-import { route } from '../../core/pipeline.ts';
+import { routeWithFallback, type RouteResult } from '../../core/pipeline.ts';
 import { createExecutor } from '../../core/executor.ts';
 import { runDuo } from '../../core/duo.ts';
 import { appendDecision } from '../../core/decision-log.ts';
@@ -53,8 +53,20 @@ function RunScreen({
   keys: boolean;
   write: boolean;
 }): ReactElement {
-  const result = task ? route(loadMatrix(), loadEngines(), task) : null;
-  const view = runView(result, task, { write });
+  // 분류 폴백이 async 라 라우팅을 렌더 중에 못 한다 (D-026).
+  // CLI 에만 폴백이 있으면 같은 입력이 셸마다 다르게 동작한다 — 그래서 여기도 같은 Core 함수를 쓴다.
+  const [routed, setRouted] = useState<{ result: RouteResult | null; notes: string[] }>({ result: null, notes: [] });
+  useEffect(() => {
+    if (!task) { setRouted({ result: null, notes: [] }); return; }
+    let live = true;
+    void routeWithFallback(loadMatrix(), loadEngines(), task).then((r) => {
+      if (live) setRouted({ result: r.result, notes: r.fallback ? [r.fallback.line] : [] });
+    });
+    return () => { live = false; };
+  }, [task]);
+
+  const result = routed.result;
+  const view = runView(result, task, { write, notes: routed.notes });
   const [phase, setPhase] = useState<'idle' | 'running' | 'done'>('idle');
   const [output, setOutput] = useState('');
   const [, bump] = useState(0);

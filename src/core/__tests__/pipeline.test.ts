@@ -1,11 +1,11 @@
-import { describe, it } from 'node:test';
+import { after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadMatrix } from '../../data/matrix.ts';
 import { loadEngines, type Engines } from '../../data/engines.ts';
 import { ClassifyError, classify } from '../classify.ts';
 import { AssignError, assign, crossVendorPair } from '../assign.ts';
 import { GATE_CHECKS, evaluateGate } from '../gatekeeper.ts';
-import { route } from '../pipeline.ts';
+import { route, routeWithFallback } from '../pipeline.ts';
 
 const matrix = loadMatrix();
 const catalog = loadEngines();
@@ -109,5 +109,37 @@ describe('배정 근거 표기', () => {
     const llm = route(matrix, catalog, '', { taskId: 'R05', reasonLabel: 'Haiku·low 분류' });
     assert.equal(manual.stage === 'assigned' ? manual.reason : '', '수동 지정 R05');
     assert.equal(llm.stage === 'assigned' ? llm.reason : '', 'Haiku·low 분류 R05');
+  });
+});
+
+/**
+ * 폴백은 **Core 에 있다** — CLI·TUI·GUI 가 같은 함수를 쓴다 (D-026).
+ * S9 에서 CLI 에만 있어 같은 입력이 셸마다 다르게 동작했고, 그것을 여기서 막는다.
+ */
+describe('routeWithFallback (D-026)', () => {
+  const originalPath = process.env['PATH'] ?? '';
+  after(() => { process.env['PATH'] = originalPath; });
+
+  it('규칙으로 붙으면 폴백을 아예 시작하지 않는다 — 공짜 경로가 유료가 되면 안 된다', async () => {
+    const r = await routeWithFallback(matrix, catalog, '이 타입 에러 고쳐줘');
+    assert.equal(r.result.stage, 'assigned');
+    assert.equal(r.fallback, null);
+  });
+
+  it('classifyLlm: false 면 미분류여도 폴백이 없다', async () => {
+    const r = await routeWithFallback(matrix, catalog, '오늘 점심 뭐 먹지', { classifyLlm: false });
+    assert.equal(r.result.stage, 'unclassified');
+    assert.equal(r.fallback, null);
+  });
+
+  it('폴백이 실패해도 던지지 않고 사유를 올린다 — 삼키지도, 죽지도 않는다', async () => {
+    // PATH 를 비우면 분류용 바이너리 해석이 실패한다. 진짜 엔진을 띄우지 않으므로 돈이 안 든다.
+    process.env['PATH'] = '';
+    const r = await routeWithFallback(matrix, catalog, '오늘 점심 뭐 먹지');
+    process.env['PATH'] = originalPath;
+    assert.equal(r.result.stage, 'unclassified');
+    assert.equal(r.fallback?.outcome, 'failed');
+    assert.match(r.fallback?.line ?? '', /\+\$0\.001/, '유료 호출 시도는 비용 표기와 함께 알려야 한다.');
+    assert.match(r.fallback?.line ?? '', /시도하지 못했다/);
   });
 });

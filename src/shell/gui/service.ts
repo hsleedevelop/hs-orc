@@ -7,7 +7,7 @@
 import { loadMatrix } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
 import { loadLimits } from '../../data/limits.ts';
-import { route } from '../../core/pipeline.ts';
+import { routeWithFallback } from '../../core/pipeline.ts';
 import { createExecutor, type SlotExecutor } from '../../core/executor.ts';
 import { runDuo } from '../../core/duo.ts';
 import { Budget } from '../../core/budget.ts';
@@ -20,11 +20,16 @@ import { changedFiles, runCommand } from '../../core/evidence-gather.ts';
 import { reportError } from '../../core/report.ts';
 import { dashboardView, runView, titleInfo, type RunView } from '../tui/model.ts';
 
-export interface RunPayload {
-  readonly task: string;
-  readonly verify: readonly string[];
+export interface PlanOptions {
   /** D-025: primary 슬롯에만 파일 쓰기를 허용한다. */
   readonly write?: boolean;
+  /** D-026: 규칙이 빗나갔을 때 LLM 분류 폴백. 기본 켜짐. 끄면 유료 호출이 아예 없다. */
+  readonly classifyLlm?: boolean;
+}
+
+export interface RunPayload extends PlanOptions {
+  readonly task: string;
+  readonly verify: readonly string[];
 }
 
 export interface RunOutcome {
@@ -49,9 +54,17 @@ export class GuiService {
     this.execute = execute;
   }
 
-  /** v1 의 뷰모델을 그대로 쓴다 (D-021). 여기 Ink 타입이 새어 있으면 이 파일이 안 컴파일된다. */
-  plan(task: string, write = false): RunView {
-    return runView(task.trim() ? route(loadMatrix(), loadEngines(), task) : null, task, { write });
+  /**
+   * v1 의 뷰모델을 그대로 쓴다 (D-021). 여기 Ink 타입이 새어 있으면 이 파일이 안 컴파일된다.
+   * **async 인 이유는 LLM 분류 폴백이다** (D-026) — CLI 에만 있으면 같은 입력이 셸마다 달라진다.
+   */
+  async plan(task: string, options: PlanOptions = {}): Promise<RunView> {
+    const write = options.write === true;
+    if (!task.trim()) return runView(null, task, { write });
+    const routed = await routeWithFallback(loadMatrix(), loadEngines(), task, {
+      ...(options.classifyLlm === undefined ? {} : { classifyLlm: options.classifyLlm }),
+    });
+    return runView(routed.result, task, { write, ...(routed.fallback ? { notes: [routed.fallback.line] } : {}) });
   }
 
   dashboard() {
@@ -82,9 +95,13 @@ export class GuiService {
   async run(payload: RunPayload): Promise<RunOutcome> {
     const matrix = loadMatrix();
     const catalog = loadEngines();
-    const result = route(matrix, catalog, payload.task);
+    const routed = await routeWithFallback(matrix, catalog, payload.task, {
+      ...(payload.classifyLlm === undefined ? {} : { classifyLlm: payload.classifyLlm }),
+    });
+    const result = routed.result;
+    const notes = routed.fallback ? { notes: [routed.fallback.line] } : {};
     if (result.stage !== 'assigned')
-      return { ok: false, text: '', view: runView(result, payload.task, { write: payload.write === true }) };
+      return { ok: false, text: '', view: runView(result, payload.task, { write: payload.write === true, ...notes }) };
 
     const slot = result.plan.slots.primary;
     const execute =

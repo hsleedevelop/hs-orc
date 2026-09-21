@@ -25,22 +25,23 @@ const isolated = () => {
 };
 
 describe('GUI — Core 를 그대로 쓴다', () => {
-  it('분류 → 배정 → 비용을 v1 과 같은 뷰모델로 낸다', () => {
-    const view = new GuiService(fake).plan('이 아키텍처 설계 검토해줘');
+  it('분류 → 배정 → 비용을 v1 과 같은 뷰모델로 낸다', async () => {
+    const view = await new GuiService(fake).plan('이 아키텍처 설계 검토해줘');
     assert.equal(view.awaitingApproval, true);
     assert.equal(view.cost?.line, '$10.89 = primary $7.63 + reviewer $3.26');
     assert.equal(view.cost?.badge.grade, 'INDEPENDENT');
     assert.ok(view.lines.some((l) => l.startsWith('reviewer')), 'reviewer 슬롯이 GUI 에서 사라지면 안 된다');
   });
 
-  it('승인 전에 write 선택과 reviewer read-only를 보여준다', () => {
-    const view = new GuiService(fake).plan('이 아키텍처 설계 검토해줘', true);
+  it('승인 전에 write 선택과 reviewer read-only를 보여준다', async () => {
+    const view = await new GuiService(fake).plan('이 아키텍처 설계 검토해줘', { write: true });
     assert.match(view.lines.at(-1) ?? '', /primary .*workspace 파일을 고칠 수 있음/);
     assert.match(view.lines.at(-1) ?? '', /reviewer 는 읽기 전용/);
   });
 
-  it('하한선·분류 실패는 GUI 에서도 비용도 승인도 없다', () => {
-    const view = new GuiService(fake).plan('오늘 점심 뭐 먹지');
+  it('하한선·분류 실패는 GUI 에서도 비용도 승인도 없다', async () => {
+    // 폴백을 끈다 — 켜면 이 테스트가 진짜 Haiku 를 부른다(돈 쓰는 테스트는 아무도 안 돌린다).
+    const view = await new GuiService(fake).plan('오늘 점심 뭐 먹지', { classifyLlm: false });
     assert.equal(view.cost, null);
     assert.equal(view.awaitingApproval, false);
   });

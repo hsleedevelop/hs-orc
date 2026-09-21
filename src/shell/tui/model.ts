@@ -67,19 +67,23 @@ export interface RunView {
 export interface RunViewOptions {
   /** D-025: primary 슬롯에만 파일 쓰기를 허용할지 여부. */
   readonly write?: boolean;
+  /** D-026: 분류 폴백처럼 **결과보다 먼저 알려야 할** 한 줄들. 비용이 든 일은 여기 올라온다. */
+  readonly notes?: readonly string[];
 }
 
 export function runView(result: RouteResult | null, task: string, options: RunViewOptions = {}): RunView {
   const title = titleInfo('Run');
-  if (result === null) return { title, lines: [`작업: ${task || '(입력 대기)'}`], cost: null, awaitingApproval: false };
+  const notes = options.notes ?? [];
+  if (result === null)
+    return { title, lines: [...notes, `작업: ${task || '(입력 대기)'}`], cost: null, awaitingApproval: false };
 
   if (result.stage === 'unclassified') {
-    return { title, lines: ['분류: 해당 없음 — 임의 배정하지 않는다', result.message], cost: null, awaitingApproval: false };
+    return { title, lines: [...notes, '분류: 해당 없음 — 임의 배정하지 않는다', result.message], cost: null, awaitingApproval: false };
   }
   if (result.stage === 'direct') {
     return {
       title,
-      lines: ['판정: ② 유지 — §1 하한선에 걸렸다. 엔진을 띄우지 않는다.', ...result.reasons.map((r) => `· ${r}`)],
+      lines: [...notes, '판정: ② 유지 — §1 하한선에 걸렸다. 엔진을 띄우지 않는다.', ...result.reasons.map((r) => `· ${r}`)],
       cost: null,
       awaitingApproval: false,
     };
@@ -90,6 +94,7 @@ export function runView(result: RouteResult | null, task: string, options: RunVi
   return {
     title,
     lines: [
+      ...notes,
       `분류 ${plan.assignment.id} ${plan.assignment.task}  (${result.reason})`,
       `primary  ${primary.label} · ${primary.effort} → ${primary.engine} / ${primary.modelId}`,
       `reviewer ${reviewer.label} · ${reviewer.effort} → ${reviewer.engine} / ${reviewer.modelId}`,
