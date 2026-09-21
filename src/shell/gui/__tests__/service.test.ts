@@ -4,12 +4,14 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { SlotExecutor } from '../../../core/executor.ts';
 import { readDecisions } from '../../../core/decision-log.ts';
 import { GuiService } from '../service.ts';
+import { samePath } from '../worktree.ts';
+import { spawnSync } from 'node:child_process';
 
 const calls: string[] = [];
 const fake: SlotExecutor = (slot, prompt) => {
@@ -21,6 +23,9 @@ const isolated = () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-gui-'));
   process.env['HS_ORC_DECISION_LOG'] = path.join(dir, 'log.jsonl');
   process.env['HS_ORC_RUN_STORE'] = path.join(dir, 'runs');
+  // 최근 목록도 가둔다 — 테스트가 진짜 홈의 projects.json 을 고치면 안 된다.
+  process.env['HS_ORC_PROJECTS'] = path.join(dir, 'projects.json');
+  process.env['HS_ORC_WORKTREES'] = path.join(dir, 'worktrees');
   return path.join(dir, 'log.jsonl');
 };
 
@@ -108,5 +113,75 @@ describe('GUI — S5 시나리오', () => {
 
   it('고의 크래시가 리포팅 경로를 보여준다', () => {
     assert.match(new GuiService(fake).crashTest(), /\[error\]\[gui\/main\/crash-test\]/);
+  });
+});
+
+describe('GUI — 작업 폴더 (폴더 전환)', () => {
+  it('바꾼 폴더에서 검증 명령이 돈다 — 화면의 폴더와 실행 폴더가 갈리면 안 된다', async () => {
+    isolated();
+    const project = mkdtempSync(path.join(os.tmpdir(), 'hs-project-'));
+    writeFileSync(path.join(project, 'MARKER'), '', 'utf8');
+
+    const service = new GuiService(fake, undefined, os.tmpdir());
+    assert.equal(service.projects().current.dir, os.tmpdir());
+    assert.equal(service.useProject(project).current.dir, project);
+
+    // MARKER 는 **바꾼 폴더에만** 있다. 이 명령이 통과하면 cwd 가 실제로 옮겨간 것이다.
+    const result = await service.run({ task: '이 타입 에러 고쳐줘', verify: ['test -f MARKER'] });
+    assert.equal(result.report?.accepted.some((e) => e.kind === 'command' && e.exitCode === 0), true);
+    assert.equal(service.debug().cwd, project, 'Debug 화면이 예전 폴더를 보여주면 안 된다');
+  });
+
+  it('폴더가 아니면 던지고 **이전 폴더를 유지한다**', () => {
+    isolated();
+    const service = new GuiService(fake, undefined, os.tmpdir());
+    assert.throws(() => service.useProject(path.join(os.tmpdir(), '없는-폴더-xyz')), /폴더가 아니다/);
+    assert.equal(service.cwd, os.tmpdir());
+  });
+
+  it('바꾼 폴더가 최근 목록 맨 앞에 남는다', () => {
+    isolated();
+    const project = mkdtempSync(path.join(os.tmpdir(), 'hs-project-'));
+    const state = new GuiService(fake, undefined, os.tmpdir()).useProject(project);
+    assert.equal(state.recent[0]?.dir, project);
+  });
+});
+
+/** 훅이 심는 GIT_DIR 류를 지운 환경으로 만든다 — 안 지우면 바깥 저장소를 본다. */
+function initRepo(dir: string): void {
+  const env = { ...process.env };
+  for (const key of ['GIT_DIR', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_WORK_TREE', 'GIT_PREFIX']) delete env[key];
+  spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: dir, env });
+  spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir, env });
+}
+
+describe('GUI — 워크트리', () => {
+  it('워크트리를 만들면 **그 안으로 들어간다** — 만들고 본체에 남으면 쓰기를 가둔 뜻이 없다', () => {
+    isolated();
+    const repo = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'hs-svc-wt-')));
+    initRepo(repo);
+
+    const service = new GuiService(fake, undefined, repo);
+    assert.equal(service.worktrees().items.length, 1, '본체 하나로 시작한다');
+
+    const state = service.createWorktree('slot-a');
+    assert.ok(samePath(service.cwd, state.current.dir));
+    assert.notEqual(samePath(service.cwd, repo), true, '본체에 남아 있으면 안 된다');
+    assert.equal(service.worktrees().items.find((w) => samePath(w.dir, service.cwd))?.branch, 'hs-orc/slot-a');
+    assert.equal(state.current.dir.startsWith(repo), false, '워크트리는 저장소 밖(홈)에 둔다');
+  });
+
+  it('지금 들어가 있는 워크트리를 지우면 **본체로 나온 뒤** 지운다', () => {
+    isolated();
+    const repo = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'hs-svc-rm-')));
+    initRepo(repo);
+
+    const service = new GuiService(fake, undefined, repo);
+    const inside = service.createWorktree('temp').current.dir;
+    const after = service.removeWorktree(inside);
+
+    assert.ok(samePath(service.cwd, repo), '발밑을 지운 채로 남아 있으면 안 된다');
+    assert.equal(after.worktrees.items.length, 1);
+    assert.equal(after.project.recent.some((r) => samePath(r.dir, inside)), false, '지운 폴더가 최근 목록에 남으면 안 된다');
   });
 });
