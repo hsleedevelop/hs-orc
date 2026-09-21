@@ -35,7 +35,7 @@
 
 ## 분류 매트릭스 — 제품의 라우팅 원본
 
-출처: `/Users/hsonpro/Documents/Codex/2026-09-20/astra-terra-fable-opus-test/outputs/gpt-5-6-claude-practical-matrix-v6.html`.
+출처: `data/matrix-source.html (저장소 안. 원본 v6 HTML 을 그대로 넣어 두어 누구나 `npm run matrix:check` 로 대조할 수 있다 — D-013)`.
 구현 전에 이 파일을 직접 읽어 `rows` 배열과 `profiles` 객체를 확인한다. 아래는 그 요약이며, 불일치가 있으면 원본이 이긴다.
 
 **모델 계층**: OpenAI `Luna → Terra → Sol → Astra`, Claude `Haiku → Sonnet → Opus → Fable`. 단일 순위가 아니라 실행 역할의 계층이다.

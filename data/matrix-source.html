@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="ko" data-ha-style="dashboard">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>GPT-5.6 x Claude 실무 사용 매트릭스 v6</title>
+  <style>
+    :root {
+      --primary: #ff6b35;
+      --primary-fixed: #ffdbcd;
+      --secondary: #c4b5fd;
+      --tertiary: #818cf8;
+      --accent-cyan: #22d3ee;
+      --green: #34d399;
+      --yellow: #fbbf24;
+      --red: #fb7185;
+      --bg: #060b18;
+      --surface: #0b1426;
+      --surface-container-lowest: #101d35;
+      --surface-container-low: #101d35;
+      --surface-container: #162544;
+      --surface-container-high: #1c2d52;
+      --fg-1: #f8fafc;
+      --fg-2: #cbd5e1;
+      --fg-muted: #94a3b8;
+      --border: rgba(255,255,255,.08);
+      --border-strong: rgba(255,255,255,.15);
+      --shadow-md: 0 16px 42px rgba(0,0,0,.28);
+      --radius-sm: 8px; --radius-md: 12px; --radius-lg: 16px; --radius-xl: 20px; --radius-pill: 9999px;
+      --font-headline: ui-rounded, "SF Pro Display", "Apple SD Gothic Neo", system-ui, sans-serif;
+      --font-body: "Apple SD Gothic Neo", "Pretendard", system-ui, sans-serif;
+      --font-mono: "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; min-width: 320px; background: radial-gradient(circle at 82% -10%, #182f5b 0, transparent 30rem), var(--bg); color: var(--fg-1); font-family: var(--font-body); line-height: 1.55; }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid var(--accent-cyan); outline-offset: 3px; }
+    .ops-shell { min-height: 100vh; }
+    .command-bar { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px clamp(16px, 3vw, 32px); background: rgba(11,20,38,.9); border-bottom: 1px solid var(--border-strong); backdrop-filter: blur(18px); }
+    .command-bar__title { display: flex; align-items: center; gap: 10px; font-family: var(--font-headline); font-weight: 750; letter-spacing: -.025em; }
+    .mark { width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(145deg, var(--primary), var(--secondary)); display: grid; place-items: center; box-shadow: 0 0 24px rgba(255,107,53,.35); }
+    .mark svg { width: 16px; }
+    .command-bar__period, .eyebrow, .mono { font-family: var(--font-mono); }
+    .command-bar__period { color: var(--fg-muted); font-size: .72rem; padding: 3px 8px; border: 1px solid var(--border); border-radius: var(--radius-pill); }
+    .command-bar__spacer { flex: 1; }
+    .search { display: flex; align-items: center; gap: 8px; min-width: min(260px, 100%); padding: 7px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface-container-lowest); }
+    .search input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--fg-1); font-size: .84rem; }
+    .search svg { width: 16px; color: var(--fg-muted); flex: 0 0 auto; }
+    .btn { min-height: 36px; padding: 7px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-pill); background: var(--surface-container); color: var(--fg-2); cursor: pointer; font-size: .8rem; font-weight: 650; transition: border-color .16s, background .16s, transform .16s; }
+    .btn:hover { border-color: var(--accent-cyan); background: var(--surface-container-high); }
+    .btn:active { transform: translateY(1px); }
+    .btn--primary { background: var(--primary); color: #21120d; border-color: var(--primary); }
+    .btn--primary:hover { background: #ff8454; border-color: #ff8454; }
+    .filter-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px clamp(16px, 3vw, 32px); border-bottom: 1px solid var(--border); background: rgba(16,29,53,.72); }
+    .filter-label { color: var(--fg-muted); font-family: var(--font-mono); font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; margin-right: 2px; }
+    .chip { min-height: 32px; padding: 5px 10px; border-radius: var(--radius-pill); border: 1px solid var(--border-strong); background: transparent; color: var(--fg-2); cursor: pointer; font-size: .76rem; transition: all .16s; }
+    .chip:hover, .chip.active { border-color: var(--chip, var(--primary)); color: var(--chip, var(--primary)); background: color-mix(in srgb, var(--chip, var(--primary)) 12%, transparent); }
+    .chip[data-model="astra"] { --chip: var(--green); } .chip[data-model="sol"] { --chip: #2dd4bf; } .chip[data-model="terra"] { --chip: #86efac; } .chip[data-model="luna"] { --chip: #bef264; } .chip[data-model="fable"] { --chip: var(--primary); } .chip[data-model="opus"] { --chip: var(--secondary); } .chip[data-model="sonnet"] { --chip: #fda4af; } .chip[data-model="haiku"] { --chip: #fcd34d; }
+    .ops-main { max-width: 1480px; margin: 0 auto; padding: clamp(18px, 3vw, 36px); display: grid; gap: 20px; }
+    .intro { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(270px, .65fr); gap: 18px; align-items: end; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent-cyan); font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { max-width: 850px; margin-bottom: 12px; font-family: var(--font-headline); font-size: clamp(2rem, 4vw, 3.9rem); letter-spacing: -.055em; line-height: 1.04; }
+    .intro p { max-width: 780px; color: var(--fg-2); font-size: .98rem; }
+    .decision-panel { padding: 16px; border: 1px solid rgba(34,211,238,.35); border-radius: var(--radius-lg); background: linear-gradient(145deg, rgba(34,211,238,.09), rgba(129,140,248,.09)); }
+    .decision-panel__label { color: var(--accent-cyan); font-size: .72rem; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+    .decision-panel strong { display: block; margin: 6px 0; font-size: 1.07rem; }
+    .decision-panel p { margin: 0; color: var(--fg-2); font-size: .82rem; }
+    .kpi-rail { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .kpi-cell { position: relative; min-height: 130px; padding: 17px; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface-container-lowest); box-shadow: var(--shadow-md); overflow: hidden; }
+    .kpi-cell::after { content: ""; position: absolute; width: 80px; height: 80px; right: -24px; bottom: -32px; border-radius: 50%; background: var(--kpi-accent, var(--primary)); filter: blur(30px); opacity: .2; }
+    .kpi-cell--primary { border-color: rgba(255,107,53,.55); --kpi-accent: var(--primary); }
+    .kpi-label { color: var(--fg-muted); font-family: var(--font-mono); font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; }
+    .kpi-value { display: block; margin: 10px 0 5px; font-family: var(--font-mono); font-size: clamp(1.42rem, 2.3vw, 2.2rem); font-weight: 800; letter-spacing: -.06em; }
+    .kpi-sub { color: var(--fg-2); font-size: .78rem; }
+    .work-surface { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, .75fr); gap: 16px; }
+    .panel { min-width: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface-container-lowest); box-shadow: var(--shadow-md); overflow: hidden; }
+    .panel__header { display: flex; justify-content: space-between; align-items: start; gap: 16px; padding: 14px 16px; background: var(--surface-container-low); border-bottom: 1px solid var(--border); }
+    .panel__title { margin: 0; font-family: var(--font-headline); font-size: .98rem; letter-spacing: -.02em; }
+    .panel__sub { margin: 2px 0 0; color: var(--fg-muted); font-size: .74rem; }
+    .panel__body { padding: 16px; }
+    .bench-bars { display: grid; gap: 15px; }
+    .bench-row { display: grid; grid-template-columns: minmax(125px, .75fr) minmax(180px, 2fr) 72px; align-items: center; gap: 12px; }
+    .bench-row__label { color: var(--fg-2); font-size: .82rem; }
+    .bench-track { height: 14px; overflow: hidden; border-radius: var(--radius-pill); background: var(--surface-container-high); }
+    .bench-fill { height: 100%; width: var(--w); border-radius: inherit; background: var(--color); box-shadow: 0 0 20px color-mix(in srgb, var(--color) 45%, transparent); transition: width .35s ease; }
+    .bench-score { text-align: right; color: var(--fg-1); font-family: var(--font-mono); font-size: .78rem; }
+    .bench-score span { color: var(--fg-muted); font-size: .66rem; }
+    .chart-note { margin: 18px 0 0; padding: 12px; border-left: 3px solid var(--yellow); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: rgba(251,191,36,.08); color: var(--fg-2); font-size: .78rem; }
+    .flag-queue { display: grid; gap: 10px; }
+    .flag-item { display: grid; grid-template-columns: 9px 1fr; gap: 10px; align-items: start; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-container); }
+    .flag-dot { width: 9px; height: 9px; margin-top: 5px; border-radius: 50%; background: var(--flag, var(--yellow)); box-shadow: 0 0 14px var(--flag, var(--yellow)); }
+    .flag-item strong { display: block; font-size: .8rem; }
+    .flag-item p { margin: 3px 0 0; color: var(--fg-muted); font-size: .75rem; }
+    .model-station { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; }
+    .model-list { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+    .model-button { width: 100%; min-height: 57px; padding: 10px 12px; text-align: left; border: 1px solid var(--border); border-left: 3px solid var(--model-color); border-radius: var(--radius-md); background: var(--surface-container); color: var(--fg-2); cursor: pointer; }
+    .model-button.active { background: color-mix(in srgb, var(--model-color) 13%, var(--surface-container)); border-color: var(--model-color); color: var(--fg-1); }
+    .model-button span { display: block; color: var(--fg-muted); font-family: var(--font-mono); font-size: .65rem; margin-top: 2px; }
+    .model-profile { min-height: 220px; padding: 20px; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: linear-gradient(145deg, color-mix(in srgb, var(--profile-color, var(--primary)) 11%, var(--surface-container-lowest)), var(--surface-container-lowest)); }
+    .profile-top { display: flex; justify-content: space-between; gap: 20px; align-items: start; }
+    .profile-name { margin: 0; font-family: var(--font-headline); font-size: 1.42rem; letter-spacing: -.04em; }
+    .profile-kind { color: var(--profile-color, var(--primary)); font-family: var(--font-mono); font-size: .7rem; }
+    .profile-summary { margin: 13px 0 16px; max-width: 720px; color: var(--fg-2); }
+    .profile-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .profile-stat { padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(6,11,24,.38); }
+    .profile-stat span { display: block; color: var(--fg-muted); font-family: var(--font-mono); font-size: .62rem; text-transform: uppercase; }
+    .profile-stat strong { display: block; margin-top: 4px; font-size: .79rem; }
+    .charts-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .aa-table { display: grid; gap: 12px; }
+    .aa-row { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 10px; font-size: .8rem; }
+    .aa-track { height: 9px; background: var(--surface-container-high); border-radius: var(--radius-pill); overflow: hidden; }
+    .aa-fill { width: var(--w); height: 100%; border-radius: inherit; background: var(--color); }
+    .workflow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; counter-reset: flow; }
+    .workflow-step { position: relative; padding: 0 13px 0 34px; min-height: 84px; color: var(--fg-2); font-size: .75rem; }
+    .workflow-step::before { counter-increment: flow; content: "0" counter(flow); position: absolute; left: 0; top: 0; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--tertiary); color: white; font-family: var(--font-mono); font-size: .62rem; }
+    .workflow-step:not(:last-child)::after { content: ""; position: absolute; right: 0; top: 12px; width: 10px; height: 1px; background: var(--border-strong); }
+    .workflow-step strong { display: block; margin-bottom: 5px; color: var(--fg-1); font-size: .78rem; }
+    .data-grid-section { scroll-margin-top: 130px; }
+    .grid-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 14px; background: var(--surface-container-low); border-bottom: 1px solid var(--border); }
+    .grid-count { margin-left: auto; color: var(--fg-muted); font-family: var(--font-mono); font-size: .7rem; }
+    .table-wrap { max-width: 100%; overflow-x: auto; }
+    .data-grid { width: 100%; border-collapse: collapse; min-width: 760px; }
+    .data-grid th { padding: 11px 14px; text-align: left; color: var(--fg-muted); background: var(--surface-container); border-bottom: 1px solid var(--border-strong); font-family: var(--font-mono); font-size: .66rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+    .data-grid td { padding: 12px 14px; border-bottom: 1px solid var(--border); color: var(--fg-2); font-size: .8rem; vertical-align: top; }
+    .data-grid tr[data-task] { cursor: pointer; }
+    .data-grid tr[data-task]:hover { background: rgba(34,211,238,.055); }
+    .data-grid tr.hidden { display: none; }
+    .data-grid .task { color: var(--fg-1); font-weight: 700; }
+    .pill { display: inline-block; padding: 2px 7px; border-radius: var(--radius-pill); background: rgba(255,255,255,.06); font-family: var(--font-mono); font-size: .68rem; white-space: nowrap; }
+    .pill.astra, .pill.sol, .pill.terra, .pill.luna { color: var(--green); border: 1px solid rgba(52,211,153,.25); } .pill.fable, .pill.sonnet { color: var(--primary); border: 1px solid rgba(255,107,53,.25); } .pill.opus { color: var(--secondary); border: 1px solid rgba(196,181,253,.25); } .pill.haiku { color: var(--yellow); border: 1px solid rgba(251,191,36,.25); }
+    .row-detail { display: none; padding: 14px 16px; border-top: 1px solid var(--border); background: rgba(34,211,238,.05); color: var(--fg-2); font-size: .82rem; }
+    .row-detail.visible { display: block; }
+    .row-detail strong { color: var(--accent-cyan); }
+    .source-trace { display: none; }
+    .source-trace.visible { display: grid; gap: 12px; }
+    .source-page { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-container); scroll-margin-top: 130px; }
+    .source-page.match { border-color: var(--accent-cyan); box-shadow: 0 0 0 1px rgba(34,211,238,.18), 0 0 28px rgba(34,211,238,.08); }
+    .source-page h3 { margin-bottom: 8px; font-family: var(--font-headline); font-size: 1rem; }
+    .source-page p { margin-bottom: 8px; color: var(--fg-2); font-size: .83rem; }
+    .source-page ul { margin: 0; padding-left: 20px; color: var(--fg-2); font-size: .8rem; }
+    .mode-message { display: none; margin: 0; color: var(--fg-muted); font-size: .78rem; }
+    .mode-message.visible { display: block; }
+    .economics-grid { width:100%; border-collapse:collapse; font-size:.78rem; }
+    .economics-grid th { padding:9px 10px; text-align:left; color:var(--fg-muted); border-bottom:1px solid var(--border-strong); font-family:var(--font-mono); font-size:.63rem; letter-spacing:.05em; text-transform:uppercase; }
+    .economics-grid td { padding:10px; border-bottom:1px solid var(--border); color:var(--fg-2); }
+    .economics-grid td:first-child { color:var(--fg-1); font-weight:650; }
+    .source-links { display: grid; gap: 9px; }
+    .source-link { display: flex; gap: 10px; align-items: start; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-container); color: var(--fg-2); text-decoration: none; font-size: .78rem; }
+    .source-link:hover { border-color: var(--accent-cyan); }
+    .source-link em { flex: 0 0 auto; color: var(--accent-cyan); font-style: normal; font-family: var(--font-mono); font-size: .65rem; }
+    footer { max-width: 1480px; margin: 0 auto; padding: 0 clamp(18px, 3vw, 36px) 42px; color: var(--fg-muted); font-size: .72rem; }
+    .toast { position: fixed; right: 22px; bottom: 22px; z-index: 50; transform: translateY(90px); padding: 10px 14px; border: 1px solid rgba(34,211,238,.4); border-radius: var(--radius-sm); background: #0b1426; color: var(--fg-1); box-shadow: var(--shadow-md); font-size: .78rem; transition: transform .2s ease; }
+    .toast.visible { transform: translateY(0); }
+    @media (max-width: 900px) { .intro, .work-surface, .model-station { grid-template-columns: 1fr; } .kpi-rail { grid-template-columns: repeat(2, 1fr); } .model-list { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 620px) { .command-bar__spacer { display: none; } .search { order: 4; width: 100%; min-width: 100%; } .kpi-rail, .charts-row { grid-template-columns: 1fr; } .ops-main { padding: 18px 14px; } .bench-row { grid-template-columns: 1fr; gap: 6px; } .bench-score { text-align: left; } .workflow { grid-template-columns: 1fr 1fr; gap: 16px; } .workflow-step:not(:last-child)::after { display: none; } .profile-grid { grid-template-columns: repeat(2,1fr); } .model-list { grid-template-columns:1fr; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
+    @media print { .command-bar, .filter-strip, .btn, .chip, .grid-toolbar { display: none !important; } body { background: white; color: #111827; } .panel, .kpi-cell, .source-page { box-shadow: none; break-inside: avoid; } }
+  </style>
+</head>
+<body>
+  <div class="ops-shell">
+    <header class="command-bar">
+      <div class="command-bar__title"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18M5.7 5.7l12.6 12.6M18.3 5.7 5.7 18.3"/></svg></span>Model Decision Console</div>
+      <span class="command-bar__period">V6 · 2026-09-20 · 8 models</span>
+      <span class="command-bar__spacer"></span>
+      <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="globalSearch" type="search" placeholder="업무, 모델, 검증 기준 검색" aria-label="업무와 모델 검색"></label>
+      <button class="btn" id="sourceToggle" type="button" aria-pressed="false">Source trace</button>
+      <button class="btn btn--primary" id="copyBrief" type="button">Copy brief</button>
+    </header>
+
+    <nav class="filter-strip" aria-label="모델 필터">
+      <span class="filter-label">Focus model</span>
+      <button class="chip active" data-model="all" type="button">All models</button>
+      <button class="chip" data-model="astra" type="button">Astra</button>
+      <button class="chip" data-model="sol" type="button">Sol</button>
+      <button class="chip" data-model="terra" type="button">Terra</button>
+      <button class="chip" data-model="luna" type="button">Luna</button>
+      <button class="chip" data-model="fable" type="button">Fable</button>
+      <button class="chip" data-model="opus" type="button">Opus</button>
+      <button class="chip" data-model="sonnet" type="button">Sonnet</button>
+      <button class="chip" data-model="haiku" type="button">Haiku</button>
+      <span class="filter-label" style="margin-left:10px">Evidence</span>
+      <button class="chip active" data-view="decision" type="button">Decision console</button>
+      <button class="chip" data-view="source" type="button">6-page source</button>
+    </nav>
+
+    <main class="ops-main">
+      <section class="intro" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">Operating policy · independent benchmarks · verification</p>
+          <h1 id="page-title">GPT-5.6 x Claude<br>8모델 실무 사용 매트릭스</h1>
+          <p>OpenAI의 Luna, Terra, Sol, Astra와 Claude의 Haiku, Sonnet, Opus, Fable을 개발 업무의 난이도, 검증 방식, 외부 벤치마크 기준으로 읽는 선택 화면입니다.</p>
+        </div>
+        <aside class="decision-panel" aria-label="현재 결론">
+          <div class="decision-panel__label">Operating policy</div>
+          <strong>8모델은 단일 순위가 아니라 실행 역할의 계층</strong>
+          <p>Luna/Haiku는 경량, Terra/Sonnet은 일상 구현, Sol/Opus는 복합 실행, Astra/Fable은 최고난도·장기 작업의 기본 경계입니다.</p>
+        </aside>
+      </section>
+
+      <section class="kpi-rail" aria-label="핵심 지표">
+        <article class="kpi-cell kpi-cell--primary"><div class="kpi-label">OpenAI hierarchy</div><strong class="kpi-value">4 tiers</strong><div class="kpi-sub">Luna → Terra → Sol → Astra</div></article>
+        <article class="kpi-cell" style="--kpi-accent:#ff6b35"><div class="kpi-label">Claude hierarchy</div><strong class="kpi-value">4 tiers</strong><div class="kpi-sub">Haiku → Sonnet → Opus → Fable</div></article>
+        <article class="kpi-cell" style="--kpi-accent:#c4b5fd"><div class="kpi-label">Top coding cluster</div><strong class="kpi-value">58.2 / 57.9</strong><div class="kpi-sub">Astra / Fable TB4 snapshot</div></article>
+        <article class="kpi-cell" style="--kpi-accent:#34d399"><div class="kpi-label">AA coverage</div><strong class="kpi-value">8 / 8</strong><div class="kpi-sub">Haiku 17 · Sonnet 38 · max effort</div></article>
+      </section>
+
+      <section class="work-surface">
+        <article class="panel" aria-labelledby="benchmark-title">
+          <div class="panel__header"><div><h2 class="panel__title" id="benchmark-title">Terminal-Bench 4.0 · 실제 terminal 개발 작업</h2><p class="panel__sub">66 tasks · model + agent + effort 구성의 independent leaderboard snapshot</p></div><span class="pill" style="color:var(--accent-cyan);border-color:rgba(34,211,238,.35)">INDEPENDENT</span></div>
+          <div class="panel__body">
+            <div class="bench-bars" id="benchmarkBars">
+              <div class="bench-row" data-models="astra"><div class="bench-row__label">Astra + Codex</div><div class="bench-track"><div class="bench-fill" style="--w:89.5%;--color:#34d399"></div></div><div class="bench-score">58.2% <span>±2.8</span></div></div>
+              <div class="bench-row" data-models="fable"><div class="bench-row__label">Fable 5.1 + Claude Code</div><div class="bench-track"><div class="bench-fill" style="--w:89.1%;--color:#ff6b35"></div></div><div class="bench-score">57.9% <span>±3.8</span></div></div>
+              <div class="bench-row" data-models="opus"><div class="bench-row__label">Opus 5 + Claude Code</div><div class="bench-track"><div class="bench-fill" style="--w:82.9%;--color:#c4b5fd"></div></div><div class="bench-score">53.9% <span>±3.2</span></div></div>
+              <div class="bench-row" data-models="sol"><div class="bench-row__label">Sol + Codex</div><div class="bench-track"><div class="bench-fill" style="--w:57.4%;--color:#2dd4bf"></div></div><div class="bench-score">37.3% <span>±3.8</span></div></div>
+              <div class="bench-row" data-models="terra"><div class="bench-row__label">Terra + Codex</div><div class="bench-track"><div class="bench-fill" style="--w:33.1%;--color:#86efac"></div></div><div class="bench-score">21.5% <span>±3.3</span></div></div>
+              <div class="bench-row" data-models="luna"><div class="bench-row__label">Luna + Codex</div><div class="bench-track"><div class="bench-fill" style="--w:26.6%;--color:#bef264"></div></div><div class="bench-score">17.3% <span>±2.8</span></div></div>
+              <div class="bench-row" data-models="sonnet"><div class="bench-row__label">Sonnet 5 + Claude Code</div><div class="bench-track"><div class="bench-fill" style="--w:19.1%;--color:#fda4af"></div></div><div class="bench-score">12.4% <span>±3.1</span></div></div>
+              <div class="bench-row" data-models="haiku"><div class="bench-row__label">Haiku 4.5</div><div class="bench-track"><div class="bench-fill" style="--w:0%;--color:#fcd34d"></div></div><div class="bench-score">not listed <span>TB4 snapshot</span></div></div>
+            </div>
+            <p class="chart-note"><strong>해석:</strong> 이 snapshot의 수치는 model + agent harness 구성 결과입니다. Astra/Fable의 0.3pp만으로 모델 우열을 단정하지 않으며, Haiku는 이 TB4 snapshot에 공개 listing이 없어 점수를 표시하지 않습니다.</p>
+          </div>
+        </article>
+        <aside class="panel" aria-labelledby="flags-title">
+          <div class="panel__header"><div><h2 class="panel__title" id="flags-title">Evidence status</h2><p class="panel__sub">근거 유형을 섞지 않는 읽기 규칙</p></div></div>
+          <div class="panel__body"><div class="flag-queue">
+            <div class="flag-item" style="--flag:#22d3ee"><span class="flag-dot"></span><div><strong>Independent benchmark</strong><p>Terminal-Bench는 model + agent harness 구성 결과입니다. 0.3pp만으로 모델 우열을 정하지 않습니다.</p></div></div>
+            <div class="flag-item" style="--flag:#fbbf24"><span class="flag-dot"></span><div><strong>Official vendor-reported</strong><p>공급자 평가는 capability와 setup 확인용입니다. 독립 순위의 대체 근거로 사용하지 않습니다.</p></div></div>
+            <div class="flag-item" style="--flag:#fb7185"><span class="flag-dot"></span><div><strong>Operating policy</strong><p>아래 매트릭스는 workflow heuristic입니다. 특정 repository 성공률을 예측하지 않습니다.</p></div></div>
+          </div></div>
+        </aside>
+      </section>
+
+      <section class="panel" aria-labelledby="model-station-title">
+        <div class="panel__header"><div><h2 class="panel__title" id="model-station-title">Model station</h2><p class="panel__sub">모델을 선택하면 실행 범위와 reviewer 역할을 즉시 비교합니다.</p></div></div>
+        <div class="panel__body"><div class="model-station">
+          <div class="model-list" role="tablist" aria-label="모델 선택">
+            <button class="model-button active" style="--model-color:#34d399" data-profile="astra" type="button" role="tab" aria-selected="true">GPT-6 Astra<span>highest complexity · Codex</span></button>
+            <button class="model-button" style="--model-color:#2dd4bf" data-profile="sol" type="button" role="tab" aria-selected="false">GPT-5.6 Sol<span>complex professional work</span></button>
+            <button class="model-button" style="--model-color:#86efac" data-profile="terra" type="button" role="tab" aria-selected="false">GPT-5.6 Terra<span>fast balanced work · Codex</span></button>
+            <button class="model-button" style="--model-color:#bef264" data-profile="luna" type="button" role="tab" aria-selected="false">GPT-5.6 Luna<span>cost-sensitive high volume</span></button>
+            <button class="model-button" style="--model-color:#ff6b35" data-profile="fable" type="button" role="tab" aria-selected="false">Claude Fable 5.1<span>long horizon · Claude Code</span></button>
+            <button class="model-button" style="--model-color:#c4b5fd" data-profile="opus" type="button" role="tab" aria-selected="false">Claude Opus 5<span>strong focused reasoning</span></button>
+            <button class="model-button" style="--model-color:#fda4af" data-profile="sonnet" type="button" role="tab" aria-selected="false">Claude Sonnet 5<span>balanced daily implementation</span></button>
+            <button class="model-button" style="--model-color:#fcd34d" data-profile="haiku" type="button" role="tab" aria-selected="false">Claude Haiku 4.5<span>fast lightweight work</span></button>
+          </div>
+          <div class="model-profile" id="modelProfile" style="--profile-color:#34d399" aria-live="polite"></div>
+        </div></div>
+      </section>
+
+      <section class="charts-row">
+        <article class="panel"><div class="panel__header"><div><h2 class="panel__title">Artificial Analysis composite</h2><p class="panel__sub">10개 혼합 평가의 최고 effort snapshot · Fable*은 fallback 포함 구성</p></div><span class="pill">analysis proxy</span></div><div class="panel__body"><div class="aa-table">
+          <div class="aa-row" data-models="astra"><span>Astra</span><div class="aa-track"><div class="aa-fill" style="--w:100%;--color:#34d399"></div></div><strong>53</strong></div>
+          <div class="aa-row" data-models="fable"><span>Fable*</span><div class="aa-track"><div class="aa-fill" style="--w:100%;--color:#ff6b35"></div></div><strong>53</strong></div>
+          <div class="aa-row" data-models="opus"><span>Opus</span><div class="aa-track"><div class="aa-fill" style="--w:96%;--color:#c4b5fd"></div></div><strong>51</strong></div>
+          <div class="aa-row" data-models="sol"><span>Sol</span><div class="aa-track"><div class="aa-fill" style="--w:89%;--color:#2dd4bf"></div></div><strong>47</strong></div>
+          <div class="aa-row" data-models="terra"><span>Terra</span><div class="aa-track"><div class="aa-fill" style="--w:79%;--color:#86efac"></div></div><strong>42</strong></div>
+          <div class="aa-row" data-models="sonnet"><span>Sonnet</span><div class="aa-track"><div class="aa-fill" style="--w:72%;--color:#fda4af"></div></div><strong>38</strong></div>
+          <div class="aa-row" data-models="luna"><span>Luna</span><div class="aa-track"><div class="aa-fill" style="--w:70%;--color:#bef264"></div></div><strong>37</strong></div>
+          <div class="aa-row" data-models="haiku"><span>Haiku</span><div class="aa-track"><div class="aa-fill" style="--w:32%;--color:#fcd34d"></div></div><strong>17</strong></div>
+        </div></div></article>
+        <article class="panel"><div class="panel__header"><div><h2 class="panel__title">검증 루프</h2><p class="panel__sub">모델 답변을 실행 증거로 닫는 최소 순서</p></div></div><div class="panel__body"><div class="workflow">
+          <div class="workflow-step"><strong>수용 기준</strong>재현 절차, 통과 조건, 금지할 변경을 고정합니다.</div>
+          <div class="workflow-step"><strong>Primary 실행</strong>코드·로그를 읽고 계획과 실제 diff를 분리합니다.</div>
+          <div class="workflow-step"><strong>반례 탐색</strong>다른 모델이 edge case와 누락된 test를 찾습니다.</div>
+          <div class="workflow-step"><strong>실행 결론</strong>단위·통합·E2E와 perf 재측정으로 확정합니다.</div>
+        </div></div></article>
+      </section>
+
+      <section class="panel" aria-labelledby="economics-title">
+        <div class="panel__header"><div><h2 class="panel__title" id="economics-title">Cost, latency, and modality</h2><p class="panel__sub">AA current max-effort rows. Cost is weighted benchmark task cost, not accepted-work spend.</p></div><span class="pill" style="color:var(--accent-cyan);border-color:rgba(34,211,238,.35)">ECONOMICS LAYER</span></div>
+        <div class="table-wrap"><table class="economics-grid"><thead><tr><th>Model</th><th>AA</th><th>Task cost</th><th>First chunk</th><th>Native input scope</th></tr></thead><tbody>
+          <tr><td>Astra</td><td>53</td><td>$3.26</td><td>260.42s</td><td>Text + image</td></tr>
+          <tr><td>Sol</td><td>47</td><td>$1.99</td><td>129.50s</td><td>Text + image</td></tr>
+          <tr><td>Terra</td><td>42</td><td>$1.40</td><td>211.05s</td><td>Text + image</td></tr>
+          <tr><td>Luna</td><td>37</td><td>$0.18</td><td>123.28s</td><td>Text + image</td></tr>
+          <tr><td>Fable 5.1*</td><td>53</td><td>$7.63</td><td>262.21s</td><td>Text + image</td></tr>
+          <tr><td>Opus 5</td><td>51</td><td>$5.86</td><td>56.84s</td><td>Text + image</td></tr>
+          <tr><td>Sonnet 5</td><td>38</td><td>$5.09</td><td>131.49s</td><td>Text + image</td></tr>
+          <tr><td>Haiku 4.5</td><td>17</td><td>$0.21</td><td>17.18s</td><td>Text + image</td></tr>
+        </tbody></table></div>
+        <div class="panel__body" style="padding-top:12px"><p class="chart-note" style="margin:0"><strong>모달리티 경계:</strong> 이 8모델 매트릭스는 text + image 입력을 기준으로 합니다. audio/video가 핵심이면 이 표에서 순위를 추정하지 말고 해당 입력을 지원하는 별도 후보를 동일 업무로 평가하세요.</p></div>
+      </section>
+
+      <section class="data-grid-section panel" id="matrix" aria-labelledby="matrix-title">
+        <div class="panel__header"><div><h2 class="panel__title" id="matrix-title">Primary matrix</h2><p class="panel__sub">업무를 누르면 primary와 independent reviewer의 역할을 엽니다. benchmark result가 아닌 operating policy입니다.</p></div><span class="pill" style="color:var(--primary);border-color:rgba(255,107,53,.35)">OPERATING POLICY</span></div>
+        <div class="grid-toolbar"><span class="filter-label">Current filter</span><strong id="activeFilter">All models</strong><span class="grid-count" id="gridCount">11 / 11 rows</span></div>
+        <div class="table-wrap"><table class="data-grid"><thead><tr><th>업무</th><th>Primary</th><th>Independent reviewer</th><th>운영 기준</th></tr></thead><tbody id="matrixBody"></tbody></table></div>
+        <div class="row-detail" id="rowDetail"></div>
+      </section>
+
+      <section class="source-trace" id="sourceTrace" aria-label="6-page source trace">
+        <article class="source-page" id="page-1"><p class="eyebrow">Page 1 · reading guide</p><h3>8모델 역할 구조</h3><p>OpenAI는 Luna, Terra, Sol, Astra 순으로, Claude는 Haiku, Sonnet, Opus, Fable 순으로 업무 난도와 자율 실행 범위를 구분합니다. 실제 repo, agent harness, tool 권한과 수용 기준이 결과를 바꿉니다.</p><ul><li>벤치마크는 출발점이며, 설계에는 단일 점수가 없습니다.</li><li>테스트는 생성량이 아니라 실패 재현, 수정, 회귀 방지까지 확인합니다.</li><li>고위험 변경은 모델 합의 대신 로그, diff, test, 배포 관측으로 확정합니다.</li></ul></article>
+        <article class="source-page" id="page-2"><p class="eyebrow">Page 2 · external benchmarks</p><h3>Terminal-Bench 4.0과 AA composite</h3><p>Terminal-Bench는 66개의 terminal engineering task 해결률을, Artificial Analysis는 10개 혼합 평가를 제공합니다. TB4는 Haiku 공개 listing이 없지만, AA current max snapshot은 Astra 53, Fable 53*, Opus 51, Sol 47, Terra 42, Sonnet 38, Luna 37, Haiku 17입니다.</p><ul><li>TB4: Astra 58.2 · Fable 57.9 · Opus 53.9 · Sol 37.3</li><li>TB4: Terra 21.5 · Luna 17.3 · Sonnet 12.4 · Haiku not listed</li><li>* Fable AA row는 fallback 포함 구성입니다.</li></ul></article>
+        <article class="source-page" id="page-3"><p class="eyebrow">Page 3 · primary matrix</p><h3>업무별 primary와 reviewer</h3><p>짧은 변경은 Luna/Haiku, 일반 구현은 Terra/Sonnet, 복합 구현은 Sol/Opus, 최고난도·장기 작업은 Astra/Fable을 중심으로 둡니다. 이 배치는 benchmark result가 아닌 operating policy입니다.</p><p>대규모 레거시 분석과 장기 마이그레이션은 Fable이 primary, Astra가 reviewer인 구성이 기본입니다.</p></article>
+        <article class="source-page" id="page-4"><p class="eyebrow">Page 4 · quick selection</p><h3>상향 순서</h3><p>문제가 어려워지면 즉시 가장 강한 모델로 옮기지 않습니다. 먼저 코드·로그·재현 조건을 보강하고, 그 다음 effort, 모델, reviewer 순으로 상향합니다.</p><ul><li>L1: Luna Mid / Haiku Low</li><li>L2: Terra High / Sonnet High</li><li>L3: Sol High / Opus High</li><li>L5: Astra Max / Fable Max + independent review</li></ul></article>
+        <article class="source-page" id="page-5"><p class="eyebrow">Page 5 · verification pattern</p><h3>작업별 최소 evidence</h3><p>설계에는 제약·대안·결정 이유와 실패 시나리오를, 코드 변경에는 diff·실행 결과와 관련 test를 남깁니다. RCA는 수정 전 실패와 수정 후 통과, 성능은 같은 환경의 재측정을 요구합니다.</p></article>
+        <article class="source-page" id="page-6"><p class="eyebrow">Page 6 · sources and limits</p><h3>출처와 해석 한계</h3><p>공개 leaderboard는 지속 갱신됩니다. 특정 repository 성공률이나 비공개 system prompt·tool set의 차이는 이 문서가 보장하지 않습니다. 중요한 채택은 동일 issue set 5 - 10개를 A/B 실행해 결정합니다.</p><div class="source-links">
+          <a class="source-link" href="https://snorkel.ai/leaderboard/terminal-bench-4-0/" target="_blank" rel="noreferrer"><em>INDEPENDENT</em><span>Terminal-Bench 4.0 · Snorkel AI / Harbor / Laude Institute</span></a>
+          <a class="source-link" href="https://artificialanalysis.ai/models/releases/comparisons/gpt-6-astra-vs-claude-fable-5-1" target="_blank" rel="noreferrer"><em>INDEPENDENT</em><span>Artificial Analysis · Intelligence Index comparison</span></a>
+          <a class="source-link" href="https://openai.com/index/gpt-6-astra/" target="_blank" rel="noreferrer"><em>VENDOR</em><span>OpenAI · GPT-6 Astra evaluation table</span></a>
+          <a class="source-link" href="https://developers.openai.com/api/docs/models" target="_blank" rel="noreferrer"><em>VENDOR</em><span>OpenAI · Luna, Terra, Sol, Astra model catalog</span></a>
+          <a class="source-link" href="https://www.anthropic.com/claude-fable-and-mythos-5-1" target="_blank" rel="noreferrer"><em>VENDOR</em><span>Anthropic · Claude Fable 5.1 evaluation setup</span></a>
+          <a class="source-link" href="https://www.anthropic.com/system-cards" target="_blank" rel="noreferrer"><em>VENDOR</em><span>Anthropic · Haiku, Sonnet, Opus, Fable system cards</span></a>
+        </div></article>
+      </section>
+      <p class="mode-message" id="noResults">현재 검색·필터 조건에 맞는 업무가 없습니다.</p>
+    </main>
+    <footer>How I read this: 8모델 구조에 AA task cost·first-chunk latency·input scope를 더했습니다. 외부 leaderboard와 공급자 발표 수치는 화면에서 구분하며, 실제 repository의 테스트 결과가 최종 판정 기준입니다.</footer>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script>
+    const profiles = {
+      astra: { name: 'GPT-6 Astra', color: '#34d399', kind: 'OpenAI · frontier execution', summary: '복잡한 구현, 다중 파일 변경, 장애 RCA와 실제 terminal 실행을 primary로 맡기기 좋은 선택입니다. 장기 작업에서 Fable과 사실상 동급 코딩군이므로, 고위험 작업은 Fable을 independent reviewer로 둡니다.', stats: [['Best fit', 'RCA · feature · security'], ['Effort', 'High → Max'], ['Reviewer', 'Fable xHigh / Max']] },
+      sol: { name: 'GPT-5.6 Sol', color: '#2dd4bf', kind: 'OpenAI · complex professional work', summary: '일반 구현보다 한 단계 깊은 복합 기능, 여러 파일 리팩터링, 테스트 설계의 primary로 적합합니다. Astra가 필요한지 판단하기 전에 명확한 수용 기준과 실행 로그를 먼저 보강하는 기본 상향 지점입니다.', stats: [['Best fit', 'Feature · refactor · test'], ['Effort', 'High → xHigh'], ['Reviewer', 'Opus or Sonnet']] },
+      terra: { name: 'GPT-5.6 Terra', color: '#86efac', kind: 'OpenAI · fast balanced work', summary: '짧고 명확한 구현, 구조화된 문서, 반복적인 보조 검증에 비용과 속도 균형이 좋습니다. Terminal-Bench 결과는 최상위군과 큰 간격이 있어, 복잡한 버그나 광범위한 리팩터링의 단독 담당은 피합니다.', stats: [['Best fit', 'Small changes · docs'], ['Effort', 'Mid → High'], ['Escalate when', 'root cause is unclear']] },
+      luna: { name: 'GPT-5.6 Luna', color: '#bef264', kind: 'OpenAI · high-volume efficiency', summary: '반복 변환, 짧은 요약, 명확한 타입·문법 확인처럼 비용 민감하고 고빈도인 업무에 맞습니다. 결과가 바로 실행·배포 경로를 바꾸면 Terra 이상으로 올리고 관련 test를 실행합니다.', stats: [['Best fit', 'Batch · summary · routine'], ['Effort', 'Low → Mid'], ['Escalate when', 'scope expands']] },
+      fable: { name: 'Claude Fable 5.1', color: '#ff6b35', kind: 'Anthropic · long-horizon exploration', summary: '모호한 아키텍처 설계, 대규모 레거시 분석, 장기 마이그레이션에서 primary로 적합합니다. Astra와 terminal coding 결과가 오차 범위 내로 가까워, 코딩 업무에서도 고위험 작업의 독립 검증자 역할이 강합니다.', stats: [['Best fit', 'Legacy · design · migration'], ['Effort', 'High → Max'], ['Reviewer', 'Astra xHigh / Max']] },
+      opus: { name: 'Claude Opus 5', color: '#c4b5fd', kind: 'Anthropic · focused reasoning', summary: '비용을 낮추면서 강한 단발 추론과 코드 경로 검토를 수행하는 대안입니다. 최신 Fable보다 장기 에이전트성은 낮지만, 리팩터링·성능 최적화의 reviewer로 실용적인 균형을 제공합니다.', stats: [['Best fit', 'Review · focused analysis'], ['Effort', 'Low → xHigh'], ['Use with', 'Astra or Terra primary']] }
+      ,sonnet: { name: 'Claude Sonnet 5', color: '#fda4af', kind: 'Anthropic · balanced daily implementation', summary: '요구사항 정리, 일상 기능 구현, 테스트 보강과 코드 리뷰에 균형 잡힌 역할입니다. 장기 탐색이나 불명확한 RCA에서는 Opus 또는 Fable로 상향하되, 먼저 로그·재현 조건을 보강합니다.', stats: [['Best fit', 'Daily feature · review'], ['Effort', 'Mid → High'], ['Escalate when', 'multi-step investigation']] },
+      haiku: { name: 'Claude Haiku 4.5', color: '#fcd34d', kind: 'Anthropic · fast lightweight work', summary: '짧은 질문, 요약, 문법과 타입 확인, 잘 분리된 작은 수정에 맞습니다. 현재 TB4 snapshot에는 공개 결과가 없으므로, 경량 역할의 실사용 검증은 작업 표본으로 확인해야 합니다.', stats: [['Best fit', 'Short questions · checks'], ['Effort', 'Low → Mid'], ['Escalate when', 'change has blast radius']] }
+    };
+    const rows = [
+      ['짧은 구현 / 타입 수정','Luna | Mid','Haiku | Low/Medium','빠르게 수정하고 기존 test만 실행','luna','haiku','변경이 작고 재현이 명확할 때만 Luna/Haiku로 닫습니다. 의존성이 넓거나 test가 불안정하면 Terra 또는 Sonnet으로 올립니다.'],
+      ['요구사항 정리 / 기술 비교','Terra | High','Sonnet | High','결정 기준과 반례를 문서화','terra','sonnet','결론보다 결정 기준, 제외 범위, 반례를 reviewer가 확인합니다.'],
+      ['신규 기능 구현','Sol | High','Sonnet | High','acceptance test를 먼저 고정','sol','sonnet','구현 전에 acceptance criteria를 적고, reviewer는 누락된 user flow와 edge case를 찾습니다.'],
+      ['여러 파일 리팩터링','Sol | xHigh','Opus | High','영향 범위와 회귀 suite 확인','sol','opus','계획과 실제 diff를 분리하고, 바뀐 경로와 의존성의 회귀 test를 실행합니다.'],
+      ['복잡한 버그 / 장애 RCA','Astra | xHigh/Max','Fable | xHigh','가설이 아니라 로그로 반증','astra','fable','원인 가설을 로그와 재현으로 반증합니다. 리뷰어는 대안 가설을 먼저 제시합니다.'],
+      ['테스트 설계 / 회귀 분석','Sol | xHigh','Sonnet | High','실패 재현 -> 최소 수정 -> 회귀','sol','sonnet','생성한 test가 아니라 수정 전 실패와 수정 후 통과를 증거로 남깁니다. 복잡한 원인은 Astra/Fable로 상향합니다.'],
+      ['성능 최적화','Astra | xHigh','Opus | xHigh','baseline / 변경 / 재측정 3점','astra','opus','측정 환경과 baseline을 고정하고, 변경 전후를 같은 조건에서 재측정합니다.'],
+      ['대규모 레거시 분석','Fable | xHigh/Max','Astra | xHigh','경로 추적 결과를 표본 검증','fable','astra','Fable의 장기 탐색 결과를 표본 코드 경로와 실제 query로 확인합니다.'],
+      ['장기 마이그레이션','Fable | xHigh/Max','Astra | High','작은 batch와 rollback 지점','fable','astra','작은 batch, checkpoint, rollback 지점을 먼저 설계한 뒤 실행합니다.'],
+      ['아키텍처 / 설계','Fable | High/xHigh','Astra | xHigh','대안·제약·실행계획을 분리','fable','astra','공개 설계 benchmark가 부족합니다. 산출물의 대안, 제약, 실패 모드와 실행계획을 검토합니다.'],
+      ['보안 / 배포 최종 검토','Astra | Max','Fable | Max','독립 리뷰 + 실제 검증 필수','astra','fable','두 모델의 합의는 충분하지 않습니다. 실제 검사·test·배포 관측이 최종 증거입니다.']
+    ];
+    let activeModel = 'all'; let activeQuery = ''; let sourceMode = false;
+    const el = id => document.getElementById(id);
+    const matrixBody = el('matrixBody'); const detail = el('rowDetail');
+    function modelPill(value, cls) { return `<span class="pill ${cls}">${value}</span>`; }
+    function renderProfile(key) {
+      const p = profiles[key]; el('modelProfile').style.setProperty('--profile-color', p.color);
+      el('modelProfile').innerHTML = `<div class="profile-top"><div><div class="profile-kind">${p.kind}</div><h3 class="profile-name">${p.name}</h3></div><span class="pill" style="border-color:${p.color};color:${p.color}">selected</span></div><p class="profile-summary">${p.summary}</p><div class="profile-grid">${p.stats.map(([label,value]) => `<div class="profile-stat"><span>${label}</span><strong>${value}</strong></div>`).join('')}</div>`;
+    }
+    function matches(row) { const flat = row.slice(0,6).join(' ').toLowerCase(); const modelOk = activeModel === 'all' || row[4] === activeModel || row[5] === activeModel; return modelOk && flat.includes(activeQuery); }
+    function renderGrid() {
+      const visible = rows.filter(matches); matrixBody.innerHTML = visible.map((r, i) => `<tr data-task="${rows.indexOf(r)}"><td class="task">${r[0]}</td><td>${modelPill(r[1],r[4])}</td><td>${modelPill(r[2],r[5])}</td><td>${r[3]}</td></tr>`).join('');
+      el('gridCount').textContent = `${visible.length} / ${rows.length} rows`; el('noResults').classList.toggle('visible', visible.length === 0 && !sourceMode); detail.classList.remove('visible');
+      matrixBody.querySelectorAll('tr').forEach(row => row.addEventListener('click', () => { const r = rows[Number(row.dataset.task)]; detail.innerHTML = `<strong>${r[0]}</strong><br>${r[6]}`; detail.classList.add('visible'); detail.scrollIntoView({behavior:'smooth',block:'nearest'}); }));
+    }
+    function renderSourceSearch() {
+      const pages = [...document.querySelectorAll('.source-page')]; let count = 0; let first = null;
+      pages.forEach(page => { const match = !activeQuery || page.innerText.toLowerCase().includes(activeQuery); page.hidden = !match; page.classList.toggle('match', Boolean(activeQuery) && match); if (match) { count += 1; if (!first) first = page; } });
+      if (sourceMode && activeQuery && first) first.scrollIntoView({behavior:'smooth',block:'start'});
+      if (sourceMode) el('noResults').classList.toggle('visible', count === 0);
+    }
+    function updateVisibility() {
+      document.querySelectorAll('[data-models]').forEach(node => { const ok = activeModel === 'all' || node.dataset.models.split(' ').includes(activeModel); node.style.opacity = ok ? '1' : '.22'; node.style.filter = ok ? 'none' : 'grayscale(1)'; });
+      document.querySelectorAll('.chip[data-model]').forEach(btn => btn.classList.toggle('active', btn.dataset.model === activeModel));
+      el('activeFilter').textContent = activeModel === 'all' ? 'All models' : profiles[activeModel].name;
+      renderGrid();
+    }
+    function showToast(message) { const toast = el('toast'); toast.textContent = message; toast.classList.add('visible'); clearTimeout(showToast.timeout); showToast.timeout = setTimeout(() => toast.classList.remove('visible'), 2200); }
+    document.querySelectorAll('.chip[data-model]').forEach(btn => btn.addEventListener('click', () => { activeModel = btn.dataset.model; updateVisibility(); }));
+    document.querySelectorAll('.model-button').forEach(btn => btn.addEventListener('click', () => { document.querySelectorAll('.model-button').forEach(x => { x.classList.toggle('active',x === btn); x.setAttribute('aria-selected',x === btn ? 'true' : 'false'); }); renderProfile(btn.dataset.profile); }));
+    el('globalSearch').addEventListener('input', event => { activeQuery = event.target.value.trim().toLowerCase(); renderGrid(); renderSourceSearch(); });
+    function setSourceMode(on) { sourceMode = on; el('sourceTrace').classList.toggle('visible', on); document.querySelectorAll('.ops-main > :not(.source-trace):not(.mode-message)').forEach(node => node.style.display = on ? 'none' : ''); el('sourceToggle').setAttribute('aria-pressed', String(on)); el('sourceToggle').textContent = on ? 'Decision console' : 'Source trace'; document.querySelectorAll('.chip[data-view]').forEach(btn => btn.classList.toggle('active', (on && btn.dataset.view === 'source') || (!on && btn.dataset.view === 'decision'))); if(on) { renderSourceSearch(); el('sourceTrace').scrollIntoView({behavior:'smooth',block:'start'}); } else renderGrid(); }
+    el('sourceToggle').addEventListener('click', () => setSourceMode(!sourceMode));
+    document.querySelectorAll('.chip[data-view]').forEach(btn => btn.addEventListener('click', () => setSourceMode(btn.dataset.view === 'source')));
+    el('copyBrief').addEventListener('click', async () => { const text = `# GPT-5.6 x Claude 8모델 실무 사용 매트릭스 v6\n\n- OpenAI: Luna → Terra → Sol → Astra. Claude: Haiku → Sonnet → Opus → Fable.\n- TB4 snapshot: Astra 58.2, Fable 57.9, Opus 53.9, Sol 37.3, Terra 21.5, Luna 17.3, Sonnet 12.4; Haiku not listed.\n- AA max: Astra 53, Fable 53 with fallback, Opus 51, Sol 47, Terra 42, Sonnet 38, Luna 37, Haiku 17.\n- Cost/task and first-chunk latency are benchmark measurements, not accepted-work spend.\n\nSources: Terminal-Bench 4.0, Artificial Analysis, OpenAI, Anthropic.`; try { await navigator.clipboard.writeText(text); showToast('Brief를 클립보드에 복사했습니다.'); } catch { showToast('브라우저 권한 때문에 복사하지 못했습니다.'); } });
+    renderProfile('astra'); renderGrid(); renderSourceSearch();
+  </script>
+</body>
+</html>

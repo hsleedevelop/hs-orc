@@ -1,13 +1,31 @@
 {
   "name": "hs-orchestrator",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "작업 1건을 분류 → primary·reviewer 두 슬롯 배정 → 하한선 검사 → 실제 CLI 엔진(claude/codex/cursor) 실행 → 증거로 종료하는 로컬 오케스트레이터",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hsleedevelop/hs-orc.git"
+  },
+  "homepage": "https://github.com/hsleedevelop/hs-orc#readme",
+  "bugs": "https://github.com/hsleedevelop/hs-orc/issues",
+  "keywords": [
+    "ai",
+    "agent",
+    "orchestrator",
+    "cli",
+    "claude",
+    "codex",
+    "cursor",
+    "router"
+  ],
   "private": true,
   "type": "module",
   "bin": {
     "hs-orc": "./bin/hs-orc.mjs"
   },
   "engines": {
-    "node": ">=22.6"
+    "node": ">=22.18"
   },
   "scripts": {
     "gen:matrix": "node scripts/gen-matrix.mjs",

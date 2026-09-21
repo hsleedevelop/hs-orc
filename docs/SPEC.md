@@ -57,7 +57,7 @@
 
 ## 2. 데이터 — 매트릭스
 
-출처: `/Users/hsonpro/Documents/Codex/2026-09-20/astra-terra-fable-opus-test/outputs/gpt-5-6-claude-practical-matrix-v6.html`
+출처: `data/matrix-source.html (저장소 안. 원본 v6 HTML 을 그대로 넣어 두어 누구나 `npm run matrix:check` 로 대조할 수 있다 — D-013)`
 원본 `rows` 배열과 `profiles` 객체가 진실이다. 아래 테이블은 그 전사이며, 불일치 시 원본이 이긴다.
 
 ### 2.1 모델 계층

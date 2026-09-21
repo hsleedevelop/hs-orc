@@ -12,8 +12,12 @@ import { createHash } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import path from 'node:path';
 
+// 원본 HTML 을 **저장소 안에** 둔다. 개인 절대경로를 기본값으로 두면 다른 머신에서
+// `matrix:check` 가 조용히 생략되고, 게이트 첫 단계가 no-op 이 된다 — D-013 의
+// "원본이 진실" 은 대조할 수 있을 때만 성립한다. 환경변수로 다른 원본을 지정할 수 있다.
 const DEFAULT_SOURCE =
-  '/Users/hsonpro/Documents/Codex/2026-09-20/astra-terra-fable-opus-test/outputs/gpt-5-6-claude-practical-matrix-v6.html';
+  process.env.HS_ORC_MATRIX_SOURCE ??
+  path.resolve(import.meta.dirname, '..', 'data', 'matrix-source.html');
 const DEFAULT_OUT = path.join(process.cwd(), 'data', 'matrix.json');
 
 /** 모델 계층 — SPEC §2.1. 벤더 판정의 근거이며 INV-1 이 여기에 기댄다. */
@@ -141,7 +145,7 @@ async function build(sourcePath) {
   return {
     $generated: {
       note: 'GENERATED — 수기 편집하지 않는다. `npm run gen:matrix` 로 재생성한다.',
-      source: sourcePath,
+      source: sourceLabel(sourcePath),
       sourceSha256: createHash('sha256').update(html).digest('hex'),
       generator: 'scripts/gen-matrix.mjs',
     },
@@ -154,6 +158,16 @@ async function build(sourcePath) {
     ladder: parseLadder(html),
   };
 }
+
+/**
+ * 산출물에 적는 출처 표기. 저장소 안이면 **상대경로**로 적는다 —
+ * 절대경로를 적으면 체크아웃 위치가 다른 머신에서 `--check` 가 거짓 실패한다(실측).
+ */
+const REPO_ROOT = path.resolve(import.meta.dirname, '..');
+const sourceLabel = (p) => {
+  const rel = path.relative(REPO_ROOT, p);
+  return rel && !rel.startsWith('..') ? rel : p;
+};
 
 const sourcePath = arg('--source', DEFAULT_SOURCE);
 const outPath = arg('--out', DEFAULT_OUT);

@@ -1,7 +1,7 @@
 {
   "$generated": {
     "note": "GENERATED — 수기 편집하지 않는다. `npm run gen:matrix` 로 재생성한다.",
-    "source": "/Users/hsonpro/Documents/Codex/2026-09-20/astra-terra-fable-opus-test/outputs/gpt-5-6-claude-practical-matrix-v6.html",
+    "source": "data/matrix-source.html",
     "sourceSha256": "85cc39b4a6a7932fdcdb7453665f55e5ee51c4f49f47ab2c3fe46fe0c6f3323c",
     "generator": "scripts/gen-matrix.mjs"
   },
