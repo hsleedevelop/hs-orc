@@ -13,8 +13,7 @@ import { loadLimits } from '../data/limits.ts';
 import { createExecutor } from '../core/executor.ts';
 import { PingpongSession } from '../core/modes/pingpong.ts';
 import { runLoop } from '../core/modes/loop.ts';
-import { runGraph, type GraphNode } from '../core/modes/graph.ts';
-import { assign } from '../core/assign.ts';
+import { parseGraphSpec, runGraph, type GraphSpec } from '../core/modes/graph.ts';
 import { appendDecision, decisionLogPath } from '../core/decision-log.ts';
 import { firstLine, secondLine } from '../core/decide.ts';
 import { storeRun } from '../core/run-store.ts';
@@ -56,6 +55,7 @@ interface Parsed {
 const USAGE = `사용법: hs-orc "<작업>" [--task R01] [--effort high] [--reviewer-effort high]
        [--gate <${GATE_CHECKS.join('|')}>]... [--no-classify-llm] [--run] [--write] [--timeout 600] [--raw]
        [--mode once|pingpong|loop|graph] [--max-iterations N] [--budget 20] [--graph <nodes.json>]
+       (그래프 스펙 예제: examples/graph-nodes.json)
        [--verify "[phase:]<명령>"]... [--evidence <file.json>] [--crash-test]
        [--no-reviewer] [--side primary|reviewer]`;
 
@@ -249,21 +249,8 @@ async function main(): Promise<void> {
 
   if (args.mode === 'graph') {
     if (!args.graphFile) throw new Error('--mode graph 에는 --graph <nodes.json> 이 필요하다.');
-    const spec = JSON.parse(readFileSync(args.graphFile, 'utf8')) as {
-      nodes: { id: string; prompt: string; task: string; dependsOn?: string[]; writes?: string[]; onFailure?: GraphNode['onFailure'] }[];
-    };
-    const nodes: GraphNode[] = spec.nodes.map((n) => {
-      const row = matrix.assignments.find((a) => a.id === n.task);
-      if (!row) throw new Error(`${n.id}: 그런 업무 행이 없다: ${n.task}`);
-      return {
-        id: n.id,
-        prompt: n.prompt,
-        plan: assign(matrix, catalog, row),
-        dependsOn: n.dependsOn ?? [],
-        writes: n.writes ?? [],
-        onFailure: n.onFailure ?? 'skip-dependents',
-      };
-    });
+    // 형식의 소유자는 Core 다. 예제는 examples/graph-nodes.json.
+    const nodes = parseGraphSpec(matrix, catalog, JSON.parse(readFileSync(args.graphFile, 'utf8')) as GraphSpec);
     // 그래프의 비용은 위에 찍힌 분류 결과가 아니라 **노드별 배정의 합**이다.
     // 실행 전에 노드별로 보여준다 (SPEC §7).
     const total = nodes.reduce((sum, n) => sum + n.plan.cost.primaryUsd, 0);

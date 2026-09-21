@@ -1,5 +1,5 @@
 /**
- * 실행별 원시 로그 보존 (PLAN S6-2, SPEC §3.6).
+ * 실행별 원시 로그 보존 (PLAN S6-2, SPEC §3.7).
  * **파싱 실패가 원본 손실로 이어지지 않게** 어댑터가 보존한 raw 를 그대로 디스크에 남긴다.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';

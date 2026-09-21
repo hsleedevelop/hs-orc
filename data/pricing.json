@@ -1,0 +1,8 @@
+{
+  "$note": "수기 파일이다. 모델 id 별 **단가 선언**이다 — 제품은 단가를 추측하지 않는다 (SPEC §2.5 근거 등급).",
+  "$why": "claude 만 total_cost_usd 를 돌려준다. codex·cursor 는 토큰만 주므로 단가가 없으면 AA 벤치마크 추정치로 누적된다. 여기에 단가를 적으면 그 모델의 비용이 `metered`(측정 토큰 × 선언 단가)로 바뀐다.",
+  "$howto": "키는 엔진이 실제로 받은 모델 id (engines.json 의 id/idTemplate 결과). 값은 100만 토큰당 USD. cachedInput·cacheWrite 는 생략하면 input 단가를 쓴다.",
+  "$example": { "gpt-5.6-luna": { "inputPerMTok": 0.25, "outputPerMTok": 2, "cachedInputPerMTok": 0.025 } },
+  "$empty": "비워 두는 것이 기본값이다. 선언하지 않은 모델은 계속 estimate 로 누적되고, 누적 표시에 그 사실이 드러난다.",
+  "models": {}
+}

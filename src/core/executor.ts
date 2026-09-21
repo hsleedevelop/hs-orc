@@ -7,13 +7,16 @@
 import type { Matrix } from '../data/matrix.ts';
 import type { Engines } from '../data/engines.ts';
 import { createAdapter } from '../adapters/engine.ts';
+import { meteredUsd } from '../data/pricing.ts';
 import type { ResolvedSlot } from './assign.ts';
 
 export interface SlotRun {
   readonly ok: boolean;
   readonly text: string;
-  /** 엔진이 실제 비용을 돌려줬으면 그 값. 없으면 undefined 이고 호출자가 추정치로 대체한다. */
+  /** 엔진이 실제 비용을 돌려줬으면 그 값. 없으면 undefined 이고 호출자가 아래 순서로 대체한다. */
   readonly actualUsd?: number;
+  /** 측정 토큰 × 선언 단가 (D-027). `data/pricing.json` 에 그 모델이 없으면 undefined 다. */
+  readonly meteredUsd?: number;
   readonly durationMs: number;
 }
 
@@ -50,10 +53,13 @@ export function createExecutor(
       ...(write ? { write: true } : {}),
     });
     const result = await handle.result;
+    // 엔진이 비용을 안 주면 토큰으로 계산해 본다 — 단가 선언이 없으면 undefined 로 남는다.
+    const metered = result.costUsd === undefined ? meteredUsd(slot.modelId, result.usage) : undefined;
     return {
       ok: result.outcome === 'ok',
       text: result.text,
       ...(result.costUsd !== undefined ? { actualUsd: result.costUsd } : {}),
+      ...(metered !== undefined ? { meteredUsd: metered } : {}),
       durationMs: result.durationMs,
     };
   };

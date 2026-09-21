@@ -49,7 +49,7 @@ describe('프로세스 실행', () => {
     assert.equal(result.text, '끝');
   });
 
-  it('파싱이 실패해도 원본 stdout/stderr 를 보존한다 (SPEC §3.6)', async () => {
+  it('파싱이 실패해도 원본 stdout/stderr 를 보존한다 (SPEC §3.7)', async () => {
     const result = await sh(`printf 'garbage\\n'; printf 'boom\\n' >&2`).result;
     assert.match(result.rawStdout, /garbage/);
     assert.match(result.rawStderr, /boom/);

@@ -75,7 +75,7 @@ export async function runDuo(
   const { primary: primarySlot, reviewer: reviewerSlot } = plan.slots;
 
   const primary = await execute(primarySlot, task);
-  budget.charge(`${primarySlot.label}·${primarySlot.effort}`, primary.actualUsd, estimateUsd(matrix, primarySlot));
+  budget.charge(`${primarySlot.label}·${primarySlot.effort}`, primary.actualUsd, estimateUsd(matrix, primarySlot), primary.meteredUsd);
 
   if (options.skipReviewer === true || !primary.ok) {
     // primary 가 실패했으면 검증할 산출물이 없다. reviewer 를 돌려 돈만 쓰지 않는다.
@@ -86,7 +86,7 @@ export async function runDuo(
   if (budget.exceeded()) return { primary, review: null, verdict: 'unknown', evidence: [] };
 
   const review = await execute(reviewerSlot, reviewPrompt(plan, task, primary.text));
-  budget.charge(`${reviewerSlot.label}·${reviewerSlot.effort}`, review.actualUsd, estimateUsd(matrix, reviewerSlot));
+  budget.charge(`${reviewerSlot.label}·${reviewerSlot.effort}`, review.actualUsd, estimateUsd(matrix, reviewerSlot), review.meteredUsd);
 
   const verdict = review.ok ? parseVerdict(review.text) : 'unknown';
   const evidence: Evidence[] =

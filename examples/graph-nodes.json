@@ -1,0 +1,27 @@
+{
+  "$note": "`hs-orc \"<아무 작업>\" --mode graph --graph examples/graph-nodes.json --run` 로 돈다. 노드마다 독립 배정이라 한 그래프 안에서 모델이 섞인다 (SPEC §6.3).",
+  "$fields": "id·prompt·task 는 필수. task 는 매트릭스 행 id(R01~R11). dependsOn 은 선행 노드, writes 는 이 노드가 쓰는 파일(비면 '모른다'로 보고 병렬에서 뺀다), onFailure 는 fail-fast | skip-dependents | continue (기본 skip-dependents).",
+  "nodes": [
+    {
+      "id": "survey",
+      "task": "R02",
+      "prompt": "src/adapters/ 의 세 엔진 어댑터가 서로 다르게 처리하는 지점을 표로 정리하라. 코드를 고치지 마라.",
+      "writes": [],
+      "onFailure": "fail-fast"
+    },
+    {
+      "id": "types",
+      "task": "R01",
+      "prompt": "위 조사에서 나온 어댑터 차이를 src/adapters/types.ts 주석에 반영하라.",
+      "dependsOn": ["survey"],
+      "writes": ["src/adapters/types.ts"]
+    },
+    {
+      "id": "docs",
+      "task": "R02",
+      "prompt": "같은 조사 결과를 docs/SPEC.md §3 에 반영하라.",
+      "dependsOn": ["survey"],
+      "writes": ["docs/SPEC.md"]
+    }
+  ]
+}

@@ -6,6 +6,9 @@ import { ClassifyError, classify } from '../classify.ts';
 import { AssignError, assign, crossVendorPair } from '../assign.ts';
 import { GATE_CHECKS, evaluateGate } from '../gatekeeper.ts';
 import { route, routeWithFallback } from '../pipeline.ts';
+import { parseGraphSpec, type GraphSpec } from '../modes/graph.ts';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 const matrix = loadMatrix();
 const catalog = loadEngines();
@@ -141,5 +144,43 @@ describe('routeWithFallback (D-026)', () => {
     assert.equal(r.fallback?.outcome, 'failed');
     assert.match(r.fallback?.line ?? '', /\+\$0\.001/, '유료 호출 시도는 비용 표기와 함께 알려야 한다.');
     assert.match(r.fallback?.line ?? '', /시도하지 못했다/);
+  });
+});
+
+/**
+ * 커밋된 그래프 예제가 **실제로 파싱되는지** 본다.
+ * 형식이 usage 줄에만 있고 예제가 없으면, 문서가 틀려도 아무도 모른다(PLAN S9 후속).
+ */
+describe('examples/graph-nodes.json', () => {
+  const spec = JSON.parse(
+    readFileSync(path.resolve(import.meta.dirname, '..', '..', '..', 'examples', 'graph-nodes.json'), 'utf8'),
+  ) as GraphSpec;
+
+  it('예제가 그대로 파싱되고 노드마다 독립 배정된다', () => {
+    const nodes = parseGraphSpec(matrix, catalog, spec);
+    assert.equal(nodes.length, 3);
+    assert.deepEqual(nodes.map((n) => n.id), ['survey', 'types', 'docs']);
+    // R02 와 R01 은 다른 모델로 간다 — 한 그래프에서 모델이 섞인다는 것이 §6.3 의 요점이다.
+    assert.notEqual(nodes[0]?.plan.slots.primary.model, nodes[1]?.plan.slots.primary.model);
+  });
+
+  it('선언을 생략한 자리는 문서가 말한 기본값으로 채워진다', () => {
+    const nodes = parseGraphSpec(matrix, catalog, spec);
+    assert.deepEqual(nodes[0]?.dependsOn, []);
+    assert.equal(nodes[1]?.onFailure, 'skip-dependents');
+  });
+
+  it('없는 업무 행을 가리키면 던진다 — 조용히 아무 행이나 고르지 않는다', () => {
+    assert.throws(
+      () => parseGraphSpec(matrix, catalog, { nodes: [{ id: 'x', prompt: 'p', task: 'R99' }] }),
+      /그런 업무 행이 없다/,
+    );
+  });
+
+  it('id 가 겹치면 던진다 — 의존성 그래프가 말이 안 된다', () => {
+    assert.throws(
+      () => parseGraphSpec(matrix, catalog, { nodes: [{ id: 'a', prompt: 'p', task: 'R01' }, { id: 'a', prompt: 'q', task: 'R02' }] }),
+      /노드 id 가 겹친다/,
+    );
   });
 });

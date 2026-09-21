@@ -62,6 +62,12 @@ hs-orc --help
 | `--no-classify-llm` | 규칙이 빗나갔을 때의 LLM 분류 폴백을 끈다 |
 | `--no-reviewer` | reviewer 생략 (끈 것이지 통과가 아니다) |
 
+그래프 모드는 커밋된 예제가 있다:
+
+```bash
+hs-orc "<작업>" --mode graph --graph examples/graph-nodes.json --run
+```
+
 ## 증거 없이는 완료가 아니다
 
 `"성공했습니다"`는 증거가 아니다. 행마다 요구 증거가 정해져 있고, 그것이 모였을 때만 `outcome: ok`로 닫힌다. 안 모이면 `unverified`로 남는다 — 실패가 아니라 **아직 모른다**는 뜻이다.
@@ -88,25 +94,39 @@ hs-orc --help
 
 ## 비용 표기를 믿는 법
 
-실행 **전에** 항상 비용을 보여주지만, **대부분 추정치다.** `claude`만 `total_cost_usd`를 돌려주고 `codex`·`cursor`는 토큰만 준다 — 단가표가 없어 벤치마크 값으로 누적한다. 누적 표시에 `(추정 포함)`이 붙으면 그 뜻이다. 기본 상한은 $20이고 넘으면 다음 슬롯을 시작하지 않는다.
+실행 **전에** 항상 비용을 보여준다. 다만 그 숫자의 출처가 셋이고, **섞이면 섞였다고 적는다.**
+
+| 출처 | 뜻 | 누적 표시 |
+|---|---|---|
+| `actual` | 엔진이 돌려준 값 (`claude`의 `total_cost_usd`) | 실측 |
+| `metered` | 측정 토큰 × **선언 단가** — 벤더 청구액이 아니다 | 토큰×선언단가 |
+| `estimate` | AA 벤치마크 작업당 비용 | 추정 |
+
+`codex`·`cursor`는 토큰만 주므로 기본은 `estimate`다. `data/pricing.json`에 단가를 적으면 그 모델이 `metered`로 바뀐다 — **저장소 기본값은 비어 있다. 제품은 단가를 추측하지 않는다.**
+
+```json
+{ "models": { "gpt-5.6-luna": { "inputPerMTok": 0.25, "outputPerMTok": 2 } } }
+```
+
+기본 상한은 $20이고 넘으면 다음 슬롯을 시작하지 않는다.
 
 ## 알려진 한계
 
 - **분류는 결정적이지 않다.** 규칙 표가 빗나가면 Haiku·low가 분류만 재시도하는데(+$0.001 내외, 돌 때마다 표기한다), 같은 문장이 실행마다 다른 행으로 갈 수 있다. 승인 게이트가 마지막 방어선이다.
-- **비용은 대부분 추정이다** (위 참조).
-- **`--mode graph`의 노드 스펙에 커밋된 예제가 없다.** 형식은 `--help`의 usage 줄에 있다.
+- **비용은 단가를 선언하기 전까지 추정이다** (위 참조).
+- **`--mode graph`는 [`examples/graph-nodes.json`](examples/graph-nodes.json)을 보면 된다.** 그 파일이 실제로 파싱되는지는 테스트가 고정한다.
 - **primary는 워크스페이스 안에서만 쓴다.** `codex -s workspace-write` / `claude --permission-mode acceptEdits` / `cursor-agent --force`를 쓰고, 그보다 넓게 여는 값(`danger-full-access`·`bypassPermissions`)은 선언하지 않는다.
 
 ## 개발
 
 ```bash
-npm run gate        # matrix:check → type-check → lint → test (187 tests)
+npm run gate        # matrix:check → type-check → lint → test (201 tests)
 npm run gen:matrix  # data/matrix-source.html → data/matrix.json 재생성
 ```
 
 `data/matrix.json`은 **생성물이다.** 진실은 `data/matrix-source.html`이고, 수기 편집하면 `matrix:check`가 게이트 첫 단계에서 막는다. 행을 늘리려면 원본 HTML을 고치고 재생성한다.
 
-설계 문서: [`docs/PRD.md`](docs/PRD.md) · [`docs/SPEC.md`](docs/SPEC.md) · [`docs/PLAN.md`](docs/PLAN.md) · [`docs/DECISIONS.md`](docs/DECISIONS.md)(D-001~D-026, 기각한 대안과 이유 포함).
+설계 문서: [`docs/PRD.md`](docs/PRD.md) · [`docs/SPEC.md`](docs/SPEC.md) · [`docs/PLAN.md`](docs/PLAN.md) · [`docs/DECISIONS.md`](docs/DECISIONS.md)(D-001~D-027, 기각한 대안과 이유 포함).
 
 ## 라이선스
 

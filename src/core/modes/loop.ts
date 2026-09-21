@@ -103,6 +103,7 @@ export async function runLoop(
       `#${iteration} Executor ${plan.slots.primary.label}`,
       run.actualUsd,
       estimateUsd(matrix, plan.slots.primary),
+      run.meteredUsd,
     );
 
     // Evaluator — reviewer 슬롯. 같은 모델이면 자기 채점이 된다 (D-003).

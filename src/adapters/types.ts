@@ -38,7 +38,7 @@ export interface RunResult {
   readonly usage?: Usage;
   readonly costUsd?: number;
   readonly durationMs: number;
-  /** 파싱과 무관하게 보존한다 (SPEC §3.6) — 파싱 실패가 원본 손실로 이어지면 안 된다. */
+  /** 파싱과 무관하게 보존한다 (SPEC §3.7) — 파싱 실패가 원본 손실로 이어지면 안 된다. */
   readonly rawStdout: string;
   readonly rawStderr: string;
   readonly unparsedLines: readonly string[];

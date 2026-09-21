@@ -57,7 +57,7 @@ export class PingpongSession {
     this.turns += 1;
 
     const run = await this.execute(slot, input.prompt);
-    const charge = this.budget.charge(`${slot.label}·${slot.effort}`, run.actualUsd, estimateUsd(this.matrix, slot));
+    const charge = this.budget.charge(`${slot.label}·${slot.effort}`, run.actualUsd, estimateUsd(this.matrix, slot), run.meteredUsd);
 
     const record = this.journal.append({
       index: this.turns,

@@ -10,7 +10,8 @@ import type { Matrix } from '../../data/matrix.ts';
 import { Budget, BudgetExceeded } from '../budget.ts';
 import { Journal } from '../journal.ts';
 import { estimateUsd, type SlotExecutor } from '../executor.ts';
-import type { AssignmentPlan } from '../assign.ts';
+import { assign, type AssignmentPlan } from '../assign.ts';
+import type { Engines } from '../../data/engines.ts';
 
 export type Propagation = 'fail-fast' | 'skip-dependents' | 'continue';
 
@@ -26,6 +27,48 @@ export interface GraphNode {
 
 export class GraphError extends Error {
   override name = 'GraphError';
+}
+
+/** `--graph <nodes.json>` 의 파일 형식. 커밋된 예제는 `examples/graph-nodes.json` 이다. */
+export interface GraphSpec {
+  readonly nodes: readonly {
+    readonly id: string;
+    readonly prompt: string;
+    /** 매트릭스 행 id (R01~R11). **노드마다 독립 배정**이라 그래프 안에서 모델이 섞인다. */
+    readonly task: string;
+    readonly dependsOn?: readonly string[];
+    readonly writes?: readonly string[];
+    readonly onFailure?: Propagation;
+  }[];
+}
+
+/**
+ * 스펙 JSON → 배정이 끝난 노드. **셸이 아니라 여기가 이 형식의 소유자다** —
+ * 셸에 두면 형식을 테스트로 고정할 수가 없고, 실제로 커밋된 예제가 없었다(PLAN S9 후속).
+ */
+export function parseGraphSpec(matrix: Matrix, catalog: Engines, spec: GraphSpec): GraphNode[] {
+  // 입력은 파일에서 온 JSON 이라 타입을 믿을 수 없다. 형태를 확인한 뒤 타입을 되붙인다
+  // (`Array.isArray` 는 readonly 배열을 any[] 로 좁혀 버려 이후가 전부 unsafe 가 된다).
+  const raw: unknown = (spec as { nodes?: unknown } | undefined)?.nodes;
+  if (!Array.isArray(raw) || raw.length === 0) throw new GraphError('그래프 스펙에 nodes 배열이 없다.');
+  const nodes = raw as unknown as GraphSpec['nodes'];
+
+  const seen = new Set<string>();
+  return nodes.map((n) => {
+    if (!n.id || !n.prompt || !n.task) throw new GraphError(`노드에 id·prompt·task 가 다 있어야 한다: ${JSON.stringify(n)}`);
+    if (seen.has(n.id)) throw new GraphError(`노드 id 가 겹친다: ${n.id}`);
+    seen.add(n.id);
+    const row = matrix.assignments.find((a) => a.id === n.task);
+    if (!row) throw new GraphError(`${n.id}: 그런 업무 행이 없다: ${n.task}`);
+    return {
+      id: n.id,
+      prompt: n.prompt,
+      plan: assign(matrix, catalog, row),
+      dependsOn: n.dependsOn ?? [],
+      writes: n.writes ?? [],
+      onFailure: n.onFailure ?? 'skip-dependents',
+    };
+  });
 }
 
 export type GraphStopReason = 'completed' | 'max-nodes' | 'budget-exceeded' | 'failed-fast';
@@ -169,6 +212,7 @@ export async function runGraph(
           `${node.id} ${node.plan.slots.primary.label}`,
           run.actualUsd,
           estimateUsd(matrix, node.plan.slots.primary),
+          run.meteredUsd,
         );
         journal.append({
           index: (index += 1), unit: '노드', model: node.plan.slots.primary.label,

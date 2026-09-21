@@ -1,11 +1,13 @@
 /**
  * 누적 비용 추적과 상한 (D-017).
  *
- * 비용에는 두 출처가 있고 **섞어 표시하지 않는다** (SPEC §2.5 근거 등급과 같은 이유):
+ * 비용에는 세 출처가 있고 **섞어 표시하지 않는다** (SPEC §2.5 근거 등급과 같은 이유):
  *  - `actual`   — 엔진이 돌려준 값. 지금은 claude 만 `total_cost_usd` 를 준다.
- *  - `estimate` — 매트릭스의 AA 벤치마크 작업당 비용. codex·cursor 는 이쪽뿐이다.
+ *  - `metered`  — 엔진이 보고한 **측정 토큰** × `data/pricing.json` 의 **선언 단가** (D-027).
+ *                 벤더가 청구한 금액이 아니다. 단가 선언이 없으면 이 출처는 안 생긴다.
+ *  - `estimate` — 매트릭스의 AA 벤치마크 작업당 비용. 위 둘이 없을 때의 마지막 수단이다.
  */
-export type CostSource = 'actual' | 'estimate';
+export type CostSource = 'actual' | 'metered' | 'estimate';
 
 export interface Charge {
   readonly label: string;
@@ -37,12 +39,17 @@ export class Budget {
     return Number(this.charges.reduce((sum, c) => sum + c.usd, 0).toFixed(6));
   }
 
-  /** 실측값이 있으면 그것을, 없으면 추정치를 쓴다. 어느 쪽인지 반드시 기록한다. */
-  charge(label: string, actualUsd: number | undefined, estimateUsd: number): Charge {
+  /**
+   * 우선순위는 **actual > metered > estimate** 다 (인자 순서가 아니라 이 순서다).
+   * 어느 출처를 썼는지 반드시 기록한다 — 섞인 것을 하나로 뭉치면 누적 표시가 거짓이 된다.
+   */
+  charge(label: string, actualUsd: number | undefined, estimateUsd: number, meteredUsd?: number): Charge {
     const charge: Charge =
       actualUsd !== undefined
         ? { label, usd: actualUsd, source: 'actual' }
-        : { label, usd: estimateUsd, source: 'estimate' };
+        : meteredUsd !== undefined
+          ? { label, usd: meteredUsd, source: 'metered' }
+          : { label, usd: estimateUsd, source: 'estimate' };
     this.charges.push(charge);
     return charge;
   }
@@ -65,8 +72,17 @@ export class Budget {
     return this.charges.some((c) => c.source === 'estimate');
   }
 
+  /** 섞인 출처를 **actual > metered > estimate** 순으로. 하나뿐이면 길이 1 이다. */
+  get sources(): readonly CostSource[] {
+    const order: CostSource[] = ['actual', 'metered', 'estimate'];
+    return order.filter((s) => this.charges.some((c) => c.source === s));
+  }
+
   summary(): string {
-    const mixed = this.hasEstimates ? ' (추정 포함)' : '';
+    const LABEL: Record<CostSource, string> = { actual: '실측', metered: '토큰×선언단가', estimate: '추정' };
+    const kinds = this.sources;
+    // 출처가 하나뿐이면 굳이 적지 않는다. 섞였을 때 **무엇이 섞였는지**가 중요하다.
+    const mixed = kinds.length > 1 ? ` (${kinds.map((k) => LABEL[k]).join('+')})` : this.hasEstimates ? ' (추정 포함)' : '';
     return `$${this.spentUsd.toFixed(4)} / $${this.limitUsd}${mixed}`;
   }
 }
