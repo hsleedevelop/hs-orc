@@ -23,5 +23,10 @@ build/
 # 실행별 원시 로그
 .hs-orc/
 
+# 에이전트 도구가 저장소 **안에** 만든 워크트리 (415MB). D-028 이 기각한 배치의 실례다 —
+# 이 저장소 자신이 그렇게 돼 있었다. `git add .` 한 번이면 저장소가 끝난다.
+# `.claude/handoffs/` 는 세션 인계 기록이라 남긴다 — 여기서 무시하지 않는다.
+.claude/worktrees/
+
 # GUI 렌더러 번들 (생성물)
 src/shell/gui/renderer/bundle.js
