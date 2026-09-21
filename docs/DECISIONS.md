@@ -605,9 +605,11 @@ GUI 를 `process.cwd()` 에서 떼어내면서, CLI·TUI 에도 같은 전환을
 **영향**
 `GuiService.workdir` 가 작업 폴더의 **유일한 소유자**다. 이 클래스 안에서 `process.cwd()` 를 다시 읽는 곳이 생기면 화면의 폴더와 실행 폴더가 갈린다 — 가장 위험한 종류의 버그라 테스트로 고정했다.
 
-**남은 어긋남**: `core/classify-llm.ts` 는 분류 CLI 를 여전히 `process.cwd()` 에서 띄운다. 읽기 전용이라 영향은 작지만 GUI 의 폴더 전환과 어긋난다. Core 라 D-001 에 따라 GUI 작업에서 손대지 않았다 — **미해결이다**(Q9).
+분류기(`core/classify-llm.ts`)도 같은 폴더에서 돈다. 처음에는 여기만 `process.cwd()` 로 남아 있었다(Q9) — 읽기 전용이라 오동작은 아니지만 **화면이 말하는 폴더와 실제로 띄운 폴더가 갈린다.** `cwd` 를 `routeWithFallback` 의 옵션으로 올려 GUI 만 넘긴다. 기본값이 `process.cwd()` 라 CLI·TUI 는 그대로다.
 
-**상태** 확정 — 2026-09-21
+**이것은 D-001 위반이 아니다.** Core 가 UI 를 아는 것이 아니라, **숨어 있던 전역 의존(`process.cwd()`)을 인자로 드러낸 것**이다. 방향이 반대다 — Core 는 더 순수해졌다.
+
+**상태** 확정 — 2026-09-21. Q9 는 2026-09-22 에 닫았다.
 
 ---
 
@@ -623,4 +625,4 @@ GUI 를 `process.cwd()` 에서 떼어내면서, CLI·TUI 에도 같은 전환을
 | ~~Q6~~ | ~~Cursor `-fast` 사용 조건~~ → **D-023 확정** (모델별 opt-in, 없으면 던진다) | — |
 | ~~Q7~~ | ~~v2 GUI 기술 선택~~ → **D-021 확정** (Electron + React) | — |
 | ~~Q8~~ | ~~규칙 분류기가 실제 작업 문장을 놓친다~~ → **D-026 확정** (기본 폴백 + 비용 명시) | — |
-| Q9 | `core/classify-llm.ts` 의 분류 CLI 가 `process.cwd()` 에서 돈다 — GUI 폴더 전환(D-029)과 어긋난다 | 없음 (읽기 전용이라 오동작은 아니다) |
+| ~~Q9~~ | ~~`core/classify-llm.ts` 의 분류 CLI 가 `process.cwd()` 에서 돈다~~ → **D-029 에 흡수** (`cwd` 를 `routeWithFallback` 옵션으로, 기본은 `process.cwd()`) | — |

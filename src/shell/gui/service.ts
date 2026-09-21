@@ -125,6 +125,8 @@ export class GuiService {
     const write = options.write === true;
     if (!task.trim()) return runView(null, task, { write });
     const routed = await routeWithFallback(loadMatrix(), loadEngines(), task, {
+      // 분류기도 이 폴더에서 돈다 (D-029) — 분류만 옛 폴더에 남으면 화면과 실행이 갈린다.
+      cwd: this.workdir,
       ...(options.classifyLlm === undefined ? {} : { classifyLlm: options.classifyLlm }),
     });
     return runView(routed.result, task, { write, ...(routed.fallback ? { notes: [routed.fallback.line] } : {}) });
@@ -195,6 +197,7 @@ export class GuiService {
     const matrix = loadMatrix();
     const catalog = loadEngines();
     const routed = await routeWithFallback(matrix, catalog, payload.task, {
+      cwd: this.workdir,
       ...(payload.classifyLlm === undefined ? {} : { classifyLlm: payload.classifyLlm }),
     });
     const result = routed.result;

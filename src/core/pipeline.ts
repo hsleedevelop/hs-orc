@@ -73,6 +73,12 @@ export interface RoutedWithFallback {
 export interface FallbackOptions extends PipelineOptions {
   /** 기본 **켜짐** (D-026). 규칙 표가 평범한 작업 문장을 놓치기 때문이다(PLAN S9-2). */
   readonly classifyLlm?: boolean;
+  /**
+   * 분류기를 띄울 폴더 (D-029). 기본은 `process.cwd()` — CLI·TUI 는 그대로 두면 된다.
+   * 폴더를 바꿀 수 있는 셸(GUI)만 넘긴다. Core 가 UI 를 아는 것이 아니라,
+   * **숨어 있던 전역 의존을 인자로 드러낸 것**이다.
+   */
+  readonly cwd?: string;
 }
 
 const TRY_LINE = '규칙 무매치 → Haiku·low 로 분류만 재시도 (+$0.001 내외 · --no-classify-llm 으로 끈다)';
@@ -93,7 +99,7 @@ export async function routeWithFallback(
   if (result.stage !== 'unclassified' || options.classifyLlm === false) return { result, fallback: null };
 
   try {
-    const guessed = await classifyWithModel(matrix, catalog, task);
+    const guessed = await classifyWithModel(matrix, catalog, task, options.cwd === undefined ? {} : { cwd: options.cwd });
     if (!guessed) return { result, fallback: { outcome: 'none', line: `${TRY_LINE} → 맞는 행 없음` } };
     return {
       result: route(matrix, catalog, task, { ...options, taskId: guessed.id, reasonLabel: 'Haiku·low 분류' }),
