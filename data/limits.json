@@ -4,5 +4,7 @@
   "budgetRationale": "최고 조합(Fable+Astra $10.89) 2사이클이면 상한에 닿는다. 사고는 한 자릿수 사이클에서 멈춘다 (D-017).",
   "maxIterations": 8,
   "maxNodes": 24,
-  "runTimeoutMs": 900000
+  "runTimeoutMs": 900000,
+  "tokenBudget": 2000000,
+  "tokenBudgetRationale": "구독제에서는 금액 상한이 아무것도 막지 않는다 (D-030) — total_cost_usd 조차 청구되지 않는다. 실제로 희소한 자원은 사용량 한도이고, 그에 비례하는 것이 토큰이다. 200만 토큰은 첫 실사용 (R01 두 슬롯, 수만 토큰) 기준 수십 사이클 규모다. 사고는 그 전에 멈춘다."
 }

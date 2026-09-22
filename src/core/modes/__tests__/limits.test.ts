@@ -7,8 +7,8 @@ import assert from 'node:assert/strict';
 import { loadMatrix } from '../../../data/matrix.ts';
 import { loadEngines } from '../../../data/engines.ts';
 import { loadLimits } from '../../../data/limits.ts';
-import { assign } from '../../assign.ts';
-import { BudgetExceeded } from '../../budget.ts';
+import { assign, type AssignmentPlan } from '../../assign.ts';
+import { BudgetExceeded, TokenBudgetExceeded } from '../../budget.ts';
 import type { SlotExecutor } from '../../executor.ts';
 import { PingpongSession } from '../pingpong.ts';
 import { runLoop } from '../loop.ts';
@@ -21,6 +21,15 @@ const limits = loadLimits();
 const row = (id: string) => matrix.assignments.find((a) => a.id === id) as (typeof matrix.assignments)[number];
 /** R10 = Fable($7.63) + Astra($3.26). 두 사이클이면 $20 상한에 닿는다 (D-017). */
 const planR10 = assign(matrix, catalog, row('R10'));
+
+/**
+ * 금액 상한은 **청구되는 요금제에서만** 의미가 있다 (D-030).
+ * 기본 카탈로그는 세 엔진 전부 구독제라, 금액으로 막히는지 보려면 api 로 바꿔야 한다.
+ */
+const asApi = (p: AssignmentPlan): AssignmentPlan => ({
+  ...p,
+  slots: { ...p.slots, primary: { ...p.slots.primary, plan: 'api' }, reviewer: { ...p.slots.reviewer, plan: 'api' } },
+});
 /** R01 = Luna($0.18) + Haiku($0.21). 싸서 반복 상한이 먼저 걸린다. */
 const planR01 = assign(matrix, catalog, row('R01'));
 
@@ -28,6 +37,14 @@ let calls = 0;
 const fakeExec: SlotExecutor = (_slot, prompt) => {
   calls += 1;
   return Promise.resolve({ ok: true, text: `ran:${prompt}`, rawStdout: '', rawStderr: '', durationMs: 1 });
+};
+/** 호출마다 1,000 토큰을 보고한다 — 구독제에서 실제로 닳는 자원이 이것이다 (D-030). */
+const countingExec: SlotExecutor = (_slot, prompt) => {
+  calls += 1;
+  return Promise.resolve({
+    ok: true, text: `ran:${prompt}`, rawStdout: '', rawStderr: '', durationMs: 1,
+    usage: { inputTokens: 900, outputTokens: 100, cachedInputTokens: 0, cacheWriteTokens: 0 },
+  });
 };
 const failingExec: SlotExecutor = () =>
   Promise.resolve({ ok: false, text: 'boom', rawStdout: '', rawStderr: 'boom', durationMs: 1 });
@@ -46,7 +63,7 @@ describe('기본 상한값', () => {
 
 describe('/pingpong — 비용 상한 (턴 상한은 없다, D-015)', () => {
   it('상한에 닿으면 다음 턴을 시작하지 않는다', async () => {
-    const session = new PingpongSession(matrix, planR10, fakeExec, limits.budgetUsd);
+    const session = new PingpongSession(matrix, asApi(planR10), fakeExec, limits.budgetUsd);
     await session.turn({ prompt: 'a', side: 'primary' }); // $7.63
     await session.turn({ prompt: 'b', side: 'reviewer' }); // +$3.26 = $10.89
     await session.turn({ prompt: 'c', side: 'primary' }); // +$7.63 = $18.52
@@ -57,6 +74,19 @@ describe('/pingpong — 비용 상한 (턴 상한은 없다, D-015)', () => {
     assert.equal(session.turnCount, 4, '상한 초과 턴은 시작조차 하지 않아야 한다');
   });
 
+  it('구독제에서는 토큰 상한이 턴을 멈춘다 — 금액 상한은 걸리지 않는다', async () => {
+    // 기본 카탈로그(전부 구독제) 그대로. 금액은 넉넉하고 토큰만 빡빡하다.
+    const session = new PingpongSession(matrix, planR10, countingExec, 1000, 2500);
+    await session.turn({ prompt: 'a', side: 'primary' });   // 1,000
+    await session.turn({ prompt: 'b', side: 'reviewer' });  // 2,000
+    await session.turn({ prompt: 'c', side: 'primary' });   // 3,000 > 2,500
+
+    assert.equal(session.budget.exceeded(), false, '구독제 금액은 아무것도 막지 않는다');
+    assert.equal(session.budget.tokensExceeded(), true);
+    await assert.rejects(() => session.turn({ prompt: 'd', side: 'reviewer' }), TokenBudgetExceeded);
+    assert.equal(session.turnCount, 3, '상한 초과 턴은 시작조차 하지 않아야 한다');
+  });
+
   it('턴 수 자체에는 상한이 없다 — 사용자 승인이 그 자리를 대신한다', async () => {
     const session = new PingpongSession(matrix, planR01, fakeExec, limits.budgetUsd);
     for (let i = 0; i < 20; i += 1) await session.turn({ prompt: `t${i}`, side: 'primary' });
@@ -65,7 +95,7 @@ describe('/pingpong — 비용 상한 (턴 상한은 없다, D-015)', () => {
   });
 
   it('자동으로 슬롯을 교대하지 않는다 — 제안만 하고 멈춘다', async () => {
-    const session = new PingpongSession(matrix, planR10, fakeExec, limits.budgetUsd);
+    const session = new PingpongSession(matrix, asApi(planR10), fakeExec, limits.budgetUsd);
     const turn = await session.turn({ prompt: 'a', side: 'primary' });
     assert.match(turn.suggestion, /Astra/);
     assert.equal(session.turnCount, 1);
@@ -89,12 +119,22 @@ describe('/loop — 반복 상한과 비용 상한', () => {
   });
 
   it('반복 상한 전에 비용 상한이 걸리면 그쪽에서 멈춘다', async () => {
-    const result = await runLoop(matrix, planR10, fakeExec, components, {
+    const result = await runLoop(matrix, asApi(planR10), fakeExec, components, {
       goal: 'g', maxIterations: 100, budgetUsd: limits.budgetUsd,
     });
     assert.equal(result.stopReason, 'budget-exceeded');
     assert.ok(result.iterations < 100);
     assert.ok(result.budget.spentUsd >= limits.budgetUsd);
+  });
+
+  it('구독제에서는 토큰 상한이 반복을 멈춘다 — 예외로 죽지 않고 정상 중단이다', async () => {
+    const result = await runLoop(matrix, planR10, countingExec, components, {
+      goal: 'g', maxIterations: 100, budgetUsd: 1000, tokenBudget: 2500,
+    });
+    assert.equal(result.stopReason, 'budget-exceeded');
+    assert.ok(result.iterations < 100, '반복 상한이 아니라 토큰 상한에서 멈춰야 한다');
+    assert.equal(result.budget.exceeded(), false, '구독제 금액은 아무것도 막지 않는다');
+    assert.equal(result.budget.tokensExceeded(), true);
   });
 
   it('최대 반복 수가 없으면 아예 돌지 않는다', async () => {

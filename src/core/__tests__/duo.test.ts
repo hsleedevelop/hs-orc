@@ -7,9 +7,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadMatrix } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
-import { assign } from '../assign.ts';
+import { assign, type AssignmentPlan } from '../assign.ts';
 import { Budget } from '../budget.ts';
-import type { SlotExecutor } from '../executor.ts';
+import type { SlotExecutor, SlotRun } from '../executor.ts';
 import { parseVerdict, reviewPrompt, runDuo } from '../duo.ts';
 
 const matrix = loadMatrix();
@@ -18,12 +18,30 @@ const row = (id: string) => matrix.assignments.find((a) => a.id === id)!;
 const planR01 = assign(matrix, catalog, row('R01'));   // Luna $0.18 + Haiku $0.21
 const planR10 = assign(matrix, catalog, row('R10'));   // Fable $7.63 + Astra $3.26
 
+/**
+ * 금액 상한은 **청구되는 요금제에서만** 의미가 있다 (D-030).
+ * 기본 카탈로그는 세 엔진 전부 구독제라, 금액으로 막히는지 보려면 api 로 바꿔야 한다.
+ */
+const asApi = (p: AssignmentPlan): AssignmentPlan => ({
+  ...p,
+  slots: {
+    ...p.slots,
+    primary: { ...p.slots.primary, plan: 'api' },
+    reviewer: { ...p.slots.reviewer, plan: 'api' },
+  },
+});
+
 /** 슬롯별 호출을 기록하는 실행기 — "누가 돌았나"가 이 파일의 관심사다. */
-const spy = (reply: (label: string) => { ok: boolean; text: string }) => {
+const spy = (reply: (label: string) => { ok: boolean; text: string; usage?: SlotRun['usage'] }) => {
   const calls: { label: string; prompt: string }[] = [];
   const exec: SlotExecutor = (slot, prompt) => {
     calls.push({ label: slot.label, prompt });
-    return Promise.resolve({ ...reply(slot.label), rawStdout: '', rawStderr: '', durationMs: 1 });
+    const r = reply(slot.label);
+    // exactOptionalPropertyTypes: usage 는 **없거나 값이 있거나**다. `undefined` 를 실어 보내지 않는다.
+    return Promise.resolve({
+      ok: r.ok, text: r.text, rawStdout: '', rawStderr: '', durationMs: 1,
+      ...(r.usage ? { usage: r.usage } : {}),
+    });
   };
   return { calls, exec };
 };
@@ -78,9 +96,23 @@ describe('reviewer 를 돌리지 않는 경우', () => {
   it('primary 만으로 비용 상한을 넘기면 reviewer 를 시작하지 않는다', async () => {
     const { calls, exec } = spy(() => ({ ok: true, text: 'PASS' }));
     // Fable $7.63 하나로 이미 상한 $5 초과.
-    const duo = await runDuo(matrix, planR10, exec, 't', new Budget(5));
+    const duo = await runDuo(matrix, asApi(planR10), exec, 't', new Budget(5));
     assert.deepEqual(calls.map((c) => c.label), ['Fable']);
     assert.equal(duo.review, null);
+  });
+
+  it('구독제에서는 **토큰 상한**이 그 자리를 대신한다 — 금액은 아무것도 막지 않는다', async () => {
+    const { calls, exec } = spy(() => ({
+      ok: true, text: 'PASS',
+      usage: { inputTokens: 900, outputTokens: 100, cachedInputTokens: 0, cacheWriteTokens: 0 },
+    }));
+    // 금액 상한은 넉넉하다. 기본 카탈로그가 전부 구독제라 애초에 걸리지도 않는다.
+    const budget = new Budget(1000, 1000);
+    const duo = await runDuo(matrix, planR01, exec, 't', budget);
+    assert.deepEqual(calls.map((c) => c.label), ['Luna'], 'primary 만으로 토큰 상한에 닿으면 reviewer 를 시작하지 않는다');
+    assert.equal(duo.review, null);
+    assert.equal(budget.exceeded(), false, '금액으로 막힌 것이 아니다');
+    assert.equal(budget.tokensExceeded(), true);
   });
 
   it('--no-reviewer 로 끄면 끈 것이지 통과가 아니다', async () => {

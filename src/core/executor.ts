@@ -7,7 +7,7 @@
 import type { Matrix } from '../data/matrix.ts';
 import type { Engines } from '../data/engines.ts';
 import { createAdapter } from '../adapters/engine.ts';
-import { meteredUsd } from '../data/pricing.ts';
+import { meteredUsd, type TokenCounts } from '../data/pricing.ts';
 import type { ResolvedSlot } from './assign.ts';
 
 export interface SlotRun {
@@ -26,6 +26,11 @@ export interface SlotRun {
   readonly actualUsd?: number;
   /** 측정 토큰 × 선언 단가 (D-027). `data/pricing.json` 에 그 모델이 없으면 undefined 다. */
   readonly meteredUsd?: number;
+  /**
+   * 엔진이 보고한 토큰 (D-030). **구독제에서 실제로 희소한 자원이 이것이다** — 돈이 아니다.
+   * 엔진이 보고하지 않으면 undefined 다. 0 으로 채우면 "공짜로 돌았다" 가 되어 상한이 거짓이 된다.
+   */
+  readonly usage?: TokenCounts;
   readonly durationMs: number;
 }
 
@@ -71,6 +76,7 @@ export function createExecutor(
       rawStderr: result.rawStderr,
       ...(result.costUsd !== undefined ? { actualUsd: result.costUsd } : {}),
       ...(metered !== undefined ? { meteredUsd: metered } : {}),
+      ...(result.usage !== undefined ? { usage: result.usage } : {}),
       durationMs: result.durationMs,
     };
   };

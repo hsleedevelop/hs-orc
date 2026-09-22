@@ -7,7 +7,7 @@
  * - 부분 실패 전파는 노드마다 선언한다: fail-fast / skip-dependents / continue.
  */
 import type { Matrix } from '../../data/matrix.ts';
-import { Budget, BudgetExceeded } from '../budget.ts';
+import { Budget, BudgetExceeded, TokenBudgetExceeded } from '../budget.ts';
 import { Journal } from '../journal.ts';
 import { estimateUsd, type SlotExecutor } from '../executor.ts';
 import { assign, type AssignmentPlan } from '../assign.ts';
@@ -85,6 +85,8 @@ export interface GraphResult {
 export interface GraphOptions {
   readonly maxNodes: number;
   readonly budgetUsd: number;
+  /** 생략하면 토큰 상한을 걸지 않는다 (D-030). 구독제에서는 이쪽만 실제로 막는다. */
+  readonly tokenBudget?: number;
 }
 
 /** 위상 정렬. 순환이면 던진다 — 실행 전에 부른다. */
@@ -151,7 +153,7 @@ export async function runGraph(
   const layers = topoSort(nodes);
 
   const journal = new Journal();
-  const budget = new Budget(options.budgetUsd);
+  const budget = new Budget(options.budgetUsd, options.tokenBudget ?? 0);
   const skipped: string[] = [];
   const batches: string[][] = [];
   const failed = new Set<string>();
@@ -180,7 +182,7 @@ export async function runGraph(
       try {
         budget.assertCanContinue();
       } catch (error) {
-        if (error instanceof BudgetExceeded) {
+        if (error instanceof BudgetExceeded || error instanceof TokenBudgetExceeded) {
           stopReason = 'budget-exceeded';
           break outer;
         }
@@ -213,7 +215,9 @@ export async function runGraph(
           run.actualUsd,
           estimateUsd(matrix, node.plan.slots.primary),
           run.meteredUsd,
+          node.plan.slots.primary.plan,
         );
+        budget.countTokens(run.usage);
         journal.append({
           index: (index += 1), unit: '노드', model: node.plan.slots.primary.label,
           effort: node.plan.slots.primary.effort, outcome: run.ok ? 'ok' : 'failed',

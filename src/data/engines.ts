@@ -13,9 +13,20 @@ export type EffortStyle =
   | { readonly kind: 'config'; readonly flag: string; readonly key: string }
   | { readonly kind: 'modelSuffix' };
 
+/**
+ * 이 엔진을 **무슨 요금제로 쓰는가** (D-030).
+ *
+ * 제품이 알아낼 수 없다 — 같은 CLI 를 구독제로도 API 키로도 쓴다. 그래서 선언이다.
+ * `subscription` 이면 `total_cost_usd`(actual) 와 토큰×단가(metered) 가 **청구되지 않는다**:
+ * API 로 썼다면 들었을 환산액이다. 누적 상한이 무엇을 막는지가 이 값에 달려 있다.
+ */
+export type BillingPlan = 'subscription' | 'api';
+
 export interface EngineSpec {
   /** 앞에서부터 탐색한다. cursor 는 `cursor-cli` → `cursor-agent` 폴백 (D-005). */
   readonly binaries: readonly string[];
+  /** **선택이 아니다.** 빠지면 금액 표시가 청구인지 환산인지 말할 수 없다. */
+  readonly plan: BillingPlan;
   readonly promptArgv: readonly string[];
   readonly modelFlag: string;
   readonly effort: EffortStyle;
