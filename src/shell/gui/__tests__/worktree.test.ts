@@ -5,7 +5,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createWorktree, listWorktrees, removeWorktree, repoRoot, samePath, worktreesRoot } from '../worktree.ts';
@@ -104,6 +104,16 @@ describe('워크트리', () => {
     writeFileSync(path.join(made.dir, 'untracked.txt'), 'x', 'utf8');
     assert.throws(() => removeWorktree(dir, made.dir), /worktree remove 실패/);
     assert.equal(existsSync(made.dir), true);
+  });
+
+  it('실행 기록이 남아 있으면 거절한다 — 증거를 조용히 버리지 않는다', () => {
+    const dir = repo();
+    const made = createWorktree(dir, 'evidence');
+    mkdirSync(path.join(made.dir, '.hs-orc', 'runs', '0922-0858-275'), { recursive: true });
+    writeFileSync(path.join(made.dir, '.hs-orc', 'runs', '0922-0858-275', '01-Luna.stdout'), '{"raw":1}', 'utf8');
+
+    assert.throws(() => removeWorktree(dir, made.dir), /실행 기록 1건이 남아 있다/);
+    assert.equal(existsSync(made.dir), true, '거절했으면 폴더도 그대로여야 한다');
   });
 
   it('본체는 지울 수 없다', () => {

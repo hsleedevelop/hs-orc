@@ -68,3 +68,37 @@ describe('쓰기 권한은 primary 슬롯만 받는다 (D-025)', () => {
     assert.doesNotMatch(argvOf('claude'), /acceptEdits/);
   });
 });
+
+/**
+ * SPEC §3.7 — 파싱 실패가 **원본 손실로 이어지지 않는다.**
+ *
+ * 어댑터는 원래부터 raw 를 보존했지만 `SlotRun` 에 그 자리가 없어 executor 경계에서 버려졌고,
+ * 셸은 남은 `text` 를 "원시 로그" 라는 이름으로 디스크에 썼다. codex·cursor 의 토큰 보고가
+ * 통째로 사라진 이유가 그것이다(2026-09-22 첫 실사용). 이 테스트가 그 경계를 고정한다.
+ */
+describe('원시 출력은 파싱과 무관하게 보존된다 (SPEC §3.7)', () => {
+  const garbage = '{ 이건 JSON 이 아니다\n또 한 줄';
+
+  it('파싱이 통째로 실패해도 stdout 원본이 그대로 올라온다', async () => {
+    const file = path.join(fakeDir, 'claude');
+    writeFileSync(file, `#!/bin/sh\nprintf '%s' '${garbage}'\nprintf '%s' 'stderr 한 줄' >&2\nexit 0\n`, 'utf8');
+    chmodSync(file, 0o755);
+
+    const run = await createExecutor(catalog, fakeDir, 10_000)(plan.slots.reviewer, 'R');
+    assert.equal(run.text, '', '파싱된 텍스트는 비어야 한다 — 그래야 이 테스트가 raw 를 보는 것이다');
+    assert.equal(run.rawStdout, garbage, 'text 가 아니라 **원본**이 보존돼야 한다');
+    assert.equal(run.rawStderr, 'stderr 한 줄');
+  });
+
+  it('정상 응답에서도 raw 는 파싱 결과가 아니라 원본이다 — 토큰 보고가 여기 실려 온다', async () => {
+    const line = JSON.stringify({ type: 'result', is_error: false, result: 'ok', usage: { input_tokens: 11, output_tokens: 5 } });
+    const file = path.join(fakeDir, 'claude');
+    writeFileSync(file, `#!/bin/sh\ncat <<'JSONL'\n${line}\nJSONL\n`, 'utf8');
+    chmodSync(file, 0o755);
+
+    const run = await createExecutor(catalog, fakeDir, 10_000)(plan.slots.reviewer, 'R');
+    assert.equal(run.text, 'ok');
+    assert.match(run.rawStdout, /input_tokens/, '사용량이 raw 에 없으면 단가 선언(D-027)이 소급 계산될 수 없다');
+    assert.notEqual(run.rawStdout, run.text);
+  });
+});

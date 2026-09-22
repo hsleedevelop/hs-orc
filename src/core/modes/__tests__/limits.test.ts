@@ -27,9 +27,10 @@ const planR01 = assign(matrix, catalog, row('R01'));
 let calls = 0;
 const fakeExec: SlotExecutor = (_slot, prompt) => {
   calls += 1;
-  return Promise.resolve({ ok: true, text: `ran:${prompt}`, durationMs: 1 });
+  return Promise.resolve({ ok: true, text: `ran:${prompt}`, rawStdout: '', rawStderr: '', durationMs: 1 });
 };
-const failingExec: SlotExecutor = () => Promise.resolve({ ok: false, text: 'boom', durationMs: 1 });
+const failingExec: SlotExecutor = () =>
+  Promise.resolve({ ok: false, text: 'boom', rawStdout: '', rawStderr: 'boom', durationMs: 1 });
 
 describe('기본 상한값', () => {
   it('limits.json 의 기본 누적 비용 상한은 $20 이다 (D-017)', () => {

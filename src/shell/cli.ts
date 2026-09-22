@@ -307,15 +307,15 @@ async function main(): Promise<void> {
   let stored = '';
   try {
     stored = storeRun(decision.id, 1, primary.label, {
-      rawStdout: duo.primary.text,
-      rawStderr: '',
+      rawStdout: duo.primary.rawStdout,
+      rawStderr: duo.primary.rawStderr,
       meta: { slot: 'primary', outcome: run.outcome, durationMs: duo.primary.durationMs, costUsd: duo.primary.actualUsd, modelId: primary.modelId },
     }).dir;
     // reviewer 산출물도 실행별로 남긴다 — 독립 검증 기록이 사라지면 "검증했다"를 증명할 수 없다.
     if (duo.review) {
       storeRun(decision.id, 2, reviewer.label, {
-        rawStdout: duo.review.text,
-        rawStderr: '',
+        rawStdout: duo.review.rawStdout,
+        rawStderr: duo.review.rawStderr,
         meta: { slot: 'reviewer', verdict: duo.verdict, durationMs: duo.review.durationMs, costUsd: duo.review.actualUsd, modelId: reviewer.modelId },
       });
     }

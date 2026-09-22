@@ -12,7 +12,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -184,6 +184,9 @@ export interface RemoveResult {
  *   - 본체 작업 트리는 못 지운다.
  *   - `--force` 를 쓰지 않는다. 커밋 안 한 변경이 있으면 git 이 거절하고, 그 말을 그대로 올린다.
  *   - 브랜치는 `git branch -d`(머지된 것만) 로만 지운다. 거절당하면 남기고 그렇다고 말한다.
+ *   - **실행 기록이 남아 있으면 거절한다.** 산출물은 cwd 기준으로 쌓이므로(`bin/hs-orc.mjs`)
+ *     워크트리를 지우면 그 안의 `.hs-orc/runs/` 도 같이 사라진다. "증거로 종료" 하는 제품이
+ *     증거를 조용히 버리면 안 된다 — 2026-09-22 에 실제로 첫 실사용 원시 로그를 이렇게 잃었다.
  */
 export function removeWorktree(cwd: string, target: string): RemoveResult {
   const items = listWorktrees(cwd);
@@ -191,6 +194,16 @@ export function removeWorktree(cwd: string, target: string): RemoveResult {
   if (found === undefined) throw new Error(`이 저장소의 워크트리가 아니다: ${target}`);
   if (found.main) throw new Error('본체 작업 트리는 지울 수 없다');
   if (found.locked) throw new Error(`잠긴 워크트리다 — git worktree unlock 이 먼저다: ${found.dir}`);
+
+  // 증거가 먼저다. git 이 dirty 를 거절하는 것과 같은 자리에서 같은 방식으로 막는다.
+  const runs = path.join(found.dir, '.hs-orc', 'runs');
+  const kept = existsSync(runs) ? readdirSync(runs) : [];
+  if (kept.length > 0) {
+    throw new Error(
+      `실행 기록 ${kept.length}건이 남아 있다: ${runs}\n` +
+        '지우면 그 사이클의 원시 로그와 판정 근거가 사라진다. 옮기거나 지운 뒤 다시 한다.',
+    );
+  }
 
   const repo = items[0]?.dir ?? cwd;
   const removed = git(repo, ['worktree', 'remove', found.dir]);
