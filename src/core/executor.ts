@@ -13,6 +13,15 @@ import type { ResolvedSlot } from './assign.ts';
 export interface SlotRun {
   readonly ok: boolean;
   readonly text: string;
+  /**
+   * 어댑터가 보존한 **원본** 출력 (SPEC §3.7). `text` 는 파싱 결과고 이것은 그 전이다.
+   *
+   * **선택 필드가 아니다.** 예전에는 이 자리가 아예 없어서 셸이 `text` 를 "원시 로그"라는
+   * 이름으로 디스크에 썼고, codex·cursor 의 토큰 보고(`turn.completed`)가 통째로 사라졌다
+   * (2026-09-22 첫 실사용에서 드러났다). 타입이 강제해야 같은 실수가 다시 안 생긴다.
+   */
+  readonly rawStdout: string;
+  readonly rawStderr: string;
   /** 엔진이 실제 비용을 돌려줬으면 그 값. 없으면 undefined 이고 호출자가 아래 순서로 대체한다. */
   readonly actualUsd?: number;
   /** 측정 토큰 × 선언 단가 (D-027). `data/pricing.json` 에 그 모델이 없으면 undefined 다. */
@@ -58,6 +67,8 @@ export function createExecutor(
     return {
       ok: result.outcome === 'ok',
       text: result.text,
+      rawStdout: result.rawStdout,
+      rawStderr: result.rawStderr,
       ...(result.costUsd !== undefined ? { actualUsd: result.costUsd } : {}),
       ...(metered !== undefined ? { meteredUsd: metered } : {}),
       durationMs: result.durationMs,

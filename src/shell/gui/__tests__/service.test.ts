@@ -16,7 +16,9 @@ import { spawnSync } from 'node:child_process';
 const calls: string[] = [];
 const fake: SlotExecutor = (slot, prompt) => {
   calls.push(slot.label);
-  return Promise.resolve({ ok: true, text: slot.label === 'Haiku' ? 'PASS' : `ran:${prompt}`, durationMs: 1 });
+  const text = slot.label === 'Haiku' ? 'PASS' : `ran:${prompt}`;
+  // raw 는 파싱 전이다 — 셸이 이것을 그대로 디스크에 쓰는지 아래 테스트가 본다.
+  return Promise.resolve({ ok: true, text, rawStdout: `{"raw":"${slot.label}"}`, rawStderr: '', durationMs: 1 });
 };
 
 const isolated = () => {
@@ -85,11 +87,13 @@ describe('GUI — S5 시나리오', () => {
     assert.equal(result.report?.accepted.some((e) => e.kind === 'command' && e.exitCode === 3), true);
   });
 
-  it('원시 로그를 실행별로 남긴다', async () => {
+  it('원시 로그를 실행별로 남긴다 — **파싱 결과가 아니라 원본이다** (SPEC §3.7)', async () => {
     isolated();
     await new GuiService(fake).run({ task: '이 타입 에러 고쳐줘', verify: [] });
-    const dir = process.env['HS_ORC_RUN_STORE'] as string;
-    assert.ok(readFileSync(path.join(dir, readDecisions().at(-1)?.id ?? '', '01-Luna.meta.json'), 'utf8').includes('outcome'));
+    const dir = path.join(process.env['HS_ORC_RUN_STORE'] as string, readDecisions().at(-1)?.id ?? '');
+    assert.ok(readFileSync(path.join(dir, '01-Luna.meta.json'), 'utf8').includes('outcome'));
+    // fake 가 준 raw 가 그대로 디스크에 있어야 한다. `text`(ran:…) 가 들어 있으면 셸이 raw 를 버린 것이다.
+    assert.equal(readFileSync(path.join(dir, '01-Luna.stdout'), 'utf8'), '{"raw":"Luna"}');
   });
 
   it('누적 비용과 Dashboard 가 v1 과 같은 모양으로 갱신된다', async () => {

@@ -103,7 +103,7 @@ function RunScreen({
       let stored = '';
       try {
         stored = storeRun(decision.id, journal.records.length, slot.label, {
-          rawStdout: '', rawStderr: '', meta: { outcome: run.ok ? 'ok' : 'failed', durationMs: run.durationMs, modelId: slot.modelId },
+          rawStdout: run.rawStdout, rawStderr: run.rawStderr, meta: { outcome: run.ok ? 'ok' : 'failed', durationMs: run.durationMs, modelId: slot.modelId },
         }).dir;
       } catch (error) {
         setOutput(reportError('run-store', 'persist', error).display);

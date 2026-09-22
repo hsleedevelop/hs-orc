@@ -23,7 +23,7 @@ const spy = (reply: (label: string) => { ok: boolean; text: string }) => {
   const calls: { label: string; prompt: string }[] = [];
   const exec: SlotExecutor = (slot, prompt) => {
     calls.push({ label: slot.label, prompt });
-    return Promise.resolve({ ...reply(slot.label), durationMs: 1 });
+    return Promise.resolve({ ...reply(slot.label), rawStdout: '', rawStderr: '', durationMs: 1 });
   };
   return { calls, exec };
 };

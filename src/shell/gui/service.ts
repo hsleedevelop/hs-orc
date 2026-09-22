@@ -221,8 +221,8 @@ export class GuiService {
     let stored = '';
     try {
       stored = storeRun(decision.id, this.journal.records.length + 1, slot.label, {
-        rawStdout: '',
-        rawStderr: '',
+        rawStdout: run.rawStdout,
+        rawStderr: run.rawStderr,
         meta: { outcome: run.ok ? 'ok' : 'failed', durationMs: run.durationMs, modelId: slot.modelId, verdict: duo.verdict },
       }, runStoreRoot(this.workdir)).dir;
     } catch (error) {
