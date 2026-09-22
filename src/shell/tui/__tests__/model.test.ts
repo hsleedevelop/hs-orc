@@ -73,7 +73,7 @@ describe('Dashboard 화면', () => {
 
   it('추정 비용이 섞이면 누적 표시에 드러난다', () => {
     const budget = new Budget(20);
-    budget.charge('x', undefined, 1.5);
+    budget.charge('x', undefined, 1.5, undefined, 'api');
     assert.match(dashboardView(new Journal(), budget).spent, /추정 포함/);
   });
 });

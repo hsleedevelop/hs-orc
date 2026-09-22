@@ -8,7 +8,8 @@
     "stream": "claude/cursor는 --output-format stream-json (claude는 --verbose 동반), codex는 --output-format 자체가 없고 --json(JSONL). 2026-09-20 실행 캡처로 확인.",
     "stdin": "세 CLI 모두 stdin이 TTY가 아니면 입력을 기다린다. codex는 무기한 블록, claude는 3초 경고 후 진행. 어댑터는 stdin을 닫는다.",
     "cursorFast": "cursor-agent --list-models (2026-09-21) 실측: -fast 변형은 luna/terra/sol 각 6종, opus 8종에 있고 sonnet·fable-5-1 에는 0종이다. D-023.",
-    "write": "쓰기 권한 플래그 실측 (2026-09-21 각 CLI --help): codex exec -s <read-only|workspace-write|danger-full-access> · claude --permission-mode <acceptEdits|auto|bypassPermissions|manual|dontAsk|plan> · cursor-agent -f/--force. 셋 다 workspace 범위를 넘는 값(danger-full-access, bypassPermissions)은 쓰지 않는다."
+    "write": "쓰기 권한 플래그 실측 (2026-09-21 각 CLI --help): codex exec -s <read-only|workspace-write|danger-full-access> · claude --permission-mode <acceptEdits|auto|bypassPermissions|manual|dontAsk|plan> · cursor-agent -f/--force. 셋 다 workspace 범위를 넘는 값(danger-full-access, bypassPermissions)은 쓰지 않는다.",
+    "plan": "엔진별 요금제 (D-030). 이 저장소를 쓰는 사람의 실제 구독 상태를 적는다 — 제품이 알아낼 수 없다. 2026-09-22 기준 claude·codex·cursor 모두 구독제다. subscription 이면 total_cost_usd(actual) 와 토큰×단가(metered) 가 **청구되지 않는다** — API 로 썼다면 들었을 환산액이다. 이 선언이 바뀌면 누적 상한이 무엇을 막는지도 바뀐다."
   },
   "efforts": [
     "low",
@@ -22,6 +23,7 @@
       "binaries": [
         "claude"
       ],
+      "plan": "subscription",
       "promptArgv": [
         "-p"
       ],
@@ -49,6 +51,7 @@
       "binaries": [
         "codex"
       ],
+      "plan": "subscription",
       "promptArgv": [
         "exec"
       ],
@@ -76,6 +79,7 @@
         "cursor-cli",
         "cursor-agent"
       ],
+      "plan": "subscription",
       "promptArgv": [
         "-p"
       ],

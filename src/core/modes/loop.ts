@@ -7,7 +7,7 @@
  * - 최대 반복 수와 누적 비용 상한이 **둘 다** 있어야 돈다.
  */
 import type { Matrix } from '../../data/matrix.ts';
-import { Budget, BudgetExceeded } from '../budget.ts';
+import { Budget, BudgetExceeded, TokenBudgetExceeded } from '../budget.ts';
 import { Journal } from '../journal.ts';
 import { estimateUsd, type SlotExecutor } from '../executor.ts';
 import type { AssignmentPlan } from '../assign.ts';
@@ -58,6 +58,8 @@ export interface LoopOptions {
   readonly goal: string;
   readonly maxIterations: number;
   readonly budgetUsd: number;
+  /** 생략하면 토큰 상한을 걸지 않는다 (D-030). 구독제에서는 이쪽만 실제로 막는다. */
+  readonly tokenBudget?: number;
 }
 
 export async function runLoop(
@@ -72,7 +74,7 @@ export async function runLoop(
   }
 
   const journal = new Journal();
-  const budget = new Budget(options.budgetUsd);
+  const budget = new Budget(options.budgetUsd, options.tokenBudget ?? 0);
   const history: string[] = [];
   let iteration = 0;
   let stopReason: LoopStopReason = 'max-iterations';
@@ -83,7 +85,7 @@ export async function runLoop(
     try {
       budget.assertCanContinue();
     } catch (error) {
-      if (error instanceof BudgetExceeded) {
+      if (error instanceof BudgetExceeded || error instanceof TokenBudgetExceeded) {
         stopReason = 'budget-exceeded';
         break;
       }
@@ -104,7 +106,9 @@ export async function runLoop(
       run.actualUsd,
       estimateUsd(matrix, plan.slots.primary),
       run.meteredUsd,
+      plan.slots.primary.plan,
     );
+    budget.countTokens(run.usage);
 
     // Evaluator — reviewer 슬롯. 같은 모델이면 자기 채점이 된다 (D-003).
     const verdict = await components.evaluate(ctx, run.text);
@@ -112,6 +116,8 @@ export async function runLoop(
       `#${iteration} Evaluator ${plan.slots.reviewer.label}`,
       undefined,
       estimateUsd(matrix, plan.slots.reviewer),
+      undefined,
+      plan.slots.reviewer.plan,
     );
 
     const critique = components.critique ? await components.critique(ctx, run.text) : '';

@@ -279,7 +279,7 @@ async function main(): Promise<void> {
   process.stderr.write(`결정   ${decision.id} ${decision.branch}/${decision.tier} → ${decisionLogPath()}\n`);
 
   // **두 슬롯을 실제로 돌린다** (D-009). primary 만 돌리면 이 제품은 단일 엔진 선택기다.
-  const duoBudget = new Budget(budgetUsd);
+  const duoBudget = new Budget(budgetUsd, loadLimits().tokenBudget);
   const duo = await runDuo(matrix, plan, execute, args.task, duoBudget, { skipReviewer: args.skipReviewer });
   const run = {
     outcome: duo.primary.ok ? ('ok' as const) : ('error' as const),

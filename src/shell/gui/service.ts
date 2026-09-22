@@ -85,7 +85,7 @@ export class GuiService {
   private workdir: string;
 
   constructor(execute?: SlotExecutor, budgetUsd = loadLimits().budgetUsd, cwd = process.cwd()) {
-    this.budget = new Budget(budgetUsd);
+    this.budget = new Budget(budgetUsd, loadLimits().tokenBudget);
     this.execute = execute;
     this.workdir = cwd;
   }

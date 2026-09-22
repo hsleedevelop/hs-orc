@@ -37,11 +37,11 @@ export class PingpongSession {
   private readonly execute: SlotExecutor;
   private turns = 0;
 
-  constructor(matrix: Matrix, plan: AssignmentPlan, execute: SlotExecutor, budgetUsd: number) {
+  constructor(matrix: Matrix, plan: AssignmentPlan, execute: SlotExecutor, budgetUsd: number, tokenBudget = 0) {
     this.matrix = matrix;
     this.plan = plan;
     this.execute = execute;
-    this.budget = new Budget(budgetUsd);
+    this.budget = new Budget(budgetUsd, tokenBudget);
   }
 
   get turnCount(): number {
@@ -57,7 +57,8 @@ export class PingpongSession {
     this.turns += 1;
 
     const run = await this.execute(slot, input.prompt);
-    const charge = this.budget.charge(`${slot.label}·${slot.effort}`, run.actualUsd, estimateUsd(this.matrix, slot), run.meteredUsd);
+    const charge = this.budget.charge(`${slot.label}·${slot.effort}`, run.actualUsd, estimateUsd(this.matrix, slot), run.meteredUsd, slot.plan);
+    this.budget.countTokens(run.usage);
 
     const record = this.journal.append({
       index: this.turns,
@@ -72,7 +73,7 @@ export class PingpongSession {
       charge,
     });
 
-    const suggestion = this.budget.exceeded()
+    const suggestion = this.budget.limitReached()
       ? `누적 비용 상한 도달(${this.budget.summary()}). 다음 턴을 시작하지 않는다 — 계속하려면 상한을 올려야 한다.`
       : `다음 턴 후보: ${this.plan.slots[other].label}·${this.plan.slots[other].effort} 로 ${
           input.side === 'primary' ? '독립 검증' : '반영'

@@ -216,7 +216,7 @@ export function App({ task, initialScreen, write = false }: { task: string; init
   const keysAvailable = process.stdin.isTTY === true;
   // S5 범위에서 Tasks/Dashboard 는 이 세션의 기록만 본다. 영속화는 S6 이다.
   const [journal] = useState(() => new Journal());
-  const [budget] = useState(() => new Budget(loadLimits().budgetUsd));
+  const [budget] = useState(() => new Budget(loadLimits().budgetUsd, loadLimits().tokenBudget));
 
   useInput(
     (input) => {
