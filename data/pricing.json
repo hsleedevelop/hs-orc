@@ -2,7 +2,42 @@
   "$note": "수기 파일이다. 모델 id 별 **단가 선언**이다 — 제품은 단가를 추측하지 않는다 (SPEC §2.5 근거 등급).",
   "$why": "claude 만 total_cost_usd 를 돌려준다. codex·cursor 는 토큰만 주므로 단가가 없으면 AA 벤치마크 추정치로 누적된다. 여기에 단가를 적으면 그 모델의 비용이 `metered`(측정 토큰 × 선언 단가)로 바뀐다.",
   "$howto": "키는 엔진이 실제로 받은 모델 id (engines.json 의 id/idTemplate 결과). 값은 100만 토큰당 USD. cachedInput·cacheWrite 는 생략하면 input 단가를 쓴다.",
-  "$example": { "gpt-5.6-luna": { "inputPerMTok": 0.25, "outputPerMTok": 2, "cachedInputPerMTok": 0.025 } },
+  "$example": {
+    "gpt-5.6-luna": {
+      "inputPerMTok": 0.25,
+      "outputPerMTok": 2,
+      "cachedInputPerMTok": 0.025
+    }
+  },
   "$empty": "비워 두는 것이 기본값이다. 선언하지 않은 모델은 계속 estimate 로 누적되고, 누적 표시에 그 사실이 드러난다.",
-  "models": {}
+  "models": {
+    "gpt-5.6-luna": {
+      "inputPerMTok": 0.2,
+      "cachedInputPerMTok": 0.02,
+      "outputPerMTok": 1.2
+    },
+    "gpt-5.6-terra": {
+      "inputPerMTok": 2,
+      "cachedInputPerMTok": 0.2,
+      "outputPerMTok": 12
+    },
+    "gpt-5.6-sol": {
+      "inputPerMTok": 4,
+      "cachedInputPerMTok": 0.4,
+      "outputPerMTok": 20
+    },
+    "gpt-6-astra": {
+      "inputPerMTok": 10,
+      "cachedInputPerMTok": 1,
+      "outputPerMTok": 50
+    }
+  },
+  "$evidence": {
+    "collectedAt": "2026-09-22",
+    "source": "https://developers.openai.com/api/docs/pricing (Standard, short context)",
+    "note": "2차 자료(블로그 다수)가 sol 을 $5/$30 으로 적었으나 공식 표는 $4/$20 이다. 1차 자료를 따랐다.",
+    "plan": "**구독제로 쓰면 이 단가는 청구되지 않는다.** 이 값은 API 로 썼다면 들었을 비용이고, metered 등급의 쓸모는 절대 금액이 아니라 **배정 간 상대 비교**다 (첫 실사용에서 R03 $7.08 vs R01 $0.39 같은 18배 과잉 배정을 잡아낸 그 판단). 요금제 축 자체는 별도 결정으로 다룬다.",
+    "claude": "claude 모델(haiku·sonnet·opus·fable)은 **일부러 비워 둔다.** CLI 가 total_cost_usd 를 돌려주므로 이미 actual 등급이다. 단가를 적으면 신뢰도가 낮은 값이 끼어들 자리만 생긴다.",
+    "cursor": "cursor 는 매트릭스 11행의 기본 배정에 등장하지 않는다(모든 행의 defaultEngine 이 claude 또는 codex). --engine cursor 로 직접 지정할 때 필요해지면 그때 선언한다."
+  }
 }
