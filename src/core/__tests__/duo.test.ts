@@ -143,3 +143,15 @@ describe('판정 읽기', () => {
     assert.match(reviewPrompt(planR01, 't', 'o'), /"성공했습니다" 같은 산문은 판정이 아니다/);
   });
 });
+
+describe('resume 은 primary 에만 (SPEC §6.4.3)', () => {
+  it('primary 는 넘겨받은 엔진 세션을 잇고 reviewer 는 잇지 않는다', async () => {
+    const seen: { label: string; resume: string | undefined }[] = [];
+    const exec: SlotExecutor = (slot, _prompt, options) => {
+      seen.push({ label: slot.label, resume: options?.resume });
+      return Promise.resolve({ ok: true, text: slot.label === 'Haiku' ? 'PASS' : 'ran', rawStdout: '', rawStderr: '', durationMs: 1 });
+    };
+    await runDuo(matrix, planR01, exec, 'task', new Budget(20, 2_000_000), { resumePrimary: 'eng-1' });
+    assert.deepEqual(seen.map((s) => s.resume), ['eng-1', undefined]);
+  });
+});

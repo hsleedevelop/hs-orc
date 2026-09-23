@@ -199,7 +199,11 @@ export class ConversationSession {
     this.pending = null;
     this.stateValue = 'working';
     try {
-      const context = buildContext(this.records(), this.contextLimits, { before: this.turn });
+      const ref = this.resumable(pending.plan);
+      const context = buildContext(this.records(), this.contextLimits, {
+        before: this.turn,
+        ...(ref ? { after: ref.turn } : {}),
+      });
       const prompt = context ? `[최근 대화]\n${context}\n\n[이번 요청]\n${pending.title}` : pending.title;
       const d = await delegate({
         matrix,
@@ -213,6 +217,7 @@ export class ConversationSession {
         budget,
         journal,
         note: `session ${this.deps.id}`,
+        ...(ref ? { resumePrimary: ref.id } : {}),
       });
       out.push(
         this.append({
@@ -223,8 +228,15 @@ export class ConversationSession {
           review: d.review ?? '',
           evidence: d.report.summary,
           decisionId: d.decisionId,
+          ...(d.primarySession ? { engineSession: d.primarySession } : {}),
         }),
       );
+      if (ref && !d.ok) {
+        out.push(this.append({
+          kind: 'error',
+          text: '이어 붙인 엔진 세션이 실패했다 — 새 세션으로 조용히 바꾸지 않는다. 다시 보내면 맥락을 실어 새로 띄운다.',
+        }));
+      }
       out.push(...(await this.summarize(pending.title, d)));
     } catch (error) {
       out.push(this.append({ kind: 'error', text: `위임이 끝나지 못했다: ${why(error)}` }));
@@ -232,6 +244,19 @@ export class ConversationSession {
       this.stateValue = 'waiting_input';
     }
     return out;
+  }
+
+  /**
+   * 이을 엔진 세션 (SPEC §6.4.3): **가장 최근 위임**이 성공해 엔진 세션을 남겼고, 그 primary 가
+   * 이번 primary 와 엔진·모델·effort 가 모두 같을 때만. 최근 위임이 실패했으면 더 앞을 찾지 않는다.
+   * 세션 폴더는 이 세션이 늘 같다 (codex 는 cwd 로 세션을 거른다).
+   */
+  private resumable(plan: AssignmentPlan): { id: string; turn: number } | null {
+    const last = this.records().findLast((r) => r.kind === 'result');
+    if (last?.kind !== 'result' || !last.engineSession) return null;
+    const p = plan.slots.primary;
+    const s = last.engineSession;
+    return s.engine === p.engine && s.modelId === p.modelId && s.effort === p.effort ? { id: s.id, turn: last.turn } : null;
   }
 
   reject(): TranscriptRecord[] {

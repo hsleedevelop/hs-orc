@@ -45,6 +45,20 @@ const delegateSpy = () => {
   return { exec, calls };
 };
 
+/** primary 는 세션 id 를 돌려주고, 두 번째 primary 실행의 성패를 고를 수 있다. */
+const resumeSpy = (secondOk = true) => {
+  const calls: { label: string; prompt: string; resume: string | undefined }[] = [];
+  let primaries = 0;
+  const exec: SlotExecutor = (slot, prompt, options) => {
+    calls.push({ label: slot.label, prompt, resume: options?.resume });
+    if (slot.label === 'Haiku') return Promise.resolve(reply('PASS'));
+    primaries += 1;
+    const ok = primaries === 1 || secondOk;
+    return Promise.resolve({ ...reply(ok ? 'ran' : '', ok), sessionId: `eng-${primaries}` });
+  };
+  return { exec, calls };
+};
+
 const make = (conduct: SlotExecutor, dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-')), execute = delegateSpy().exec) => {
   const budget = new Budget(20, 2_000_000);
   const session = new ConversationSession({
@@ -200,5 +214,56 @@ describe('대화 세션 — 승인·결과 처리 (SPEC §6.4.4)', () => {
     await session.send('이 타입 에러 고쳐줘');
     await assert.rejects(session.approve({ write: true }), SessionStateError);
     assert.equal(session.state, 'blocked');
+  });
+});
+
+describe('대화 세션 — resume (SPEC §6.4.3)', () => {
+  it('직전 위임과 같은 슬롯이면 엔진 세션을 잇고, 그 실행 이후 대화만 싣는다', async () => {
+    isolate();
+    const r = resumeSpy();
+    const { session } = make(conductSpy().exec, undefined, r.exec);
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    const primaries = r.calls.filter((c) => c.label !== 'Haiku');
+    assert.deepEqual(primaries.map((c) => c.resume), [undefined, 'eng-1']);
+    assert.equal(primaries[1]?.prompt, '이 타입 에러 고쳐줘');
+  });
+
+  it('reviewer 는 한 번도 잇지 않는다', async () => {
+    isolate();
+    const r = resumeSpy();
+    const { session } = make(conductSpy().exec, undefined, r.exec);
+    for (let i = 0; i < 2; i += 1) {
+      await session.send('이 타입 에러 고쳐줘');
+      await session.approve();
+    }
+    assert.ok(r.calls.filter((c) => c.label === 'Haiku').every((c) => c.resume === undefined));
+  });
+
+  it('이어 붙인 실행이 실패하면 사유를 남기고 새 세션으로 조용히 다시 돌리지 않는다', async () => {
+    isolate();
+    const r = resumeSpy(false);
+    const { session } = make(conductSpy().exec, undefined, r.exec);
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    await session.send('이 타입 에러 고쳐줘');
+    const out = await session.approve();
+    assert.ok(out.some((rec) => rec.kind === 'error' && /조용히 바꾸지 않는다/.test(rec.text)));
+    assert.equal(r.calls.filter((c) => c.label !== 'Haiku').length, 2);
+  });
+
+  it('이어 붙인 실행이 실패하면 다음 위임은 잇지 않고 맥락을 실어 새로 띄운다', async () => {
+    isolate();
+    const r = resumeSpy(false);
+    const { session } = make(conductSpy().exec, undefined, r.exec);
+    for (let i = 0; i < 3; i += 1) {
+      await session.send('이 타입 에러 고쳐줘');
+      await session.approve();
+    }
+    const primaries = r.calls.filter((c) => c.label !== 'Haiku');
+    assert.deepEqual(primaries.map((c) => c.resume), [undefined, 'eng-1', undefined]);
+    assert.match(primaries[2]?.prompt ?? '', /^\[최근 대화\]/);
   });
 });

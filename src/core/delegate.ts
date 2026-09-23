@@ -17,6 +17,7 @@ import type { SlotExecutor } from './executor.ts';
 import type { Journal } from './journal.ts';
 import { reportError } from './report.ts';
 import { runStoreRoot, storeRun } from './run-store.ts';
+import type { EngineSessionRef } from './transcript.ts';
 
 export interface DelegateInput {
   readonly matrix: Matrix;
@@ -33,6 +34,8 @@ export interface DelegateInput {
   readonly journal: Journal;
   /** 결정 로그 1차 `note` 끝에 붙인다 — 세션 id 로 대화 기록과 잇는다 (SPEC §8). */
   readonly note?: string;
+  /** primary 가 이어 붙일 엔진 세션 (SPEC §6.4.3). reviewer 에는 절대 가지 않는다. */
+  readonly resumePrimary?: string;
 }
 
 export interface Delegated {
@@ -43,6 +46,7 @@ export interface Delegated {
   readonly verdict: Verdict;
   readonly review?: string;
   readonly decisionId: string;
+  readonly primarySession?: EngineSessionRef;
 }
 
 export async function delegate(input: DelegateInput): Promise<Delegated> {
@@ -54,7 +58,8 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
   appendDecision(decision);
 
   // **두 슬롯을 실제로 돌린다** (D-009) — primary 만 돌리면 단일 엔진 선택기다.
-  const duo = await runDuo(matrix, plan, input.execute, input.prompt, budget);
+  const duo = await runDuo(matrix, plan, input.execute, input.prompt, budget,
+    input.resumePrimary !== undefined ? { resumePrimary: input.resumePrimary } : {});
   const run = duo.primary;
   const charge = budget.charges.at(-1);
 
@@ -99,5 +104,9 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
     verdict: duo.verdict,
     ...(duo.review ? { review: duo.review.text.slice(0, 2000) } : {}),
     decisionId: decision.id,
+    // 성공한 primary 만 이을 수 있다 — 실패한 세션을 다음에 이으면 실패를 물려받는다.
+    ...(run.ok && run.sessionId
+      ? { primarySession: { engine: slot.engine, modelId: slot.modelId, effort: slot.effort, id: run.sessionId } }
+      : {}),
   };
 }

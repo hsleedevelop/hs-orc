@@ -62,6 +62,8 @@ export function parseVerdict(text: string): Verdict {
 export interface DuoOptions {
   /** reviewer 를 끈다. 기본은 **켜짐** — 비용은 승인 게이트에서 이미 두 슬롯으로 보여줬다. */
   readonly skipReviewer?: boolean;
+  /** primary 가 이어 붙일 엔진 세션 (SPEC §6.4.3). reviewer 에는 절대 가지 않는다. */
+  readonly resumePrimary?: string;
 }
 
 export async function runDuo(
@@ -74,7 +76,11 @@ export async function runDuo(
 ): Promise<DuoResult> {
   const { primary: primarySlot, reviewer: reviewerSlot } = plan.slots;
 
-  const primary = await execute(primarySlot, task);
+  const primary = await execute(
+    primarySlot,
+    task,
+    options.resumePrimary !== undefined ? { resume: options.resumePrimary } : undefined,
+  );
   budget.charge(`${primarySlot.label}·${primarySlot.effort}`, primary.actualUsd, estimateUsd(matrix, primarySlot), primary.meteredUsd, primarySlot.plan);
   // 금액과 토큰은 **같은 자리**에서 센다. 한쪽만 세면 구독제에서 상한이 통째로 비어 버린다 (D-030).
   budget.countTokens(primary.usage);
