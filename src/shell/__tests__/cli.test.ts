@@ -299,5 +299,6 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     assert.notEqual(r.code, 0);
     assert.match(r.err, /중단 {3}escalated · 1회/);
     assert.equal(existsSync(reviewCount), false, 'primary 가 죽었는데 reviewer 가 돌았다.');
+    assert.doesNotMatch(r.err, /누적.*실측/, '돌지 않은 reviewer 를 실측 $0 으로 적었다 — 출처 표시가 거짓이 된다.');
   });
 });

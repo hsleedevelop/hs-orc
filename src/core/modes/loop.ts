@@ -31,6 +31,8 @@ export interface Verdict {
    * 없으면 추정 금액만 적는다 — 토큰 상한이 reviewer 몫을 세지 못한다.
    */
   readonly cost?: Pick<SlotRun, 'actualUsd' | 'meteredUsd' | 'usage'>;
+  /** reviewer 를 아예 부르지 않았다 (예: primary 실행 실패). 과금하지 않는다 — 돌지 않은 실행에 출처를 지어내지 않는다. */
+  readonly skipped?: boolean;
 }
 
 export interface LoopComponents {
@@ -129,19 +131,21 @@ export async function runLoop(
 
     // Evaluator — reviewer 슬롯. 같은 모델이면 자기 채점이 된다 (D-003).
     const verdict = await components.evaluate(ctx, run.text);
-    budget.charge(
-      `#${iteration} Evaluator ${plan.slots.reviewer.label}`,
-      verdict.cost?.actualUsd,
-      estimateUsd(matrix, plan.slots.reviewer),
-      verdict.cost?.meteredUsd,
-      plan.slots.reviewer.plan,
-    );
-    // cost 가 없으면 reviewer 토큰을 못 본 것이다 — 0 으로 치지 않고 미보고로 센다 (D-030).
-    budget.countTokens(verdict.cost?.usage);
+    if (verdict.skipped !== true) {
+      budget.charge(
+        `#${iteration} Evaluator ${plan.slots.reviewer.label}`,
+        verdict.cost?.actualUsd,
+        estimateUsd(matrix, plan.slots.reviewer),
+        verdict.cost?.meteredUsd,
+        plan.slots.reviewer.plan,
+      );
+      // cost 가 없으면 reviewer 토큰을 못 본 것이다 — 0 으로 치지 않고 미보고로 센다 (D-030).
+      budget.countTokens(verdict.cost?.usage);
+    }
 
     const critique = components.critique ? await components.critique(ctx, run.text) : '';
-    // 재시도 작업에는 직전 지적이 여러 줄로 붙는다 — 기록에는 첫 줄만 남긴다 (D-036 리뷰).
-    const summary = task.split('\n', 1)[0] ?? task;
+    // 재시도 작업에는 직전 지적(최대 4000자)이 붙는다 — 기록에는 change 와 같이 앞 200자만 남긴다 (D-036 리뷰).
+    const summary = task.slice(0, 200);
     history.push(`#${iteration} ${summary} → ${verdict.passed ? 'pass' : 'fail'}`);
 
     journal.append({

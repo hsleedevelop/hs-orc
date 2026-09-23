@@ -282,9 +282,7 @@ async function main(): Promise<void> {
         // 마지막 줄 PASS/FAIL, 못 읽으면 unknown 이고 통과로 봐주지 않는다.
         evaluate: async (_ctx, output) => {
           if (broken === 'primary') {
-            // reviewer 는 돌지 않았다 — 0 은 "미보고"가 아니라 실제로 0 이다.
-            const none = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 };
-            return { passed: false, verification: `primary 실행 실패 — reviewer 생략: ${output.slice(0, 80)}`, cost: { actualUsd: 0, usage: none } };
+            return { passed: false, verification: `primary 실행 실패 — reviewer 생략: ${output.slice(0, 80)}`, skipped: true };
           }
           const check = await loopExecute(plan.slots.reviewer, reviewPrompt(plan, args.task, output));
           const verdict = check.ok ? parseVerdict(check.text) : 'unknown';
