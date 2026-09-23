@@ -11,7 +11,7 @@
     "write": "쓰기 권한 플래그 실측 (2026-09-21 각 CLI --help): codex exec -s <read-only|workspace-write|danger-full-access> · claude --permission-mode <acceptEdits|auto|bypassPermissions|manual|dontAsk|plan> · cursor-agent -f/--force. 셋 다 workspace 범위를 넘는 값(danger-full-access, bypassPermissions)은 쓰지 않는다.",
     "plan": "엔진별 요금제 (D-030). 이 저장소를 쓰는 사람의 실제 구독 상태를 적는다 — 제품이 알아낼 수 없다. 2026-09-22 기준 claude·codex·cursor 모두 구독제다. subscription 이면 total_cost_usd(actual) 와 토큰×단가(metered) 가 **청구되지 않는다** — API 로 썼다면 들었을 환산액이다. 이 선언이 바뀌면 누적 상한이 무엇을 막는지도 바뀐다.",
     "nonGit": "codex exec 는 git 저장소 밖에서 --skip-git-repo-check 없이 거절한다 (2026-09-23 실측). 스크래치 세션에만 붙인다 — 쓰기를 켤 수 없는 자리다. project 세션(git 이 아닌 폴더 포함)에는 붙이지 않는다.",
-    "resume": "2026-09-23 Q10 실측 (DECISIONS D-031): claude -p --resume <id> · codex exec resume <id> <prompt> (-m·effort 를 받는다) · cursor-agent -p --resume <id>. 무작위 코드워드를 셋 다 회수했고 id 는 불변이다."
+    "resume": "2026-09-23 Q10 실측 (DECISIONS D-031): claude -p --resume <id> · codex exec resume <id> <prompt> (-m·effort 를 받는다) · cursor-agent -p --resume <id>. 무작위 코드워드를 셋 다 회수했고 id 는 불변이다. codex exec resume --help 에는 -s/--sandbox 가 없다(2026-09-23 --help 및 clap dry run, 존재하지 않는 세션 id 로 -s workspace-write 를 붙였더니 'unexpected argument' exit 2 — 모델 호출 전) — 그래서 write+resume 은 codex 에서 불가능으로 선언한다."
   },
   "efforts": [
     "low",
@@ -86,7 +86,8 @@
         "kind": "subcommand",
         "argv": [
           "resume"
-        ]
+        ],
+        "write": false
       }
     },
     "cursor": {

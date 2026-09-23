@@ -119,6 +119,11 @@ export function buildInvocation(
   if (resume !== undefined && !spec.resume) {
     throw new EngineError(`${target} 는 resume 선언이 없다 — 맥락 없는 새 실행으로 바꾸지 않는다 (SPEC §3.8).`);
   }
+  // codex exec resume 은 -s/--sandbox 를 받지 않는다 (2026-09-23 실측, $evidence.resume). 쓰기를 조용히
+  // 빼고 읽기 전용으로 잇지 않는다 — 던져서 호출자가 새 실행으로 넘어가게 한다 (final-review #1).
+  if (resume !== undefined && options.write === true && spec.resume?.write === false) {
+    throw new EngineError(`${target} 는 resume 상태에서 쓰기를 받지 않는다 — 쓰기를 빼고 조용히 잇지 않는다 (SPEC §3.8).`);
+  }
   const argv =
     resume !== undefined && spec.resume?.kind === 'subcommand'
       ? [...spec.promptArgv, ...spec.resume.argv, resume, prompt, spec.modelFlag, modelId]

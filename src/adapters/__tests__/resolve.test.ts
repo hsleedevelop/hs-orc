@@ -169,4 +169,18 @@ describe('resume argv (SPEC §3.8, Q10 실측)', () => {
       /resume 선언이 없다/,
     );
   });
+
+  it('codex 는 resume 상태에서 쓰기를 받지 않는다 — 두 플래그를 같이 붙이지 않고 던진다 (final-review #1)', () => {
+    assert.throws(
+      () => buildInvocation(catalog, 'luna', 'medium', 'hi', { engine: 'codex', resume: 'T1', write: true }),
+      (error: unknown) => error instanceof EngineError && /codex/.test(error.message) && /resume/.test(error.message) && /쓰기/.test(error.message),
+    );
+  });
+
+  it('resume 상태에서 쓰기를 거절해도 resume 단독·write 단독은 그대로 된다', () => {
+    const resumeOnly = buildInvocation(catalog, 'luna', 'medium', 'hi', { engine: 'codex', resume: 'T1' }).argv;
+    assert.ok(!resumeOnly.includes('-s'));
+    const writeOnly = buildInvocation(catalog, 'luna', 'medium', 'hi', { engine: 'codex', write: true }).argv;
+    assert.deepEqual(writeOnly.slice(-2), ['-s', 'workspace-write']);
+  });
 });

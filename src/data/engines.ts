@@ -52,10 +52,12 @@ export interface EngineSpec {
   /**
    * 비대화 resume (SPEC §3.8, 2026-09-23 Q10 실측). claude·cursor 는 플래그, codex 는 `exec resume <id>` 서브커맨드다.
    * 선언이 없는 엔진에 resume 을 요청하면 **던진다** — 맥락 없는 새 실행으로 조용히 떨어지지 않는다.
+   * `write: false` 면 이 엔진의 resume 경로는 쓰기 인자를 받지 못한다는 뜻이다 (실측 근거는 `$evidence.resume`).
+   * resume·write 를 동시에 요청하면 **던진다** — 쓰기를 조용히 빼고 읽기 전용으로 잇지 않는다.
    */
   readonly resume?:
-    | { readonly kind: 'flag'; readonly flag: string }
-    | { readonly kind: 'subcommand'; readonly argv: readonly string[] };
+    | { readonly kind: 'flag'; readonly flag: string; readonly write?: false }
+    | { readonly kind: 'subcommand'; readonly argv: readonly string[]; readonly write?: false };
 }
 
 /** 해당 엔진이 그 모델을 아예 제공하지 않으면 `null` 이다 — 말없는 치환의 자리가 아니다 (D-004). */
