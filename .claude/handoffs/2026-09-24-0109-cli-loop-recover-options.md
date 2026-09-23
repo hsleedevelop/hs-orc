@@ -1,5 +1,5 @@
 # Handoff: cli-loop-recover-options
-- from: local_78f112cd-94ef-4ac9-94ff-2a654c664183 · cwd: /Users/hsonpro/Library/Mobile Documents/com~apple~CloudDocs/shared_workspace/hs-orc · branch: main · 2026-09-23T16:09:28Z · model: claude-opus-5-5 · 형식: full · 전달: B task_411e229d
+- from: local_78f112cd-94ef-4ac9-94ff-2a654c664183 · cwd: /Users/hsonpro/Library/Mobile Documents/com~apple~CloudDocs/shared_workspace/hs-orc · branch: main · 2026-09-23T16:09:28Z · model: claude-opus-5-5 · 형식: full · 전달: B task_411e229d · 종결: 2026-09-24 elastic-ishizaka-2a00e1
 
 ## 1. 목표
 사용자 원문: "CLI loop 복구 방식 선택지 정리해줘" — **분석·선택지 제시만** (구현 요청 아님). 사용자가 안을 고르면 이 저장소 관례대로 D-036 결정 기록 → 커밋 → 브랜치에서 구현(서브에이전트) → 리뷰 → 사용자 승인 시 로컬 ff merge.
@@ -54,3 +54,10 @@
 - src/shell/cli.ts (loop 분기, ~255-290)
 - docs/PLAN.md S10 절
 - 스킬: 분석만이면 없음. 구현 단계에서 superpowers:test-driven-development 관례(RED→GREEN) 유지.
+
+## 인계 종결
+사유: 수행함
+- 한 것: §6 실행 — CLI loop 복구 선택지(L1~L4)를 사용자에게 제시. 코드 재확인으로 사실 추가: reviewer 프롬프트가 "PASS/FAIL 만 한 줄"이라 FAIL 사유 자체가 생성되지 않음, 판정 정규식 `/\bPASS\b/i` 가 사유 텍스트 속 PASS 에도 매치(L4 도입 시 오판 위험), `--max-iterations 1` + retry ≡ 현재 abort 동작.
+- 후속 수행: 사용자가 L2+L4 선택 → D-036 기록·구현·리뷰 2회 → main ff merge 완료 (HEAD `ba42fe8`, gate 326/326, push 안 함). reviewer 는 duo.reviewPrompt/parseVerdict 재사용, primary·reviewer 실행 실패는 escalate.
+- 남은 것: 실엔진 실측(구독 사용량 — 사전 승인 필요), Core runLoop 가 run.ok 를 직접 보지 않음(CLI 만 보호).
+- 함정: 이번 세션은 fresh worktree(`elastic-ishizaka-2a00e1`)라 deps 없음 — 구현은 메인 체크아웃 브랜치에서 하거나 node_modules 연결 먼저(§8).
