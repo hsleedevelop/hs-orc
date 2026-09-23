@@ -189,5 +189,5 @@ Terminal-Bench 4.0(독립 벤치마크, model+agent harness 구성), Artificial 
 3. `/loop`를 Claude Code 내장 `/loop` 스킬 위에 얹을 것인가 자체 구현할 것인가 (SPEC §6.2 참조)
 4. ~~v2 GUI의 기술 선택~~ → D-021 (Electron + React)
 5. ~~엔진 resume 비대화 왕복 실측~~ → D-031 에 기록 (세 엔진 통과)
-6. 직접 답의 모델·effort와, 답이 작업 결과를 대신하지 않게 할 경계 (Q11)
+6. ~~직접 답의 모델·effort~~ → Haiku·low (Q11). 경계는 SPEC §6.4.2
 7. 스크래치 세션 보존·정리 정책 (Q12)

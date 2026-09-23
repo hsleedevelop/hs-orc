@@ -1,8 +1,8 @@
 # hs-orchestrator — 기술 명세
 
-- 버전: v0.1 (초안)
-- 작성일: 2026-09-20
-- 대상: v1 (TUI)
+- 버전: v0.2
+- 작성일: 2026-09-20 · 개정 2026-09-23 (D-031 대화 세션 — §1·§3.1·§3.8·§4·§6.1·§6.4·§7.1·§8~§11)
+- 대상: v1 (TUI) · v2 (GUI) · v2.1 (대화 세션)
 - 선행 문서: `docs/PRD.md`
 
 ## 0. 검증된 환경 사실
@@ -43,6 +43,9 @@
 ┌─────────────────────────────────────────────┐
 │  Shell (v1: TUI  /  v2: GUI)                │  ← 교체 가능한 계층
 ├─────────────────────────────────────────────┤
+│  ConversationSession (headless, v2.1)       │  ← 대화 기록 · 지휘자(직접 답·요약)
+│   메시지 → 아래 파이프라인 | 직접 답        │     §6.4
+├─────────────────────────────────────────────┤
 │  Core (headless)                            │
 │   Classifier → Gatekeeper → Assigner        │
 │   → ModeRunner → EvidenceCollector          │
@@ -54,6 +57,8 @@
 ```
 
 **Core는 UI를 모른다.** 이벤트 스트림과 콜백으로만 바깥과 통신한다. v2 GUI는 Shell만 교체한다. Core에 UI 타입이 새면 v2에서 재작성이 된다.
+
+**`ConversationSession` 도 Core 쪽이다** (D-031 결정 8). 대화 기록·지휘자 판단을 셸에 두면 GUI 와 CLI 가 같은 메시지에 다르게 답한다 — D-026 에서 분류 폴백이 CLI 에만 있어 실제로 그랬다.
 
 ## 2. 데이터 — 매트릭스
 
@@ -141,6 +146,14 @@ interface RunRequest {
   prompt: string;
   cwd: string;
   timeoutMs: number;
+  /** v2.1: 이어 붙일 엔진 세션 id. 있으면 resume 경로로 띄운다 (§3.8) */
+  resume?: string;
+}
+
+interface RunResult {
+  // … (outcome · text · usage · rawStdout 등 기존 필드)
+  /** v2.1: 스트림에서 읽은 엔진 세션 id. 못 읽으면 undefined — 지어내지 않는다 */
+  sessionId?: string;
 }
 
 interface EngineAdapter {
@@ -154,7 +167,7 @@ interface EngineAdapter {
 }
 ```
 
-**CLI 플래그 문자열은 어댑터 밖에서 보이지 않는다.** Core는 `MatrixModel`과 `Effort`만 다룬다.
+**CLI 플래그 문자열은 어댑터 밖에서 보이지 않는다.** Core는 `MatrixModel`과 `Effort`만 다룬다. resume 도 같다 — Core 는 세션 id 문자열만 들고 다니고, 그것을 어느 플래그에 싣는지는 어댑터가 안다.
 
 ### 3.2 모델 → 엔진 매핑
 
@@ -240,16 +253,30 @@ cursor  -p "<prompt>" --model gpt-5.6-sol-xhigh --output-format stream-json
 - stdout/stderr 원본을 실행별로 보존한다. 파싱 실패가 원본 손실로 이어지지 않게 한다.
 - stream-json 파싱은 **바깥 try와 분리된 중첩 try**로 감싼다. 한 줄 파싱 실패가 실행 전체를 죽이지 않는다.
 
+### 3.8 세션 resume (v2.1, D-031 Q10 실측)
+
+| 엔진 | 세션 id 출처 (어댑터가 이미 읽는 스트림) | resume argv |
+|---|---|---|
+| claude | stream-json 각 줄의 `session_id` | `-p --resume <id>` + 기존 모델·effort·스트림 인자 |
+| codex | `--json` 첫 줄 `{"type":"thread.started","thread_id"}` | `exec resume <id>` + `--json -m … -c model_reasoning_effort=…` (resume 이 모델·effort 를 받는다) |
+| cursor | stream-json `system init` 부터의 `session_id` | `-p --resume <id>` + 기존 인자 |
+
+- 세 엔진 모두 2026-09-23 에 무작위 코드워드 회수로 확인했다. resume 뒤에도 id 는 같다.
+- **같은 세션 폴더(cwd)에서만 resume 한다.** codex 는 세션 목록을 cwd 로 거른다. 다른 cwd 에서의 resume 은 실측하지 않았다.
+- resume 이 실패하면(비정상 종료·id 없음) **새 세션으로 조용히 바꾸지 않는다.** 실패를 올리고, 재시도는 맥락을 실은 새 실행으로 사용자가 고른다 — 조용히 맥락 없는 실행으로 떨어지면 답이 그럴듯하게 틀린다.
+
 ## 4. 라우팅 파이프라인
 
 ```
-작업 입력
+작업 입력 (v2.1: 세션의 메시지 1건 — §6.4)
   │
   ├─ 1. Classifier      → 11행 중 1행 | "해당 없음"
-  │                        "해당 없음" → 사용자에게 올림 (임의 배정 금지)
+  │                        "해당 없음" → 임의 배정 금지. v1: 사용자에게 올림
+  │                                      v2.1: 지휘자 직접 답 (§6.4.2), 행은 제안만
   │
   ├─ 2. Gatekeeper      → /delegation-router §1 하한선
-  │                        걸림  → "직접 처리" 판정 후 종료 (엔진을 띄우지 않는다)
+  │                        걸림  → "직접 처리". v1: 종료 (엔진을 띄우지 않는다)
+  │                                v2.1: 지휘자 직접 답 (§6.4.2)
   │                        통과  → 네 갈래 ①~④ 부여
   │
   ├─ 3. Assigner        → primary/reviewer 모델·effort
@@ -265,7 +292,9 @@ cursor  -p "<prompt>" --model gpt-5.6-sol-xhigh --output-format stream-json
   │
   ├─ 6. EvidenceCollector → 해당 행의 `운영 기준`이 요구하는 증거 수집
   │
-  └─ 7. DecisionLog     → 2차 append
+  ├─ 7. DecisionLog     → 2차 append
+  │
+  └─ 8. 결과 처리 (v2.1) → 대화 기록에 결과 append → 지휘자 요약 + 다음 제안 (§6.4.4)
 ```
 
 ### 4.1 Gatekeeper — §1 하한선
@@ -329,6 +358,8 @@ R06 `reproduce`/`fix`/`regress` 단계 표기 지원), 변경 파일은 git 에�
 - primary와 reviewer를 같은 대화 맥락에서 교대로 붙일 수 있다.
 - 최대 턴 수 제한은 없다(사용자가 매 턴 승인하므로). 누적 비용은 계속 표시한다.
 
+**v2.1 개정 (D-031 결정 6):** GUI 채팅이 `/pingpong` 의 기본 형태가 되고, **배정은 턴마다 다시 한다.** 세션 고정 배정(`PingpongSession` 의 생성자 `plan`)은 CLI `--mode pingpong` 에만 남는다 — CLI 가 `ConversationSession` 으로 옮겨 가면 걷어낸다. 턴 모양은 §6.4 가 정한다.
+
 ### 6.2 `/loop` — loop-engineering
 
 자율 반복이다. 구성 요소를 분리한다.
@@ -361,6 +392,54 @@ Evaluator에는 reviewer 슬롯 모델을 쓴다 — 매트릭스의 독립 리�
 
 세 방식 공통: 사이클/턴/노드마다 근거·변경·검증 결과를 남기고, 최대 시도 도달 시 사람에게 올린다.
 
+### 6.4 대화 세션 (v2.1, D-031)
+
+#### 6.4.1 세션과 기록
+
+| 종류 | 작업 폴더 | 기록 파일 |
+|---|---|---|
+| `project` | 사용자가 고른 폴더 (워크트리 포함, D-029) | `<폴더>/.hs-orc/sessions/<id>.jsonl` |
+| `scratch` | `~/.hs-orc/scratch/<id>/` 를 세션 시작 때 만든다 (`HS_ORC_SCRATCH` 로 뿌리를 바꾼다). git 아님, **쓰기 켤 수 없음** | 그 폴더의 `.hs-orc/sessions/<id>.jsonl` |
+
+- `id` 는 결정 로그와 같은 `MMDD-HHMM-xxx` (§8).
+- 기록은 **append-only JSONL** 이다. 한 줄 = 한 사건:
+  `{ v:1, at, turn, kind, … }` — `kind` 는 `user`(메시지) · `direct`(직접 답) · `plan`(배정·비용) · `approval`(승인·거절) · `result`(primary 출력·reviewer 판정·증거·outcome·엔진 세션 id) · `summary`(지휘자 요약·다음 제안) · `error`(실패 사유).
+- 세션을 다시 열면 기록을 **처음부터 다시 읽어** 화면과 맥락을 복원한다. 깨진 줄은 건너뛰고 수를 센다 — 결정 로그와 같은 규칙.
+- 세션 상태는 AO 어휘를 빌린다: `waiting_input`(메시지 대기) · `working`(엔진 실행 중) · `blocked`(위임 승인 대기). **`blocked` 에서는 자동으로 아무것도 진행하지 않는다.**
+
+#### 6.4.2 메시지 1건 처리
+
+```
+user 메시지 append
+  → routeWithFallback(메시지, cwd = 세션 폴더)
+      assigned            → plan append, 상태 blocked, 배정·비용 카드 + 승인 버튼
+      unclassified|direct → 직접 답
+```
+
+**직접 답** (Q11 확정 — Haiku·low, 분류 폴백과 같은 계층):
+- 입력: §6.4.3 의 맥락 + 메시지. 프롬프트가 요구하는 것 — 대화로 답하되 **파일을 고치거나 명령을 실행하지 않는다**, 작업 결과를 지어내지 않는다, 작업으로 보이면 행을 제안한다.
+- 항상 **읽기 전용**으로 띄운다 (`write` 없음). 세션의 쓰기 스위치와 무관하다.
+- 마지막 줄은 `SUGGEST: Rxx` 또는 `SUGGEST: NONE` 이다. reviewer 판정처럼 **마지막 줄만** 읽는다. 못 읽으면 제안 없음 — 행을 추측하지 않는다.
+- 제안이 있으면 화면은 "Rxx 로 위임" 을 띄우고, 누르면 `taskId: Rxx` 로 배정을 받는다 (FR-1 수동 덮어쓰기와 같은 경로). **자동으로 배정하지 않는다.**
+- 비용은 세션 `Budget` 에 `지휘자·Haiku·low` 로 과금하고 메시지 옆에 한 줄로 찍는다. 승인은 받지 않는다.
+- 실패하면 `error` 를 append 하고 사유를 화면에 올린 뒤 `waiting_input` 으로 돌아간다. 조용히 삼키지 않는다.
+
+분류 입력은 **메시지 원문**이다. 후속 메시지("그거 테스트도")는 규칙에 안 붙기 쉽다 — LLM 폴백 프롬프트에 **직전 `summary` 한 줄**을 함께 준다. 규칙 분류기에는 맥락을 섞지 않는다(G1).
+
+#### 6.4.3 맥락 전달
+
+- 위임·직접 답 프롬프트 = `[최근 대화]` + `[이번 요청]`. 최근 대화는 기록에서 `user`·`direct`·`summary` 만 뽑아 **최근 `contextTurns` 턴**(기본 6), 끝에서부터 **`contextChars` 자**(기본 6000)로 자른다. 엔진 원시 출력(`result` 의 본문)은 싣지 않는다 — 요약이 그 자리를 대신한다.
+- rolling 요약은 v2.1 에 두지 않는다. 최근 N턴 자르기로 시작하고, 부족하다는 실측이 나오면 연다.
+- **resume** (§3.8): 다음 위임의 primary 슬롯이 **직전 성공한 위임의 primary 와 엔진·모델·effort 가 같고** 같은 세션 폴더면 그 엔진 세션을 이어 붙인다. 이때 프롬프트에는 그 실행 **이후**의 대화만 싣는다.
+- **reviewer 는 resume 하지 않는다.** 이전 판정의 맥락이 다음 독립 검증을 끌어당기면 D-009 의 "독립" 이 흐려진다.
+
+#### 6.4.4 결과 처리
+
+- 위임이 끝나면 `result` 를 append 한다 (결정 로그 2차와 같은 시점).
+- 지휘자(Haiku·low)가 요청·primary 출력(앞부분)·reviewer 판정·증거 요약을 받아 **3줄 이내 요약**을 낸다 → `summary` append.
+- **다음 제안은 코드가 계산한다.** outcome 이 `wrong`·`unverified` 이거나 판정이 `fail` 이면 사다리(`core/ladder.ts`)의 다음 단계를 제안에 넣는다 — 상향 판단을 모델에 넘기지 않는다(G1). 모델은 요약만 한다.
+- 다음 위임은 사용자가 승인해야 시작한다 (D-015).
+
 ## 7. TUI (v1)
 
 화면 5개 + Debug. 프레임워크는 **Ink 7 + React 19**다 (D-018). **JSX는 쓰지 않는다** — Node의 타입
@@ -390,6 +469,17 @@ Evaluator에는 reviewer 슬롯 모델을 쓴다 — 매트릭스의 독립 리�
   `pull_requests[3]{number,title,state,author,draft,review}:` 헤더 + 들여쓴 CSV 행(제목은 따옴표). `gh`는 `--json number,title,state`다. 어느 쪽도 못 쓰면 **빈 목록이 아니라 사유를 표시한다.**
 - 출처별로 잘라서 보여준다. 한쪽 세션이 많다고 다른 쪽을 밀어내면 "통합 조회"가 아니다.
 
+### 7.1 GUI 화면 (v2.1)
+
+| 화면 | 내용 |
+|---|---|
+| **세션 목록** | 최근 세션(`project` 는 폴더 이름, `scratch` 는 표시) · 상태(`waiting_input`/`working`/`blocked`) · 마지막 메시지 시각. "새 프로젝트 세션" · "새 스크래치" |
+| **세션** | 상단: 작업 폴더(스크래치면 그렇다고)·워크트리·쓰기 스위치 — 폴더가 **항상 보인다**(D-029). 본문: 대화. 배정·비용·승인, 결과, 직접 답의 비용 한 줄이 **대화 안의 카드**로 뜬다. "업무 행 직접 지정" 은 배정 카드의 컨트롤로 남는다 |
+| Dashboard · Reviews · Debug | v2 그대로 |
+| **Agents** | v2 의 "Sessions" 화면(FR-9 — `claude agents`·codex 색인)을 이름만 바꾼다. orc 의 대화 세션과 이름이 겹치면 안 된다 |
+
+v2 의 Run 폼은 세션 화면으로 대체한다. 탭을 옮겨도 세션 화면은 언마운트하지 않는다 (2026-09-23 `fe60bff` 의 원칙).
+
 ## 8. 결정 로그
 
 경로: `~/.claude/logs/delegation-router.jsonl` (라우터 §7 스키마)
@@ -401,7 +491,8 @@ Evaluator에는 reviewer 슬롯 모델을 쓴다 — 매트릭스의 독립 리�
 - `downshifted`/`branch`는 **AA 측정치로 판정한다**(§2.3). 매트릭스 모델은 벤더가 갈려 계층 이름만으로는 비교할 수 없다. 기준 세션 모델은 `HS_ORC_SESSION_MODEL`(기본 `fable`)이다.
 - 자동 증거 수집이 붙기 전까지 2차 줄의 `outcome`은 성공해도 **`unverified`다.** "성공했습니다"는 증거가 아니다(§5).
 - 남기는 경우: 위임했을 때 / 티어를 내렸을 때 / 조건에 걸렸는데 일부러 안 내렸을 때 / 제안했지만 실행되지 않았을 때(거절·차단·무응답)
-- 남기지 않는 경우: 그냥 "직접"으로 간 기본 경로
+- 남기지 않는 경우: 그냥 "직접"으로 간 기본 경로 — v2.1 의 **직접 답·지휘자 요약**이 여기다. 그 기록은 세션 jsonl 에만 있다 (§6.4.1).
+- v2.1: 1차 줄의 `note` 에 세션 id 를 넣어 결정 로그 ↔ 대화 기록을 잇는다.
 
 ## 9. 설정 파일
 
@@ -409,7 +500,9 @@ Evaluator에는 reviewer 슬롯 모델을 쓴다 — 매트릭스의 독립 리�
 |---|---|---|
 | `matrix.json` | 11행 배정표, 모델 계층, 비용, 사다리 | 원본 HTML에서 생성. 대조 테스트 필수 |
 | `engines.json` | 바이너리 경로·이름 해석, 모델↔엔진 매핑, 가용성, effort 표기, cursor 변형 정책 | 수기 |
-| `limits.json` | 최대 반복 수, 최대 노드 수, 누적 비용 상한, 타임아웃 | 수기 |
+| `limits.json` | 최대 반복 수, 최대 노드 수, 누적 비용 상한, 타임아웃. v2.1: `contextTurns`(6)·`contextChars`(6000) | 수기 |
+
+환경 변수 (테스트가 홈을 건드리지 않게 가두는 자리이기도 하다): `HS_ORC_DECISION_LOG` · `HS_ORC_RUN_STORE` · `HS_ORC_PROJECTS` · `HS_ORC_WORKTREES` · v2.1 `HS_ORC_SCRATCH`.
 
 `matrix.json`은 생성물이며 수기 편집하지 않는다.
 
@@ -439,6 +532,13 @@ Evaluator에는 reviewer 슬롯 모델을 쓴다 — 매트릭스의 독립 리�
 | 프로세스 취소 | 자식이 실제로 죽는지 (좀비 없음) |
 | stream-json 파싱 | 깨진 줄 1개가 실행 전체를 죽이지 않는지 |
 | 엔진 통합 | 세 CLI로 짧은 실제 프롬프트 1회씩 |
+| 세션 id·resume argv (v2.1) | 세 엔진 스트림 캡처에서 id 를 읽는지, resume 시 argv 가 §3.8 과 같은지 |
+| 메시지 처리 (v2.1) | 가짜 executor 로: 분류됨 → `blocked` + plan / 미분류 → 직접 답 · 읽기 전용 · 승인 없음 / 직접 답 실패 → `error` + `waiting_input` |
+| `SUGGEST` 읽기 (v2.1) | 마지막 줄만 본다 · 못 읽으면 제안 없음 · 없는 행 id 는 버린다 |
+| 대화 기록 (v2.1) | append-only · 다시 열면 같은 화면·맥락 · 깨진 줄을 세고 건너뛴다 |
+| 맥락 자르기 (v2.1) | 턴 수·글자 수 상한 · `result` 본문 제외 · resume 시 그 실행 이후만 |
+| resume 정책 (v2.1) | 같은 엔진·모델·effort·폴더일 때만 primary 가 잇는다 · **reviewer 는 절대 잇지 않는다** · resume 실패는 새 세션으로 조용히 떨어지지 않는다 |
+| 스크래치 (v2.1) | `HS_ORC_SCRATCH` 안에만 만든다 · 쓰기를 켤 수 없다 |
 
 순수 로직 테스트는 소스 옆 `__tests__/`에 둔다. GWT/AAA, 행위 기술형 `it` 이름.
 
@@ -446,8 +546,11 @@ Evaluator에는 reviewer 슬롯 모델을 쓴다 — 매트릭스의 독립 리�
 
 ## 11. 미해결
 
-1. `/loop` 자체 구현 vs 내장 스킬 활용 (§6.2)
-2. 매트릭스 "해당 없음" 반복 시 행 추가 정책
-3. 누적 비용 상한 기본값
-4. TUI 프레임워크 선택
-5. Cursor `-fast` 변형 사용 조건
+1. ~~`/loop` 자체 구현 vs 내장 스킬 활용~~ → D-016
+2. ~~매트릭스 "해당 없음" 반복 시 행 추가 정책~~ → D-022
+3. ~~누적 비용 상한 기본값~~ → D-017 · D-030
+4. ~~TUI 프레임워크 선택~~ → D-018
+5. ~~Cursor `-fast` 변형 사용 조건~~ → D-023
+6. 스크래치 세션 보존·정리 정책 (DECISIONS Q12)
+7. 위임된 엔진이 사용자 전역 hook·skills·MCP 를 싣고 뜬다 — 격리 여부 (Q13)
+8. 맥락 자르기(최근 N턴)가 부족할 때 rolling 요약을 열 기준 — 실측 뒤 (§6.4.3)
