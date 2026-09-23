@@ -22,7 +22,7 @@ import { collect, type Evidence } from '../core/evidence.ts';
 import { readUnclassified, recordUnclassified, suggestRows } from '../core/unclassified.ts';
 import { defaultVerify } from '../data/verify.ts';
 import { depStatus } from './deps.ts';
-import { runDuo } from '../core/duo.ts';
+import { parseVerdict, reviewPrompt, runDuo } from '../core/duo.ts';
 import { Budget } from '../core/budget.ts';
 import { changedFiles, loadEvidenceFile, runCommand } from '../core/evidence-gather.ts';
 import { GATE_CHECKS, parseGateCheck, type GateSignals } from '../core/gatekeeper.ts';
@@ -259,26 +259,35 @@ async function main(): Promise<void> {
       `상한   최대 ${maxIterations}사이클 · 최악 $${worst.toFixed(2)}(추정, 상한 $${budgetUsd} 에서 강제 중단)` +
         ` · 토큰 ${tokenBudget} (0 = 없음)\n\n`,
     );
+    // reviewer 실행 자체가 죽으면 재시도하지 않는다 — 망가진 엔진에 primary 를 반복해 태우지 않는다 (D-036).
+    let reviewerBroken = false;
     const result = await runLoop(
       matrix,
       plan,
       execute,
       {
-        plan: (ctx) => (ctx.iteration === 1 ? args.task : `${args.task} — 직전 사이클의 지적을 반영하라`),
-        // Evaluator 는 reviewer 슬롯이 돈다 (D-003). 판정은 기계적으로 읽는다.
+        // 재시도면 직전 reviewer 의 지적을 싣는다 — 사유 없는 재시도는 같은 실수를 반복한다 (D-036).
+        plan: (ctx) =>
+          ctx.feedback === undefined
+            ? args.task
+            : `${args.task}\n\n직전 사이클은 독립 검증을 통과하지 못했다. 검증자의 지적:\n${ctx.feedback}\n\n이 지적을 반영해 다시 수행하라.`,
+        // Evaluator 는 reviewer 슬롯이 돈다 (D-003). 형식·판정은 once 의 독립 리뷰와 같다 —
+        // 마지막 줄 PASS/FAIL, 못 읽으면 unknown 이고 통과로 봐주지 않는다.
         evaluate: async (_ctx, output) => {
-          const check = await execute(
-            plan.slots.reviewer,
-            `다음 산출물이 목표 "${args.task}" 를 충족하면 PASS, 아니면 FAIL 만 한 줄로 답하라.\n\n${output}`,
-          );
+          const check = await execute(plan.slots.reviewer, reviewPrompt(plan, args.task, output));
+          reviewerBroken = !check.ok;
+          const verdict = check.ok ? parseVerdict(check.text) : 'unknown';
           return {
-            passed: /\bPASS\b/i.test(check.text),
-            verification: `reviewer ${plan.slots.reviewer.label}: ${check.text.slice(0, 80)}`,
+            passed: verdict === 'pass',
+            verification:
+              `reviewer ${plan.slots.reviewer.label} → ${verdict.toUpperCase()}` +
+              (check.ok ? '' : ` (실행 실패: ${check.text.slice(0, 80)})`),
+            ...(verdict === 'pass' || !check.ok ? {} : { reason: check.text.slice(0, 4000) }),
             cost: check,
           };
         },
         stop: (_ctx, verdict) => verdict.passed,
-        recover: () => 'abort',
+        recover: () => (reviewerBroken ? 'escalate' : 'retry'),
       },
       // 분류 폴백이 이미 과금한 같은 budget 을 넘긴다 — 합산이다 (D-034).
       { goal: args.task, maxIterations, budgetUsd, budget },

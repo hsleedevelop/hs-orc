@@ -174,6 +174,26 @@ describe('/loop — 반복 상한과 비용 상한', () => {
     assert.equal(result.stopReason, 'aborted');
     assert.equal(result.iterations, 1);
   });
+
+  it('retry 사이클의 Planner 는 직전 FAIL 사유를 feedback 으로 받는다 — 눈먼 재시도가 아니다 (D-036)', async () => {
+    const seen: (string | undefined)[] = [];
+    const verdicts = [
+      { passed: false, verification: 'reviewer', reason: '반례 X 가 빠졌다' },
+      { passed: true, verification: 'reviewer' },
+    ];
+    const result = await runLoop(
+      matrix, planR01, fakeExec,
+      {
+        plan: (ctx) => { seen.push(ctx.feedback); return 'work'; },
+        evaluate: (ctx) => verdicts[ctx.iteration - 1] as (typeof verdicts)[number],
+        recover: () => 'retry',
+        stop: (_ctx, v) => v.passed,
+      },
+      { goal: 'g', maxIterations: 5, budgetUsd: 20 },
+    );
+    assert.deepEqual(seen, [undefined, '반례 X 가 빠졌다']);
+    assert.deepEqual([result.stopReason, result.iterations], ['goal-reached', 2]);
+  });
 });
 
 describe('/graph — 순환·노드 상한·비용 상한', () => {
