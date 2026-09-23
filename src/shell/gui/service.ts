@@ -184,6 +184,8 @@ export class GuiService {
     const routed = await routeWithFallback(loadMatrix(), loadEngines(), task, {
       // 분류기도 이 폴더에서 돈다 (D-029) — 분류만 옛 폴더에 남으면 화면과 실행이 갈린다.
       cwd: this.workdir,
+      // 이미 가진 예산을 넘긴다 (D-034) — 분류 폴백 비용도 같은 누적 상한에 합산된다.
+      budget: this.budget,
       ...(options.classifyLlm === undefined ? {} : { classifyLlm: options.classifyLlm }),
       ...(options.taskId ? { taskId: options.taskId } : {}),
     });
@@ -261,6 +263,8 @@ export class GuiService {
     const catalog = loadEngines();
     const routed = await routeWithFallback(matrix, catalog, payload.task, {
       cwd: this.workdir,
+      // 이미 가진 예산을 넘긴다 (D-034) — 분류 폴백 비용도 같은 누적 상한에 합산된다.
+      budget: this.budget,
       ...(payload.classifyLlm === undefined ? {} : { classifyLlm: payload.classifyLlm }),
       ...(payload.taskId ? { taskId: payload.taskId } : {}),
     });

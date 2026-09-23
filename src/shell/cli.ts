@@ -138,14 +138,21 @@ async function main(): Promise<void> {
     gate: args.gate,
   };
 
+  // D-034: 분류 전에 이 실행의 예산을 만든다 — 분류 폴백부터 진행 방식까지 **같은 예산에 합산**한다.
+  // 토큰 상한은 진행 방식별로 지금 값 그대로다: once 만 tokenBudget 을 받는다 — pingpong·loop·graph 는
+  // 0(상한 없음)인 기존 빈틈을 이 변경이 메우지 않는다 (D-034 "드러난 기존 빈틈").
+  const limits = loadLimits();
+  const budgetUsd = args.budgetUsd ?? limits.budgetUsd;
+  const budget = new Budget(budgetUsd, args.mode === 'once' ? limits.tokenBudget : 0);
+
   // 분류·하한선·배정 + LLM 폴백. 순서의 소유자는 Core 다 (SPEC §4, D-026).
-  const routed = await routeWithFallback(matrix, catalog, args.task, { ...options, classifyLlm: args.classifyLlm });
+  const routed = await routeWithFallback(matrix, catalog, args.task, { ...options, classifyLlm: args.classifyLlm, budget });
   const result = routed.result;
   // 폴백이 돌았으면 **반드시 보여준다** — 말없이 도는 유료 호출은 없다.
   if (routed.fallback) {
     const line = `분류   ${routed.fallback.line}`;
     process.stderr.write(
-      routed.fallback.outcome === 'failed'
+      routed.fallback.outcome === 'failed' || routed.fallback.outcome === 'skipped'
         ? `${reportNotice('pipeline', 'classify-fallback', routed.fallback.line).display}\n`
         : `${line}\n`,
     );
@@ -204,13 +211,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  const limits = loadLimits();
-  const budgetUsd = args.budgetUsd ?? limits.budgetUsd;
   const execute = createExecutor(catalog, process.cwd(), args.timeoutMs, { write: args.write });
 
   if (args.mode === 'pingpong') {
     // 자율 실행이 아니다 (D-015). 한 턴만 돌리고 다음 제안을 남긴 뒤 사용자에게 돌려준다.
-    const session = new PingpongSession(matrix, plan, execute, budgetUsd);
+    // 분류 폴백이 이미 과금한 같은 budget 을 넘긴다 — 합산이다 (D-034).
+    const session = new PingpongSession(matrix, plan, execute, budgetUsd, 0, budget);
     const turn = await session.turn({ prompt: args.task, side: args.side });
     process.stdout.write(`${turn.text}\n`);
     process.stderr.write(`\n${session.journal.render()}\n누적   ${turn.budget}\n제안   ${turn.suggestion}\n`);
@@ -242,7 +248,8 @@ async function main(): Promise<void> {
         stop: (_ctx, verdict) => verdict.passed,
         recover: () => 'abort',
       },
-      { goal: args.task, maxIterations, budgetUsd },
+      // 분류 폴백이 이미 과금한 같은 budget 을 넘긴다 — 합산이다 (D-034).
+      { goal: args.task, maxIterations, budgetUsd, budget },
     );
     process.stderr.write(
       `\n${result.journal.render()}\n중단   ${result.stopReason} · ${result.iterations}회\n누적   ${result.budget.summary()}\n`,
@@ -270,7 +277,8 @@ async function main(): Promise<void> {
       ].join('\n'),
     );
 
-    const result = await runGraph(matrix, nodes, execute, { maxNodes: limits.maxNodes, budgetUsd });
+    // 분류 폴백이 이미 과금한 같은 budget 을 넘긴다 — 합산이다 (D-034).
+    const result = await runGraph(matrix, nodes, execute, { maxNodes: limits.maxNodes, budgetUsd, budget });
     process.stderr.write(
       `\n${result.journal.render()}\n묶음   ${result.batches.map((b) => b.join('+')).join(' → ')}\n` +
         `건너뜀 ${result.skipped.join(', ') || '없음'}\n중단   ${result.stopReason}\n누적   ${result.budget.summary()}\n`,
@@ -286,8 +294,8 @@ async function main(): Promise<void> {
   process.stderr.write(`결정   ${decision.id} ${decision.branch}/${decision.tier} → ${decisionLogPath()}\n`);
 
   // **두 슬롯을 실제로 돌린다** (D-009). primary 만 돌리면 이 제품은 단일 엔진 선택기다.
-  const duoBudget = new Budget(budgetUsd, loadLimits().tokenBudget);
-  const duo = await runDuo(matrix, plan, execute, args.task, duoBudget, { skipReviewer: args.skipReviewer });
+  // 분류 폴백이 이미 과금한 같은 budget 을 그대로 쓴다 — 합산이다 (D-034).
+  const duo = await runDuo(matrix, plan, execute, args.task, budget, { skipReviewer: args.skipReviewer });
   const run = {
     outcome: duo.primary.ok ? ('ok' as const) : ('error' as const),
     text: duo.primary.text,
@@ -381,7 +389,7 @@ async function main(): Promise<void> {
     `\n결과   ${run.outcome} · ${run.durationMs}ms` +
       (run.costUsd !== undefined ? ` · $${run.costUsd.toFixed(4)}` : '') +
       (run.unparsedLines.length ? ` · 파싱 실패 ${run.unparsedLines.length}줄` : '') +
-      `\n누적   ${duoBudget.summary()}` +
+      `\n누적   ${budget.summary()}` +
       `\n결정   ${decision.id} 2차 append 완료 (outcome=${outcome})` +
       (stored ? `\n원본   ${stored}` : '') +
       '\n',

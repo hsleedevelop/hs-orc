@@ -59,7 +59,8 @@ function RunScreen({
   useEffect(() => {
     if (!task) { setRouted({ result: null, notes: [] }); return; }
     let live = true;
-    void routeWithFallback(loadMatrix(), loadEngines(), task).then((r) => {
+    // 이미 가진 앱 예산을 넘긴다 (D-034) — 분류 폴백 비용도 같은 누적 상한에 합산된다.
+    void routeWithFallback(loadMatrix(), loadEngines(), task, { budget }).then((r) => {
       if (live) setRouted({ result: r.result, notes: r.fallback ? [r.fallback.line] : [] });
     });
     return () => { live = false; };

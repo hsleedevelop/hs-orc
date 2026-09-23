@@ -76,7 +76,8 @@ describe('CLI 순서 보장', () => {
     // PATH 가 비어 폴백 자체는 실패한다. 그래도 **시도했다는 것**과 실패 사유가 보여야 한다.
     const r = cli(['오늘 점심 뭐 먹지'], NO_PATH);
     assert.match(r.err, /규칙 무매치 → Haiku·low/);
-    assert.match(r.err, /\+\$0\.001/, '유료 호출을 비용 표기 없이 돌리면 안 된다.');
+    // 실행조차 못 했으니(PATH 없음) 비용을 지어내지 않는다 — 그 사실 자체를 찍는다 (D-034).
+    assert.match(r.err, /비용 보고 없음/, '유료 호출 시도는 비용 표기(또는 "없다"는 사실)와 함께 알려야 한다.');
     assert.match(r.err, /classify-fallback/, '폴백 실패를 삼키면 안 된다.');
   });
 
