@@ -6,8 +6,10 @@ import { ClassifyError, classify } from '../classify.ts';
 import { AssignError, assign, crossVendorPair } from '../assign.ts';
 import { GATE_CHECKS, evaluateGate } from '../gatekeeper.ts';
 import { route, routeWithFallback } from '../pipeline.ts';
+import { Budget } from '../budget.ts';
 import { parseGraphSpec, type GraphSpec } from '../modes/graph.ts';
-import { readFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const matrix = loadMatrix();
@@ -142,8 +144,72 @@ describe('routeWithFallback (D-026)', () => {
     process.env['PATH'] = originalPath;
     assert.equal(r.result.stage, 'unclassified');
     assert.equal(r.fallback?.outcome, 'failed');
-    assert.match(r.fallback?.line ?? '', /\+\$0\.001/, '유료 호출 시도는 비용 표기와 함께 알려야 한다.');
+    // 실행조차 못 했으니 비용을 지어내지 않는다 (D-034) — 추정 문구("+$0.001 내외")를 되살리지 않는다.
+    assert.match(r.fallback?.line ?? '', /비용 보고 없음/, '돈 정보가 없다는 사실 자체를 감추면 안 된다.');
     assert.match(r.fallback?.line ?? '', /시도하지 못했다/);
+  });
+});
+
+/**
+ * D-034: 분류 폴백은 **받은 예산에 과금**하고 **실제 금액**을 찍는다.
+ * 예산이 이미 상한이면 폴백을 시작조차 하지 않는다 — 유료 호출을 조용히 더 태우지 않는다.
+ */
+describe('routeWithFallback — 예산 과금 (D-034)', () => {
+  const originalPath = process.env['PATH'] ?? '';
+  after(() => { process.env['PATH'] = originalPath; });
+
+  /** claude 스트림-json 한 줄로 실측 비용·토큰을 함께 돌려주는 가짜 바이너리. */
+  const fakeClaudeBinary = (dir: string, id: string, marker?: string): void => {
+    const bin = path.join(dir, 'claude');
+    const markerLine = marker ? [`touch "${marker}"`] : [];
+    writeFileSync(
+      bin,
+      [
+        '#!/bin/sh',
+        ...markerLine,
+        `printf '{"type":"result","is_error":false,"result":"%s","total_cost_usd":0.015,"usage":{"input_tokens":900,"output_tokens":100,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}\\n' "${id}"`,
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    chmodSync(bin, 0o755);
+  };
+
+  it('분류 폴백이 돌면 실측 비용을 받은 예산에 정확히 한 번 과금하고 토큰을 센다', async () => {
+    const here = mkdtempSync(path.join(os.tmpdir(), 'hs-classify-charge-'));
+    fakeClaudeBinary(here, 'R02');
+    process.env['PATH'] = `${here}${path.delimiter}${originalPath}`;
+    try {
+      const budget = new Budget(20);
+      const r = await routeWithFallback(matrix, catalog, '오늘 점심 뭐 먹지', { budget });
+      assert.equal(budget.charges.length, 1);
+      const charge = budget.charges[0];
+      assert.match(charge?.label ?? '', /^분류·Haiku·low$/);
+      assert.equal(charge?.source, 'actual');
+      assert.equal(charge?.usd, 0.015);
+      assert.equal(budget.spentTokens, 1000);
+      assert.match(r.fallback?.line ?? '', /\$/);
+      assert.match(r.fallback?.line ?? '', /actual/);
+      assert.doesNotMatch(r.fallback?.line ?? '', /내외/);
+    } finally {
+      process.env['PATH'] = originalPath;
+    }
+  });
+
+  it('예산이 이미 상한이면 폴백을 시작하지 않는다 — 가짜 바이너리도 뜨지 않는다', async () => {
+    const here = mkdtempSync(path.join(os.tmpdir(), 'hs-classify-skip-'));
+    const marker = path.join(here, 'spawned');
+    fakeClaudeBinary(here, 'R02', marker);
+    process.env['PATH'] = `${here}${path.delimiter}${originalPath}`;
+    try {
+      const budget = new Budget(0); // 상한 $0 — 이미 닿아 있다.
+      const r = await routeWithFallback(matrix, catalog, '오늘 점심 뭐 먹지', { budget });
+      assert.equal(r.fallback?.outcome, 'skipped');
+      assert.equal(budget.charges.length, 0);
+      assert.equal(existsSync(marker), false, '이미 상한인데 가짜 바이너리가 떴다 — 폴백이 시작됐다는 뜻이다.');
+    } finally {
+      process.env['PATH'] = originalPath;
+    }
   });
 });
 

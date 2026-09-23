@@ -60,6 +60,8 @@ export interface LoopOptions {
   readonly budgetUsd: number;
   /** 생략하면 토큰 상한을 걸지 않는다 (D-030). 구독제에서는 이쪽만 실제로 막는다. */
   readonly tokenBudget?: number;
+  /** 주면 그대로 쓴다 — CLI 가 분류 폴백에 이미 과금한 같은 예산을 넘겨 합산한다 (D-034). */
+  readonly budget?: Budget;
 }
 
 export async function runLoop(
@@ -74,7 +76,7 @@ export async function runLoop(
   }
 
   const journal = new Journal();
-  const budget = new Budget(options.budgetUsd, options.tokenBudget ?? 0);
+  const budget = options.budget ?? new Budget(options.budgetUsd, options.tokenBudget ?? 0);
   const history: string[] = [];
   let iteration = 0;
   let stopReason: LoopStopReason = 'max-iterations';

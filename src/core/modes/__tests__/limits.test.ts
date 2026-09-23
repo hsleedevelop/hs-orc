@@ -8,7 +8,7 @@ import { loadMatrix } from '../../../data/matrix.ts';
 import { loadEngines } from '../../../data/engines.ts';
 import { loadLimits } from '../../../data/limits.ts';
 import { assign, type AssignmentPlan } from '../../assign.ts';
-import { BudgetExceeded, TokenBudgetExceeded } from '../../budget.ts';
+import { Budget, BudgetExceeded, TokenBudgetExceeded } from '../../budget.ts';
 import type { SlotExecutor } from '../../executor.ts';
 import { PingpongSession } from '../pingpong.ts';
 import { runLoop } from '../loop.ts';
@@ -238,5 +238,41 @@ describe('/graph — 병렬 판정과 실패 전파', () => {
     const r = await runGraph(matrix, nodes, failingExec, { maxNodes: 9, budgetUsd: 20 });
     assert.deepEqual(r.skipped, []);
     assert.equal(r.journal.records.length, 2);
+  });
+});
+
+/**
+ * D-034: CLI 가 분류 폴백에 과금한 예산을 진행 방식에도 그대로 넘긴다 — 합산이다.
+ * 주입한 Budget 을 새로 만든 것으로 갈아치우면 분류 폴백의 과금이 사라진다.
+ */
+describe('주입된 Budget 재사용 — CLI 합산 (D-034)', () => {
+  it('PingpongSession 은 주입된 Budget 을 그대로 쓴다', async () => {
+    const budget = new Budget(limits.budgetUsd);
+    budget.charge('분류·Haiku·low', 0.015, 0, undefined, 'api');
+    const session = new PingpongSession(matrix, planR01, fakeExec, limits.budgetUsd, 0, budget);
+    assert.equal(session.budget, budget, '새 Budget 을 만들었다 — 분류 폴백의 과금이 끊겼다.');
+    await session.turn({ prompt: 'a', side: 'primary' });
+    assert.equal(budget.charges.length, 2);
+    assert.equal(budget.charges[0]?.label, '분류·Haiku·low');
+  });
+
+  it('runLoop 은 주입된 Budget 을 그대로 쓴다', async () => {
+    const budget = new Budget(limits.budgetUsd);
+    budget.charge('분류·Haiku·low', 0.015, 0, undefined, 'api');
+    const soloComponents = { plan: () => 'work', evaluate: () => ({ passed: true, verification: 'exit code 0' }) };
+    const result = await runLoop(matrix, planR01, fakeExec, soloComponents, {
+      goal: 'g', maxIterations: 1, budgetUsd: limits.budgetUsd, budget,
+    });
+    assert.equal(result.budget, budget, '새 Budget 을 만들었다 — 분류 폴백의 과금이 끊겼다.');
+    assert.ok(result.budget.charges.some((c) => c.label === '분류·Haiku·low'));
+  });
+
+  it('runGraph 은 주입된 Budget 을 그대로 쓴다', async () => {
+    const budget = new Budget(20);
+    budget.charge('분류·Haiku·low', 0.015, 0, undefined, 'api');
+    const soloNode: GraphNode = { id: 'a', prompt: 'a', plan: planR01, dependsOn: [], writes: ['x'], onFailure: 'skip-dependents' };
+    const r = await runGraph(matrix, [soloNode], fakeExec, { maxNodes: 9, budgetUsd: 20, budget });
+    assert.equal(r.budget, budget, '새 Budget 을 만들었다 — 분류 폴백의 과금이 끊겼다.');
+    assert.ok(r.budget.charges.some((c) => c.label === '분류·Haiku·low'));
   });
 });

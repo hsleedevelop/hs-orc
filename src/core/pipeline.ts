@@ -8,12 +8,13 @@
  * **이 함수가 순서의 유일한 소유자다.** 2번이 1번과 3번 사이에 있는 것이 이 단계의 요점이고,
  * 3번(배정)에 도달하기 전에 어떤 엔진도 띄우지 않는다.
  */
-import type { Matrix } from '../data/matrix.ts';
+import type { Matrix, ModelKey } from '../data/matrix.ts';
 import type { Engines } from '../data/engines.ts';
 import { ClassifyError, assignmentById, classify } from './classify.ts';
 import { evaluateGate, type GateCheck, type GateSignals } from './gatekeeper.ts';
 import { assign, type AssignOptions, type AssignmentPlan } from './assign.ts';
 import { classifyWithModel } from './classify-llm.ts';
+import type { Budget } from './budget.ts';
 
 export type RouteResult =
   /** 11행 중 어디에도 안 붙는다. 기본 배정을 만들지 않고 사용자에게 올린다 (PLAN S3-5). */
@@ -59,7 +60,8 @@ export function route(matrix: Matrix, catalog: Engines, task: string, options: P
 
 /** 폴백이 돌았다는 사실. **셸이 반드시 사용자에게 보여준다** — 말없이 도는 유료 호출은 없다 (D-026). */
 export interface FallbackNote {
-  readonly outcome: 'matched' | 'none' | 'failed';
+  /** skipped = 예산이 이미 상한이라 시작조차 하지 않았다 (D-034). */
+  readonly outcome: 'matched' | 'none' | 'failed' | 'skipped';
   /** 화면에 그대로 찍을 한 줄. 셸마다 다시 쓰지 않는다. */
   readonly line: string;
 }
@@ -79,9 +81,31 @@ export interface FallbackOptions extends PipelineOptions {
    * **숨어 있던 전역 의존을 인자로 드러낸 것**이다.
    */
   readonly cwd?: string;
+  /**
+   * 이 실행의 누적 예산 (D-034). 주면 — 폴백 비용을 여기에 과금하고, 이미 상한이면
+   * 폴백을 **시작하지 않는다**. 안 주면(TUI·GUI 의 옛 호출부 등) 과금 없이 예전처럼 돈다.
+   */
+  readonly budget?: Budget;
 }
 
-const TRY_LINE = '규칙 무매치 → Haiku·low 로 분류만 재시도 (+$0.001 내외 · --no-classify-llm 으로 끈다)';
+/** 매트릭스 행의 슬롯 라벨에서 이 모델의 표시 라벨을 찾는다. 못 찾으면 모델 키를 그대로 쓴다. */
+function modelLabel(matrix: Matrix, model: ModelKey): string {
+  for (const a of matrix.assignments) {
+    if (a.primary.model === model) return a.primary.label;
+    if (a.reviewer.model === model) return a.reviewer.label;
+  }
+  return model.charAt(0).toUpperCase() + model.slice(1);
+}
+
+/** 이번 호출의 실제 비용과 출처. 없으면 지어내지 않고 "없다"고 말한다 (D-034). */
+function costText(actualUsd: number | undefined, meteredUsd: number | undefined): string {
+  if (actualUsd !== undefined) return `$${actualUsd.toFixed(4)} actual`;
+  if (meteredUsd !== undefined) return `$${meteredUsd.toFixed(4)} metered`;
+  return '비용 보고 없음';
+}
+
+const tryLine = (label: string, effort: 'low' | 'medium', cost: string): string =>
+  `규칙 무매치 → ${label}·${effort} 로 분류만 재시도 (${cost} · --no-classify-llm 으로 끈다)`;
 
 /**
  * `route` + LLM 분류 폴백 (D-026). **세 셸이 전부 이 함수를 쓴다** —
@@ -98,21 +122,48 @@ export async function routeWithFallback(
   const result = route(matrix, catalog, task, options);
   if (result.stage !== 'unclassified' || options.classifyLlm === false) return { result, fallback: null };
 
+  const { budget } = options;
+  if (budget?.limitReached()) {
+    return {
+      result,
+      fallback: { outcome: 'skipped', line: `규칙 무매치 → 누적 상한에 닿아 분류 폴백을 시작하지 않는다 (${budget.summary()})` },
+    };
+  }
+
   try {
-    const guessed = await classifyWithModel(matrix, catalog, task, {
+    const outcome = await classifyWithModel(matrix, catalog, task, {
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     });
-    if (!guessed) return { result, fallback: { outcome: 'none', line: `${TRY_LINE} → 맞는 행 없음` } };
+
+    const label = modelLabel(matrix, outcome.model);
+    if (budget) {
+      // 실패했어도 쓴 것은 쓴 것이다 — 과금은 ok 여부와 무관하다 (D-034).
+      const estimate = matrix.economics.find((e) => e.model === outcome.model)?.taskCostUsd ?? 0;
+      const plan = catalog.engines[catalog.models[outcome.model].defaultEngine].plan;
+      budget.charge(`분류·${label}·${outcome.effort}`, outcome.actualUsd, estimate, outcome.meteredUsd, plan);
+      budget.countTokens(outcome.usage);
+    }
+    const line = tryLine(label, outcome.effort, costText(outcome.actualUsd, outcome.meteredUsd));
+
+    if (!outcome.ok || outcome.assignment === null) {
+      return { result, fallback: { outcome: 'none', line: `${line} → 맞는 행 없음` } };
+    }
     return {
-      result: route(matrix, catalog, task, { ...options, taskId: guessed.id, reasonLabel: 'Haiku·low 분류' }),
-      fallback: { outcome: 'matched', line: `${TRY_LINE} → ${guessed.id}` },
+      result: route(matrix, catalog, task, {
+        ...options,
+        taskId: outcome.assignment.id,
+        reasonLabel: `${label}·${outcome.effort} 분류`,
+      }),
+      fallback: { outcome: 'matched', line: `${line} → ${outcome.assignment.id}` },
     };
   } catch (error) {
+    // 던진 지점(ClassifierModelError·어댑터 오류)은 **실행 전**이다 — 쓴 돈이 없으니 과금하지 않는다.
+    const label = modelLabel(matrix, 'haiku');
     return {
       result,
       fallback: {
         outcome: 'failed',
-        line: `${TRY_LINE} → 시도하지 못했다: ${error instanceof Error ? error.message : String(error)}`,
+        line: `${tryLine(label, 'low', '비용 보고 없음')} → 시도하지 못했다: ${error instanceof Error ? error.message : String(error)}`,
       },
     };
   }

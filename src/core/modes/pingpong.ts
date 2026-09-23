@@ -37,11 +37,15 @@ export class PingpongSession {
   private readonly execute: SlotExecutor;
   private turns = 0;
 
-  constructor(matrix: Matrix, plan: AssignmentPlan, execute: SlotExecutor, budgetUsd: number, tokenBudget = 0) {
+  /**
+   * `budget` 을 주면 그것을 그대로 쓴다 — CLI 가 분류 폴백에 이미 과금한 같은 예산을 넘겨
+   * **합산**하기 위함이다 (D-034). 안 주면 지금처럼 새로 만든다.
+   */
+  constructor(matrix: Matrix, plan: AssignmentPlan, execute: SlotExecutor, budgetUsd: number, tokenBudget = 0, budget?: Budget) {
     this.matrix = matrix;
     this.plan = plan;
     this.execute = execute;
-    this.budget = new Budget(budgetUsd, tokenBudget);
+    this.budget = budget ?? new Budget(budgetUsd, tokenBudget);
   }
 
   get turnCount(): number {

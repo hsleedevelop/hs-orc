@@ -8,12 +8,29 @@ import type { Engines } from '../data/engines.ts';
 import { adapterFor } from '../adapters/engine.ts';
 import { assignmentById } from './classify.ts';
 import type { Assignment } from '../data/matrix.ts';
+import { meteredUsd, type TokenCounts } from '../data/pricing.ts';
 
 /** 분류 전용으로 허용된 모델. 이 목록 밖은 던진다 — 분류에 비싼 모델이 새어 들어가는 것을 막는다. */
 export const CLASSIFIER_MODELS: readonly ModelKey[] = ['haiku', 'luna'];
 
 export class ClassifierModelError extends Error {
   override name = 'ClassifierModelError';
+}
+
+/**
+ * 분류기의 실행 결과 (D-034). 행뿐 아니라 **실행 결과**를 돌려준다 —
+ * 안 그러면 `routeWithFallback` 이 폴백 비용을 셀 수 없고, 누적 상한이 그만큼 거짓이 된다.
+ */
+export interface ClassifyOutcome {
+  readonly assignment: Assignment | null;
+  /** false = 엔진이 실패했다. 그래도 쓴 것은 과금한다 (D-034). */
+  readonly ok: boolean;
+  readonly actualUsd?: number;
+  readonly meteredUsd?: number;
+  readonly usage?: TokenCounts;
+  /** 과금 라벨·단가 조회용 — 분류기에 실제로 뜬 모델. */
+  readonly model: ModelKey;
+  readonly effort: 'low' | 'medium';
 }
 
 export function buildClassifyPrompt(matrix: Matrix, task: string): string {
@@ -43,7 +60,7 @@ export async function classifyWithModel(
      */
     cwd?: string;
   } = {},
-): Promise<Assignment | null> {
+): Promise<ClassifyOutcome> {
   const model = options.model ?? 'haiku';
   if (!CLASSIFIER_MODELS.includes(model)) {
     throw new ClassifierModelError(`분류에는 저비용 모델만 쓴다: ${CLASSIFIER_MODELS.join(' | ')} (요청: ${model})`);
@@ -61,16 +78,28 @@ export async function classifyWithModel(
     isolate: true,
   });
   const result = await handle.result;
-  if (result.outcome !== 'ok') return null;
+
+  // 엔진이 비용을 안 주면 토큰으로 계산해 본다 — 단가 선언이 없으면 undefined 로 남는다 (createExecutor 와 같은 규칙).
+  const modelId = catalog.models[model].availability[catalog.models[model].defaultEngine]?.id ?? '';
+  const metered = result.costUsd === undefined ? meteredUsd(modelId, result.usage) : undefined;
+  const outcome = {
+    ok: result.outcome === 'ok',
+    model,
+    effort,
+    ...(result.costUsd !== undefined ? { actualUsd: result.costUsd } : {}),
+    ...(metered !== undefined ? { meteredUsd: metered } : {}),
+    ...(result.usage !== undefined ? { usage: result.usage } : {}),
+  };
+  if (result.outcome !== 'ok') return { ...outcome, assignment: null };
 
   const answer = result.text.trim().toUpperCase();
-  if (answer.startsWith('NONE')) return null;
+  if (answer.startsWith('NONE')) return { ...outcome, assignment: null };
 
   const id = /R\d{2}/.exec(answer)?.[0];
-  if (!id) return null;
+  if (!id) return { ...outcome, assignment: null };
   try {
-    return assignmentById(matrix, id);
+    return { ...outcome, assignment: assignmentById(matrix, id) };
   } catch {
-    return null;
+    return { ...outcome, assignment: null };
   }
 }

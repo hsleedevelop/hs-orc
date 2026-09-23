@@ -48,10 +48,71 @@ describe('분류 폴백', () => {
     process.env['PATH'] = `${here}${path.delimiter}${realPath ?? ''}`;
     try {
       const withCwd = await classifyWithModel(matrix, loadEngines(), '아무거나', { cwd: project });
-      assert.equal(withCwd?.id, 'R03', '넘긴 폴더에서 돌지 않았다');
+      assert.equal(withCwd.assignment?.id, 'R03', '넘긴 폴더에서 돌지 않았다');
 
       const withoutCwd = await classifyWithModel(matrix, loadEngines(), '아무거나');
-      assert.equal(withoutCwd?.id, 'R01', '기본은 process.cwd() 그대로다 — CLI·TUI 는 안 바뀐다');
+      assert.equal(withoutCwd.assignment?.id, 'R01', '기본은 process.cwd() 그대로다 — CLI·TUI 는 안 바뀐다');
+    } finally {
+      process.env['PATH'] = realPath;
+    }
+  });
+
+  /**
+   * D-034: 행뿐 아니라 **실행 결과**(성공 여부·실측 금액·측정 토큰)를 돌려준다 —
+   * 안 그러면 어떤 셸도 분류 폴백의 비용을 셀 수 없다.
+   */
+  it('실측 비용·토큰·성공 여부를 함께 돌려준다', async () => {
+    const here = mkdtempSync(path.join(os.tmpdir(), 'hs-classify-outcome-'));
+    const bin = path.join(here, 'claude');
+    writeFileSync(
+      bin,
+      [
+        '#!/bin/sh',
+        'printf \'{"type":"result","is_error":false,"result":"R02","total_cost_usd":0.015,"usage":{"input_tokens":900,"output_tokens":100,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}\\n\'',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    chmodSync(bin, 0o755);
+
+    const realPath = process.env['PATH'];
+    process.env['PATH'] = `${here}${path.delimiter}${realPath ?? ''}`;
+    try {
+      const outcome = await classifyWithModel(matrix, loadEngines(), '아무거나');
+      assert.equal(outcome.ok, true);
+      assert.equal(outcome.assignment?.id, 'R02');
+      assert.equal(outcome.model, 'haiku');
+      assert.equal(outcome.effort, 'low');
+      assert.equal(outcome.actualUsd, 0.015);
+      assert.deepEqual(outcome.usage, {
+        inputTokens: 900, outputTokens: 100, cachedInputTokens: 0, cacheWriteTokens: 0,
+      });
+    } finally {
+      process.env['PATH'] = realPath;
+    }
+  });
+
+  it('엔진이 실패해도 성공 여부·비용은 돌려준다 — 쓴 것은 과금 대상이다', async () => {
+    const here = mkdtempSync(path.join(os.tmpdir(), 'hs-classify-outcome-fail-'));
+    const bin = path.join(here, 'claude');
+    writeFileSync(
+      bin,
+      [
+        '#!/bin/sh',
+        'printf \'{"type":"result","is_error":true,"result":"","total_cost_usd":0.004}\\n\'',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    chmodSync(bin, 0o755);
+
+    const realPath = process.env['PATH'];
+    process.env['PATH'] = `${here}${path.delimiter}${realPath ?? ''}`;
+    try {
+      const outcome = await classifyWithModel(matrix, loadEngines(), '아무거나');
+      assert.equal(outcome.ok, false);
+      assert.equal(outcome.assignment, null);
+      assert.equal(outcome.actualUsd, 0.004);
     } finally {
       process.env['PATH'] = realPath;
     }
