@@ -153,6 +153,18 @@ describe('/loop — 반복 상한과 비용 상한', () => {
     assert.ok(labels.some((l) => l.includes('Evaluator') && l.includes('Astra')));
   });
 
+  it('Evaluator 도 실제 비용·토큰으로 과금한다 — 토큰 상한이 reviewer 몫을 빼먹지 않는다 (D-036)', async () => {
+    const usage = { inputTokens: 400, outputTokens: 100, cachedInputTokens: 0, cacheWriteTokens: 0 };
+    const result = await runLoop(
+      matrix, planR10, fakeExec,
+      { ...components, evaluate: () => ({ passed: true, verification: 'reviewer', cost: { actualUsd: 0.5, usage } }) },
+      { goal: 'g', maxIterations: 1, budgetUsd: 100, tokenBudget: 10_000 },
+    );
+    const evaluator = result.budget.charges.find((c) => c.label.includes('Evaluator'));
+    assert.deepEqual([evaluator?.usd, evaluator?.source], [0.5, 'actual']);
+    assert.equal(result.budget.spentTokens, 500);
+  });
+
   it('검증에 실패하면 기본은 중단이다 — 검증 없이 다음 사이클로 넘어가지 않는다', async () => {
     const result = await runLoop(
       matrix, planR01, failingExec,

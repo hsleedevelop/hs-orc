@@ -9,7 +9,7 @@
 import type { Matrix } from '../../data/matrix.ts';
 import { Budget, BudgetExceeded, TokenBudgetExceeded } from '../budget.ts';
 import { Journal } from '../journal.ts';
-import { estimateUsd, type SlotExecutor } from '../executor.ts';
+import { estimateUsd, type SlotExecutor, type SlotRun } from '../executor.ts';
 import type { AssignmentPlan } from '../assign.ts';
 
 export interface LoopContext {
@@ -22,6 +22,11 @@ export interface Verdict {
   readonly passed: boolean;
   /** 어떻게 판정했는가. 비면 검증하지 않은 것이다. */
   readonly verification: string;
+  /**
+   * 판정에 쓴 reviewer 실행의 비용·토큰 (D-036). 주면 Executor 와 같은 우선순위로 과금하고 토큰을 센다.
+   * 없으면 추정 금액만 적는다 — 토큰 상한이 reviewer 몫을 세지 못한다.
+   */
+  readonly cost?: Pick<SlotRun, 'actualUsd' | 'meteredUsd' | 'usage'>;
 }
 
 export interface LoopComponents {
@@ -116,11 +121,12 @@ export async function runLoop(
     const verdict = await components.evaluate(ctx, run.text);
     budget.charge(
       `#${iteration} Evaluator ${plan.slots.reviewer.label}`,
-      undefined,
+      verdict.cost?.actualUsd,
       estimateUsd(matrix, plan.slots.reviewer),
-      undefined,
+      verdict.cost?.meteredUsd,
       plan.slots.reviewer.plan,
     );
+    if (verdict.cost) budget.countTokens(verdict.cost.usage);
 
     const critique = components.critique ? await components.critique(ctx, run.text) : '';
     history.push(`#${iteration} ${task} → ${verdict.passed ? 'pass' : 'fail'}`);

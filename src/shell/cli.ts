@@ -271,7 +271,11 @@ async function main(): Promise<void> {
             plan.slots.reviewer,
             `다음 산출물이 목표 "${args.task}" 를 충족하면 PASS, 아니면 FAIL 만 한 줄로 답하라.\n\n${output}`,
           );
-          return { passed: /\bPASS\b/i.test(check.text), verification: `reviewer ${plan.slots.reviewer.label}: ${check.text.slice(0, 80)}` };
+          return {
+            passed: /\bPASS\b/i.test(check.text),
+            verification: `reviewer ${plan.slots.reviewer.label}: ${check.text.slice(0, 80)}`,
+            cost: check,
+          };
         },
         stop: (_ctx, verdict) => verdict.passed,
         recover: () => 'abort',
