@@ -13,7 +13,7 @@
 import { createElement as h, useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 
-const SCREENS = ['Run', 'Dashboard', 'Sessions', 'Reviews', 'Debug'] as const;
+const SCREENS = ['Session', 'Dashboard', 'Agents', 'Reviews', 'Debug'] as const;
 type Screen = (typeof SCREENS)[number];
 
 type DepStatus =
@@ -25,9 +25,29 @@ interface ProjectState { current: ProjectInfo; recent: ProjectInfo[] }
 interface WorktreeInfo { dir: string; branch: string | null; head: string; main: boolean; locked: boolean }
 interface WorktreeState { repo: string | null; items: WorktreeInfo[]; current: string }
 
+type SessionKind = 'project' | 'scratch';
+type SessionState = 'waiting_input' | 'working' | 'blocked';
+type Rec =
+  | { kind: 'user'; turn: number; text: string }
+  | { kind: 'direct'; turn: number; text: string; suggest: string | null; cost: string; notes: string[] }
+  | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; estimateUsd: number; notes: string[] }
+  | { kind: 'approval'; turn: number; approved: boolean; write: boolean }
+  | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string }
+  | { kind: 'summary'; turn: number; text: string; next: string }
+  | { kind: 'error'; turn: number; text: string };
+interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string }
+interface SessionSummary { id: string; dir: string; kind: SessionKind; lastAt: string; preview: string }
+
 interface Bridge {
-  plan(payload: { task: string; write: boolean; taskId?: string }): Promise<RunView>;
-  run(payload: { task: string; verify: string[]; write: boolean; taskId?: string }): Promise<RunResult>;
+  convList(): Promise<SessionSummary[]>;
+  convStart(kind: SessionKind): Promise<SessionView>;
+  convOpen(payload: { kind: SessionKind; dir: string; id: string }): Promise<SessionView>;
+  convView(): Promise<SessionView>;
+  convSend(text: string): Promise<SessionView>;
+  convPlanAs(taskId: string): Promise<SessionView>;
+  convApprove(payload: { verify: string[]; write: boolean }): Promise<SessionView>;
+  convReject(): Promise<SessionView>;
+  convClose(): Promise<void>;
   tasks(): Promise<TaskRow[]>;
   projects(): Promise<ProjectState>;
   pickProject(): Promise<ProjectState | null>;
@@ -41,20 +61,7 @@ interface Bridge {
   debug(): Promise<DebugInfo>;
   crashTest(): Promise<string>;
 }
-interface RunView {
-  title: { text: string };
-  lines: string[];
-  cost: { line: string; badge: { grade: string; text: string }; disclaimer: string } | null;
-  awaitingApproval: boolean;
-  stage: 'input' | 'unclassified' | 'direct' | 'assigned';
-}
 interface TaskRow { id: string; task: string }
-interface EvidenceReport { satisfied: boolean; missing: string[]; rejected: { why: string }[]; summary: string }
-interface RunResult {
-  ok: boolean; text: string; outcome?: string; report?: EvidenceReport;
-  verdict?: 'pass' | 'fail' | 'unknown'; review?: string;
-  budget?: string; journal?: string; view?: RunView;
-}
 interface Probe<T> { rows: T[]; note: string }
 interface SessionRow { source: string; name: string; status: string; provenance: string }
 interface ReviewRow { ref: string; title: string; state: string }
@@ -235,169 +242,165 @@ function ProjectBar(props: { state: ProjectState | null; onChange: (s: ProjectSt
   );
 }
 
-// ── Run ────────────────────────────────────────────────────
-/** `taskId` 가 있으면 사용자가 고른 행이다 — 승인할 때 run 에도 같은 행을 보낸다. */
-interface Planned { task: string; write: boolean; taskId?: string; view: RunView }
+// ── 세션 ───────────────────────────────────────────────────
+const lines = (s: string): string[] => s.split('\n').map((v) => v.trim()).filter(Boolean);
 
-function RunScreen(props: { projectDir: string | undefined }): ReactElement {
+function SessionList(props: { onOpen: (v: SessionView) => void; onError: (m: string) => void }): ReactElement {
+  const list = useAsync(() => orc.convList());
+  const [busy, setBusy] = useState(false);
+  const start = (kind: SessionKind) => {
+    setBusy(true);
+    orc.convStart(kind).then(props.onOpen, (e: unknown) => props.onError(why(e))).finally(() => setBusy(false));
+  };
+  const open = (s: SessionSummary) => {
+    orc.convOpen({ kind: s.kind, dir: s.dir, id: s.id }).then(props.onOpen, (e: unknown) => props.onError(why(e)));
+  };
+  return h('div', { className: 'stack' },
+    card('새 세션',
+      h('div', { className: 'row' },
+        h('button', { className: 'btn accent', disabled: busy, onClick: () => start('project') }, '이 폴더에서 시작'),
+        h('button', { className: 'btn', disabled: busy, onClick: () => start('scratch') }, '스크래치'),
+        h('span', { className: 'hint' }, '스크래치는 폴더 없이 시작한다 — 쓰기를 켤 수 없다'))),
+    card('최근 세션',
+      !list ? text('불러오는 중…', 'dim')
+      : list.length === 0 ? text('아직 없다', 'dim')
+      : h('table', null, h('tbody', null, ...list.map((s) =>
+          h('tr', { key: `${s.dir}/${s.id}`, className: 'clickable', onClick: () => open(s) },
+            h('td', { className: 'mono dim' }, s.kind === 'scratch' ? '스크래치' : elide(s.dir, 30)),
+            h('td', null, s.preview || '(빈 세션)'),
+            h('td', { className: 'mono dim' }, s.lastAt.slice(0, 16).replace('T', ' '))))))));
+}
+
+function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v: SessionView) => void; onClose: () => void }): ReactElement {
+  const { view, onChange } = props;
   const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState('');
   const [verify, setVerify] = useState('');
   const [write, setWrite] = useState(false);
-  const [planned, setPlanned] = useState<Planned | null>(null);
-  const [result, setResult] = useState<RunResult | null>(null);
-  const [error, setError] = useState('');
-  const [planning, setPlanning] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [rows, setRows] = useState<TaskRow[]>([]);
-  /** 배정·결과가 새로 뜨면 그 자리로 옮긴다 — 입력 아래 카드들에 가려 "아무 일 없음"으로 보이지 않게. */
-  const outcomeRef = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState('');
+  const endRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { orc.tasks().then(setRows, (e: unknown) => setError(why(e))); }, []);
-  useEffect(() => { outcomeRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [planned, result]);
+  // 새 기록·진행 표시가 뜨면 그 자리로 간다 — 입력 아래에 가려 "아무 일 없음"으로 보이지 않게.
+  useEffect(() => { endRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [view.records.length, busy]);
 
-  // 폴더가 바뀌면 이전 배정·결과는 **다른 프로젝트의 것이다.** 남겨 두면 잘못된 폴더로 승인하게 된다.
-  useEffect(() => { setPlanned(null); setResult(null); setError(''); }, [props.projectDir]);
-
-  const plan = useCallback((task: string, w: boolean, taskId?: string) => {
-    if (!task.trim()) { setPlanned(null); return; }
-    setPlanning(true);
-    setError('');
-    setResult(null);
-    orc.plan({ task, write: w, ...(taskId ? { taskId } : {}) })
-      .then((view) => setPlanned({ task, write: w, ...(taskId ? { taskId } : {}), view }), (e: unknown) => setError(why(e)))
-      .finally(() => setPlanning(false));
-  }, []);
-
-  const toggleWrite = useCallback((next: boolean) => {
-    setWrite(next);
-    // 쓰기 여부는 배정 화면에 찍히는 값이다 — 이미 배정을 봤다면 그 자리에서 다시 받는다.
-    if (planned) plan(planned.task, next, planned.taskId);
-  }, [planned, plan]);
-
-  const approve = useCallback(() => {
-    if (!planned) return;
+  const act = (p: Promise<SessionView>) => {
     setBusy(true);
-    setResult(null);
     setError('');
-    // **화면에 찍힌 그 작업**을 보낸다. 입력창의 최신 글자가 아니다.
-    orc.run({
-      task: planned.task,
-      verify: verify.split('\n').map((v) => v.trim()).filter(Boolean),
-      write: planned.write,
-      ...(planned.taskId ? { taskId: planned.taskId } : {}),
-    })
-      .then(setResult, (e: unknown) => setError(why(e)))
-      .finally(() => setBusy(false));
-  }, [planned, verify]);
+    p.then(onChange, (e: unknown) => setError(why(e))).finally(() => { setBusy(false); setSending(''); });
+  };
+  const send = () => {
+    const t = draft.trim();
+    if (!t) return;
+    setDraft('');
+    setSending(t);
+    act(orc.convSend(t));
+  };
 
-  const stale = planned !== null && draft.trim() !== planned.task.trim();
-  const view = planned?.view ?? null;
+  const last = view.records.at(-1);
+  const canType = view.state === 'waiting_input' && !busy;
 
-  return h(
-    'div',
-    { className: 'stack' },
+  const planCard = (r: Extract<Rec, { kind: 'plan' }>, i: number, active: boolean): ReactNode =>
+    h('section', { key: i, className: 'card' },
+      h('span', { className: 'label' }, `배정 · ${r.taskId}`),
+      ...r.notes.map((n, j) => h('div', { key: `n${j}`, className: 'hint' }, n)),
+      planLine(`분류 ${r.taskId} ${r.title}  (${r.reason})`, 0),
+      planLine(`primary  ${r.primary}`, 1),
+      planLine(`reviewer ${r.reviewer}`, 2),
+      planLine(`비용 예상 $${r.estimateUsd}`, 3),
+      active
+        ? h('div', { className: 'stack', style: { padding: 0, width: '100%', marginTop: 10 } },
+            h('div', { className: 'row' },
+              // 행을 바꾸면 이 배정을 거절하고 새 행으로 다시 받는다 — 승인은 화면에 찍힌 그 배정으로만 간다.
+              h('select', {
+                value: r.taskId,
+                disabled: busy,
+                onChange: (e: { target: { value: string } }) => act(orc.convReject().then(() => orc.convPlanAs(e.target.value))),
+              }, ...props.rows.map((row) => h('option', { key: row.id, value: row.id }, `${row.id} · ${row.task}`))),
+              h('span', { className: 'hint' }, '업무 행 직접 지정')),
+            h('textarea', {
+              className: 'code', rows: 2, value: verify, placeholder: '검증 명령 · 한 줄에 하나 (예: npm test)',
+              onChange: (e: { target: { value: string } }) => setVerify(e.target.value),
+            }),
+            h('label', { className: 'toggle' },
+              h('input', {
+                type: 'checkbox', checked: write && view.kind !== 'scratch', disabled: view.kind === 'scratch',
+                onChange: (e: { target: { checked: boolean } }) => setWrite(e.target.checked),
+              }),
+              h('span', { className: 'track' }),
+              h('span', { className: 'text' },
+                view.kind === 'scratch' ? '스크래치는 쓰기를 켤 수 없다'
+                : write ? h('b', null, 'primary 슬롯이 이 폴더의 파일을 고칠 수 있다')
+                : 'primary 슬롯 파일 쓰기 (--write)',
+                h('span', { className: 'dim' }, ' · reviewer 는 언제나 읽기 전용'))),
+            h('div', { className: 'row' },
+              h('button', {
+                className: 'btn accent', disabled: busy,
+                onClick: () => act(orc.convApprove({ verify: lines(verify), write: write && view.kind !== 'scratch' })),
+              }, busy ? '실행 중…' : `승인하고 실행 · 두 슬롯${write && view.kind !== 'scratch' ? ' · 쓰기 켜짐' : ''}`),
+              h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convReject()) }, '거절')))
+        : null);
+
+  const record = (r: Rec, i: number): ReactNode => {
+    switch (r.kind) {
+      case 'user':
+        return h('div', { key: i, className: 'bubble user' }, r.text);
+      case 'direct': {
+        const suggest = r.suggest;
+        return h('div', { key: i, className: 'bubble orc' },
+          ...r.notes.map((n, j) => h('div', { key: `n${j}`, className: 'hint' }, n)),
+          h('div', null, r.text),
+          h('div', { className: 'hint' }, `직접 답 · 지휘자 Haiku·low · ${r.cost}`),
+          suggest && r === last && view.state === 'waiting_input'
+            ? h('button', { className: 'btn accent', disabled: busy, onClick: () => act(orc.convPlanAs(suggest)) }, `${suggest} 로 위임`)
+            : null);
+      }
+      case 'plan':
+        return planCard(r, i, r === last && view.state === 'blocked');
+      case 'approval':
+        return h('div', { key: i, className: 'hint' }, r.approved ? `승인${r.write ? ' · 쓰기 켜짐' : ''}` : '거절');
+      case 'result':
+        return h('section', { key: i, className: 'card' },
+          h('span', { className: 'label' }, `위임 결과 · ${r.decisionId}`),
+          h('div', { className: 'row' },
+            h('span', { className: `chip ${r.verdict}` }, r.verdict.toUpperCase()),
+            h('span', { className: r.outcome === 'ok' ? 'good mono' : 'warn mono' }, `outcome = ${r.outcome}`)),
+          h('div', { className: r.outcome === 'ok' ? 'good mono' : 'warn mono' }, r.evidence),
+          h('pre', { style: { marginTop: 10 } }, r.text || '(빈 출력)'),
+          r.review ? h('pre', { style: { marginTop: 10 } }, r.review) : null);
+      case 'summary':
+        return h('div', { key: i, className: 'bubble orc' },
+          r.text ? h('div', null, r.text) : null,
+          r.next ? h('div', { className: 'warn' }, r.next) : null);
+      case 'error':
+        return h('div', { key: i, className: 'banner error' }, r.text);
+    }
+  };
+
+  return h('div', { className: 'stack' },
+    h('div', { className: 'row' },
+      h('span', { className: 'mono dim' }, view.kind === 'scratch' ? `스크래치 · ${elide(view.dir, 50)}` : elide(view.dir, 60)),
+      h('div', { className: 'spacer' }),
+      h('span', { className: 'dim mono' }, view.budget),
+      h('button', { className: 'btn', onClick: props.onClose }, '세션 목록')),
+    view.broken > 0 ? h('div', { className: 'banner error' }, `기록에 깨진 줄 ${view.broken}개 — 건너뛰고 보여준다`) : null,
+    ...view.records.map(record),
+    sending ? h('div', { className: 'bubble user dim' }, sending) : null,
+    busy ? text(view.state === 'blocked' || last?.kind === 'plan' ? '실행 중…' : '생각 중…', 'dim') : null,
     error ? h('div', { className: 'banner error' }, error) : null,
-
-    card('작업',
+    h('div', { ref: endRef }),
+    card(null,
       h('textarea', {
-        rows: 3,
-        value: draft,
-        placeholder: '예) 이 아키텍처 설계 검토해줘',
+        rows: 3, value: draft, disabled: !canType,
+        placeholder: view.state === 'blocked' ? '배정을 승인하거나 거절해야 다음 메시지를 받는다' : '메시지 · ⌘↵ 전송',
         onChange: (e: { target: { value: string } }) => setDraft(e.target.value),
         onKeyDown: (e: { key: string; metaKey: boolean; ctrlKey: boolean; preventDefault: () => void }) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); plan(draft, write); }
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }
         },
       }),
       h('div', { className: 'row', style: { marginTop: 10 } },
-        h('span', { className: 'hint' }, planning ? '분류 중…' : stale ? '작업이 바뀌었다 — 다시 전송해야 배정이 갱신된다' : ''),
         h('div', { className: 'spacer' }),
-        h('span', { className: 'hint' }, h('span', { className: 'kbd' }, '⌘'), h('span', { className: 'kbd' }, '↵')),
-        h('button', { className: 'btn accent', disabled: planning || !draft.trim(), onClick: () => plan(draft, write) },
-          planning ? '분류 중…' : '전송'))),
-
-    card('검증 명령 · 한 줄에 하나',
-      h('textarea', { className: 'code', rows: 2, value: verify, placeholder: 'npm test', onChange: (e: { target: { value: string } }) => setVerify(e.target.value) }),
-      h('div', { className: 'hint', style: { marginTop: 8 } }, '증거가 없으면 완료로 닫지 않는다 — 결과는 unverified 로 남는다.')),
-
-    card(null,
-      h('label', { className: 'toggle' },
-        h('input', { type: 'checkbox', checked: write, onChange: (e: { target: { checked: boolean } }) => toggleWrite(e.target.checked) }),
-        h('span', { className: 'track' }),
-        h('span', { className: 'text' },
-          write ? h('b', null, 'primary 슬롯이 이 폴더의 파일을 고칠 수 있다') : 'primary 슬롯 파일 쓰기 (--write)',
-          h('span', { className: 'dim' }, ' · reviewer 는 언제나 읽기 전용')))),
-
-    h('div', { ref: outcomeRef, className: 'stack', style: { padding: 0, width: '100%' } },
-    view ? card('배정', ...view.lines.map((l, i) => planLine(l, i))) : null,
-
-    // 승인 버튼이 없는 분기는 **왜 없는지와 다음 행동**을 말한다. 말없이 멈추면 고장처럼 보인다.
-    view?.stage === 'unclassified'
-      ? h('div', { className: 'banner note' }, '분류되지 않아 실행할 배정이 없다 — 아래에서 업무 행을 직접 고르면 배정과 비용이 나온다.')
-      : null,
-    view?.stage === 'direct'
-      ? h('div', { className: 'banner note' }, '하한선 판정 — 엔진을 띄울 작업이 아니다. 승인할 실행이 없다.')
-      : null,
-
-    // `--task` 의 GUI 판. 한 번 고른 뒤에도 남겨 두어 다른 행으로 바꿀 수 있게 한다.
-    planned && (view?.stage === 'unclassified' || planned.taskId)
-      ? card('업무 행 직접 지정',
-          h('div', { className: 'row' },
-            h('select', {
-              value: planned.taskId ?? '',
-              disabled: planning || busy || stale,
-              onChange: (e: { target: { value: string } }) => { if (e.target.value) plan(planned.task, planned.write, e.target.value); },
-            },
-            h('option', { key: 'none', value: '' }, '행을 고른다…'),
-            ...rows.map((r) => h('option', { key: r.id, value: r.id }, `${r.id} · ${r.task}`))),
-            h('span', { className: 'hint' }, stale ? '작업이 바뀌었다 — 먼저 다시 전송' : '분류를 건너뛴다 (CLI --task 와 같다)')))
-      : null,
-
-    view?.cost
-      ? h('section', { className: 'card accented' },
-          h('span', { className: 'label' }, '비용'),
-          h('div', { className: 'row' },
-            h('span', { className: 'cost-figure' }, view.cost.line),
-            h('span', { className: 'chip grade' }, view.cost.badge.grade),
-            h('span', { className: 'hint' }, view.cost.badge.text)),
-          h('div', { className: 'hint', style: { marginTop: 6 } }, view.cost.disclaimer))
-      : null,
-
-    view?.awaitingApproval
-      ? h('button', { className: 'btn accent wide', disabled: busy || stale, onClick: approve },
-          busy ? '실행 중…' : stale ? '작업이 바뀌었다 — 다시 전송' : `승인하고 실행 · 두 슬롯${planned?.write ? ' · 쓰기 켜짐' : ''}`)
-      : null,
-
-    result ? ResultCards(result) : null),
-  );
-}
-
-function ResultCards(result: RunResult): ReactElement {
-  const verdict = result.verdict ?? 'unknown';
-  const report = result.report;
-  return h(
-    'div',
-    { className: 'stack', style: { padding: 0 } },
-    card('primary 출력', h('pre', null, result.text || '(빈 출력)')),
-
-    h('section', { className: 'card' },
-      h('span', { className: 'label' }, 'reviewer 판정'),
-      h('div', { className: 'row' },
-        h('span', { className: `chip ${verdict}` }, verdict.toUpperCase()),
-        h('span', { className: 'hint' }, '교차 벤더 독립 검증 — reviewer 는 파일을 고치지 못한다')),
-      result.review ? h('pre', { style: { marginTop: 10 } }, result.review) : null),
-
-    report
-      ? card('증거',
-          text(report.summary, report.satisfied ? 'good mono' : 'warn mono'),
-          ...report.missing.map((m, i) => h('div', { key: `m${i}`, className: 'bad mono' }, `없음: ${m}`)),
-          ...report.rejected.map((r, i) => h('div', { key: `r${i}`, className: 'warn mono' }, `거절: ${r.why}`)))
-      : null,
-
-    card('기록',
-      result.outcome ? text(`outcome = ${result.outcome}`, result.outcome === 'ok' ? 'good mono' : 'warn mono') : null,
-      result.budget ? text(result.budget, 'dim mono') : null,
-      result.journal ? h('pre', { className: 'plain', style: { marginTop: 8 } }, result.journal) : null),
-  );
+        h('button', { className: 'btn accent', disabled: !canType || !draft.trim(), onClick: send }, '전송'))));
 }
 
 // ── 나머지 화면 ────────────────────────────────────────────
@@ -407,12 +410,12 @@ function useAsync<T>(load: () => Promise<T>, deps: unknown[] = []): T | null {
   return value;
 }
 
-const SessionsScreen = (): ReactElement => {
+const AgentsScreen = (): ReactElement => {
   const probes = useAsync(() => orc.sessions());
   if (!probes) return text('불러오는 중…', 'dim');
   const rows = probes.flatMap((p) => p.rows.slice(0, 6));
   return h('div', { className: 'stack' },
-    card('세션',
+    card('에이전트 세션',
       h('table', null, h('tbody', null, ...rows.map((s) =>
         h('tr', { key: `${s.source}${s.name}` },
           h('td', { className: 'mono dim' }, s.source), h('td', null, s.name),
@@ -461,11 +464,14 @@ function DebugScreen(): ReactElement {
 
 // ── 셸 ─────────────────────────────────────────────────────
 function App(): ReactElement {
-  const [screen, setScreen] = useState<Screen>('Run');
+  const [screen, setScreen] = useState<Screen>('Session');
   const [title, setTitle] = useState('hs-orchestrator');
   const [meta, setMeta] = useState('');
   const [projects, setProjects] = useState<ProjectState | null>(null);
   const [error, setError] = useState('');
+  const [conv, setConv] = useState<SessionView | null>(null);
+  const [rows, setRows] = useState<TaskRow[]>([]);
+  useEffect(() => { orc.tasks().then(setRows, (e: unknown) => setError(why(e))); }, []);
 
   useEffect(() => {
     void orc.debug().then((d) => {
@@ -476,14 +482,25 @@ function App(): ReactElement {
     orc.projects().then(setProjects, (e: unknown) => setError(why(e)));
   }, []);
 
-  // Run 은 **숨기기만 한다.** 언마운트하면 입력·배정·진행 중인 실행 결과가 탭 이동 한 번에 사라진다.
+  // Session 은 **숨기기만 한다.** 언마운트하면 입력·배정·진행 중인 실행 결과가 탭 이동 한 번에 사라진다.
   // 나머지 화면은 읽기 전용 조회라 들어올 때마다 다시 불러오는 편이 맞다(실행 뒤 대시보드가 낡지 않게).
-  const run = h('div', { key: 'run', hidden: screen !== 'Run' },
-    h(RunScreen, { projectDir: projects?.current.dir, key: projects?.current.dir ?? 'none' }));
+  const session = h('div', { key: 'session', hidden: screen !== 'Session' },
+    conv
+      ? h(SessionScreen, {
+          view: conv,
+          rows,
+          onChange: setConv,
+          onClose: () => { void orc.convClose().then(() => setConv(null)); },
+        })
+      : h(SessionList, {
+          // project 세션을 열면 서비스가 그 폴더로 옮긴다 (Task 8) — 프로젝트 바도 따라가야 폴더가 거짓말하지 않는다.
+          onOpen: (v: SessionView) => { setConv(v); orc.projects().then(setProjects, (e: unknown) => setError(why(e))); },
+          onError: setError,
+        }));
   const body =
-    screen === 'Run' ? null
+    screen === 'Session' ? null
     : screen === 'Dashboard' ? h(DashboardScreen, null)
-    : screen === 'Sessions' ? h(SessionsScreen, null)
+    : screen === 'Agents' ? h(AgentsScreen, null)
     : screen === 'Reviews' ? h(ReviewsScreen, null)
     : h(DebugScreen, null);
 
@@ -491,12 +508,19 @@ function App(): ReactElement {
     h('header', { className: 'titlebar' },
       h('span', { className: 'name' }, title),
       h('span', { className: 'meta' }, meta)),
-    h(ProjectBar, { state: projects, onChange: setProjects, onError: setError }),
+    h(ProjectBar, {
+      state: projects,
+      onChange: (s: ProjectState) => {
+        setProjects(s);
+        setConv((c) => (c && c.kind === 'project' && c.dir !== s.current.dir ? null : c));
+      },
+      onError: setError,
+    }),
     h('nav', { className: 'tabs' }, ...SCREENS.map((s) =>
       h('button', { key: s, 'aria-current': s === screen, onClick: () => setScreen(s) }, s))),
     h('main', null,
       error ? h('div', { className: 'stack' }, h('div', { className: 'banner error' }, error)) : null,
-      run,
+      session,
       body));
 }
 

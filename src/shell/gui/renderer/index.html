@@ -189,6 +189,13 @@
       ::-webkit-scrollbar { width: 10px; height: 10px; }
       ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 6px; border: 2px solid var(--bg); }
       ::-webkit-scrollbar-track { background: transparent; }
+
+      /* ── 세션 채팅 ────────────────────────────────────────── */
+      .clickable { cursor: pointer; }
+      .clickable:hover td { color: var(--fg-strong); }
+      .bubble { max-width: 80%; padding: 10px 12px; border-radius: 10px; white-space: pre-wrap; line-height: 1.5; }
+      .bubble.user { align-self: flex-end; background: color-mix(in srgb, var(--blue) 15%, transparent); }
+      .bubble.orc { align-self: flex-start; background: var(--panel-2); }
     </style>
   </head>
   <body>
