@@ -490,7 +490,7 @@ function App(): ReactElement {
           view: conv,
           rows,
           onChange: setConv,
-          onClose: () => { void orc.convClose().then(() => setConv(null)); },
+          onClose: () => { orc.convClose().then(() => setConv(null), (e: unknown) => setError(why(e))); },
         })
       : h(SessionList, {
           // project 세션을 열면 서비스가 그 폴더로 옮긴다 (Task 8) — 프로젝트 바도 따라가야 폴더가 거짓말하지 않는다.
