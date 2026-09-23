@@ -35,7 +35,7 @@ type Rec =
   | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string }
   | { kind: 'summary'; turn: number; text: string; next: string }
   | { kind: 'error'; turn: number; text: string };
-interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string }
+interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string }
 interface SessionSummary { id: string; dir: string; kind: SessionKind; lastAt: string; preview: string }
 
 interface Bridge {
@@ -382,6 +382,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       h('span', { className: 'mono dim' }, view.kind === 'scratch' ? `스크래치 · ${elide(view.dir, 50)}` : elide(view.dir, 60)),
       h('div', { className: 'spacer' }),
       h('span', { className: 'dim mono' }, view.budget),
+      h('span', { className: 'dim mono' }, view.appBudget),
       h('button', { className: 'btn', onClick: props.onClose }, '세션 목록')),
     view.broken > 0 ? h('div', { className: 'banner error' }, `기록에 깨진 줄 ${view.broken}개 — 건너뛰고 보여준다`) : null,
     ...view.records.map(record),

@@ -36,7 +36,7 @@ export interface SessionDeps {
   readonly kind: SessionKind;
   readonly dir: string;
   readonly id: string;
-  /** 세션을 여러 개 열어도 누적 상한은 하나다 (D-030) — 셸이 같은 Budget 을 넘긴다. */
+  /** 이 세션만의 누적 상한이다 (D-032 A2) — 셸이 세션마다 다른 Budget 을 넘긴다. 앱 전체 합은 표시만 한다. */
   readonly budget: Budget;
   readonly journal: Journal;
   /** 직접 답·요약 전용. 지휘자 슬롯이 reviewer 자리라 쓰기는 어차피 붙지 않는다. */

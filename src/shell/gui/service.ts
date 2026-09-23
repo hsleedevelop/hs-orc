@@ -89,6 +89,8 @@ export interface SessionView {
   /** 깨진 줄 수 — 0 이 아니면 화면이 알린다. */
   readonly broken: number;
   readonly budget: string;
+  /** 앱 전체 누적 — **표시만 한다, 상한 판정에 쓰지 않는다** (D-032 A2). 상한은 `budget`(세션 단위)이 건다. */
+  readonly appBudget: string;
 }
 
 export interface WorktreeState {
@@ -101,8 +103,16 @@ export interface WorktreeState {
 
 export class GuiService {
   readonly journal = new Journal();
+  /** 레거시: `plan()`·`run()`(CLI 와 같은 1 회성 실행) 전용 Budget. 대화 세션은 각자 자기 것을 쓴다 (D-032 A2). */
   readonly budget: Budget;
   private readonly execute: SlotExecutor | undefined;
+  private readonly budgetUsd: number;
+  /**
+   * 세션별 Budget (D-032 A2). 키는 `${dir}::${id}` — 앱을 끄지 않고 다시 열면 같은 것을 이어 쓴다.
+   * **앱을 재시작하면 이 Map 도 비어서 0 부터 다시 잰다** — transcript 는 토큰을 저장하지 않는다,
+   * 알려진 한계다.
+   */
+  private readonly sessionBudgets = new Map<string, Budget>();
   /**
    * 작업 폴더. **`process.cwd()` 를 직접 읽는 곳이 이 클래스에 더 있으면 안 된다** — 화면에서
    * 폴더를 바꿔도 엔진이나 검증 명령이 예전 폴더에서 돌면 그게 가장 위험한 종류의 버그다.
@@ -113,9 +123,28 @@ export class GuiService {
 
   constructor(execute?: SlotExecutor, budgetUsd = loadLimits().budgetUsd, cwd = process.cwd(), classifyLlm?: boolean) {
     this.budget = new Budget(budgetUsd, loadLimits().tokenBudget);
+    this.budgetUsd = budgetUsd;
     this.execute = execute;
     this.workdir = cwd;
     this.classifyLlm = classifyLlm;
+  }
+
+  /** 세션 하나의 Budget 을 얻는다 — 없으면 새로 만들고, 있으면 그대로 재사용한다 (D-032 A2). */
+  private sessionBudget(dir: string, id: string): Budget {
+    const key = `${dir}::${id}`;
+    const existing = this.sessionBudgets.get(key);
+    if (existing) return existing;
+    const created = new Budget(this.budgetUsd, loadLimits().tokenBudget);
+    this.sessionBudgets.set(key, created);
+    return created;
+  }
+
+  /** 표시용 앱 누적 — 열려본 모든 세션 Budget 과 레거시 `budget` 을 더한다. **상한 판정에 쓰지 않는다** (D-032 A2). */
+  private appBudgetSummary(): string {
+    const all: readonly Budget[] = [this.budget, ...this.sessionBudgets.values()];
+    const spentTokens = all.reduce((sum, b) => sum + b.spentTokens, 0);
+    const spentUsd = all.reduce((sum, b) => sum + b.spentUsd, 0);
+    return `앱 누적 · 토큰 ${spentTokens} · $${spentUsd.toFixed(4)} 환산 — 표시만, 막지 않는다`;
   }
 
   get cwd(): string {
@@ -297,7 +326,8 @@ export class GuiService {
       state: s.state,
       records: s.records(),
       broken: readTranscript(s.file).broken,
-      budget: this.budget.summary(),
+      budget: this.sessionBudget(s.dir, s.id).summary(),
+      appBudget: this.appBudgetSummary(),
     };
   }
 
@@ -340,7 +370,7 @@ export class GuiService {
       kind,
       dir,
       id,
-      budget: this.budget,
+      budget: this.sessionBudget(dir, id),
       journal: this.journal,
       conduct: this.execute ?? createExecutor(catalog, dir, timeout, { nonGit }),
       executorFor: (write) => this.execute ?? createExecutor(catalog, dir, timeout, { write, nonGit }),

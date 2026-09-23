@@ -239,4 +239,28 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     service.useProject(mkdtempSync(path.join(os.tmpdir(), 'hs-other-')));
     assert.throws(() => service.conversation(), /열린 세션이 없다/);
   });
+
+  it('세션마다 Budget 이 따로다 — 한 세션이 쓴 돈이 다른 세션에 새지 않는다 (D-032 A2)', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd(), false);
+    service.startConversation('scratch');
+    const afterA = await service.converse('넌 누구니');
+    service.closeConversation();
+    const b = service.startConversation('scratch');
+    // A 는 직접 답으로 charge 가 났고 B 는 아직 아무것도 안 했으니 요약 문자열이 갈려야 한다.
+    assert.notEqual(afterA.budget, b.budget);
+    // 앱 누적은 표시만 한다 — 두 세션 어느 쪽에서 봐도 같은 문구가 붙는다.
+    assert.match(afterA.appBudget, /표시만, 막지 않는다/);
+    assert.match(b.appBudget, /표시만, 막지 않는다/);
+  });
+
+  it('같은 세션을 다시 열면 Budget 을 그대로 이어간다', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd(), false);
+    service.startConversation('scratch');
+    const afterA = await service.converse('넌 누구니');
+    service.closeConversation();
+    const reopened = service.openConversation('scratch', afterA.dir, afterA.id);
+    assert.equal(reopened.budget, afterA.budget);
+  });
 });
