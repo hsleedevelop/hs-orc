@@ -12,6 +12,7 @@ import { BrowserWindow, app, dialog, ipcMain } from 'electron';
 import { titleInfo } from '../tui/model.ts';
 import { claudeSessions, codexSessions, reviews } from '../integrations.ts';
 import { GuiService, type RunPayload } from './service.ts';
+import type { SessionKind } from '../../core/transcript.ts';
 
 const service = new GuiService();
 
@@ -66,6 +67,15 @@ ipcMain.handle('reviews', () => reviews());
 ipcMain.handle('dashboard', () => service.dashboard());
 ipcMain.handle('debug', () => service.debug());
 ipcMain.handle('crash-test', () => service.crashTest());
+ipcMain.handle('conv-list', () => service.conversations());
+ipcMain.handle('conv-start', (_e, kind: SessionKind) => service.startConversation(kind));
+ipcMain.handle('conv-open', (_e, p: { kind: SessionKind; dir: string; id: string }) => service.openConversation(p.kind, p.dir, p.id));
+ipcMain.handle('conv-view', () => service.conversation());
+ipcMain.handle('conv-send', (_e, text: string) => service.converse(text));
+ipcMain.handle('conv-plan-as', (_e, taskId: string) => service.conversePlanAs(taskId));
+ipcMain.handle('conv-approve', (_e, p: { verify: string[]; write: boolean }) => service.converseApprove(p));
+ipcMain.handle('conv-reject', () => service.converseReject());
+ipcMain.handle('conv-close', () => service.closeConversation());
 
 void app.whenReady().then(() => {
   createWindow();

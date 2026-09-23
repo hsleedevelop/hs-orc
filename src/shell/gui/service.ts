@@ -15,6 +15,19 @@ import { delegate } from '../../core/delegate.ts';
 import type { EvidenceReport } from '../../core/evidence.ts';
 import { reportError } from '../../core/report.ts';
 import { dashboardView, runView, titleInfo, type RunView } from '../tui/model.ts';
+import { ConversationSession } from '../../core/session.ts';
+import {
+  listScratchSessions,
+  listSessions,
+  prepareSession,
+  readTranscript,
+  scratchRoot,
+  type SessionKind,
+  type SessionState,
+  type SessionSummary,
+  type TranscriptRecord,
+} from '../../core/transcript.ts';
+import path from 'node:path';
 import {
   describeProject,
   forgetProject,
@@ -67,6 +80,17 @@ export interface ProjectState {
   readonly recent: readonly ProjectInfo[];
 }
 
+export interface SessionView {
+  readonly id: string;
+  readonly kind: SessionKind;
+  readonly dir: string;
+  readonly state: SessionState;
+  readonly records: readonly TranscriptRecord[];
+  /** 깨진 줄 수 — 0 이 아니면 화면이 알린다. */
+  readonly broken: number;
+  readonly budget: string;
+}
+
 export interface WorktreeState {
   /** **본체** 작업 트리. git 저장소가 아니면 null — 화면은 "저장소가 아니다"를 그대로 보여준다. */
   readonly repo: string | null;
@@ -84,11 +108,14 @@ export class GuiService {
    * 폴더를 바꿔도 엔진이나 검증 명령이 예전 폴더에서 돌면 그게 가장 위험한 종류의 버그다.
    */
   private workdir: string;
+  private readonly classifyLlm: boolean | undefined;
+  private session: ConversationSession | null = null;
 
-  constructor(execute?: SlotExecutor, budgetUsd = loadLimits().budgetUsd, cwd = process.cwd()) {
+  constructor(execute?: SlotExecutor, budgetUsd = loadLimits().budgetUsd, cwd = process.cwd(), classifyLlm?: boolean) {
     this.budget = new Budget(budgetUsd, loadLimits().tokenBudget);
     this.execute = execute;
     this.workdir = cwd;
+    this.classifyLlm = classifyLlm;
   }
 
   get cwd(): string {
@@ -109,6 +136,8 @@ export class GuiService {
    */
   useProject(dir: string): ProjectState {
     this.workdir = validateProject(dir);
+    // 화면의 폴더와 세션의 폴더가 갈리면 안 된다 (D-029) — 다른 폴더의 project 세션은 닫는다.
+    if (this.session?.kind === 'project' && !samePath(this.session.dir, this.workdir)) this.session = null;
     try {
       rememberProject(this.workdir);
     } catch (error) {
@@ -238,5 +267,85 @@ export class GuiService {
       budget: this.budget.summary(),
       journal: this.journal.render(),
     };
+  }
+
+  conversations(): SessionSummary[] {
+    return [...listSessions(this.workdir, 'project'), ...listScratchSessions()].sort((a, b) => b.lastAt.localeCompare(a.lastAt));
+  }
+
+  startConversation(kind: SessionKind): SessionView {
+    const { dir, id } = prepareSession(kind, this.workdir);
+    return this.attach(kind, dir, id);
+  }
+
+  /** project 세션은 그 폴더로 **먼저 옮긴다** — 화면의 폴더가 세션의 폴더다. 스크래치는 스크래치 뿌리 안이어야 한다. */
+  openConversation(kind: SessionKind, dir: string, id: string): SessionView {
+    if (kind === 'project') {
+      this.useProject(dir);
+    } else if (path.relative(scratchRoot(), dir).startsWith('..')) {
+      throw new Error(`스크래치 뿌리 밖의 폴더다: ${dir}`);
+    }
+    return this.attach(kind, dir, id);
+  }
+
+  conversation(): SessionView {
+    const s = this.requireConversation();
+    return {
+      id: s.id,
+      kind: s.kind,
+      dir: s.dir,
+      state: s.state,
+      records: s.records(),
+      broken: readTranscript(s.file).broken,
+      budget: this.budget.summary(),
+    };
+  }
+
+  async converse(text: string): Promise<SessionView> {
+    await this.requireConversation().send(text);
+    return this.conversation();
+  }
+
+  async conversePlanAs(taskId: string): Promise<SessionView> {
+    await this.requireConversation().planAs(taskId);
+    return this.conversation();
+  }
+
+  async converseApprove(payload: { verify: readonly string[]; write: boolean }): Promise<SessionView> {
+    await this.requireConversation().approve(payload);
+    return this.conversation();
+  }
+
+  converseReject(): SessionView {
+    this.requireConversation().reject();
+    return this.conversation();
+  }
+
+  closeConversation(): void {
+    this.session = null;
+  }
+
+  private requireConversation(): ConversationSession {
+    if (!this.session) throw new Error('열린 세션이 없다.');
+    return this.session;
+  }
+
+  private attach(kind: SessionKind, dir: string, id: string): SessionView {
+    const catalog = loadEngines();
+    const timeout = loadLimits().runTimeoutMs;
+    const nonGit = kind === 'scratch';
+    this.session = new ConversationSession({
+      matrix: loadMatrix(),
+      catalog,
+      kind,
+      dir,
+      id,
+      budget: this.budget,
+      journal: this.journal,
+      conduct: this.execute ?? createExecutor(catalog, dir, timeout, { nonGit }),
+      executorFor: (write) => this.execute ?? createExecutor(catalog, dir, timeout, { write, nonGit }),
+      ...(this.classifyLlm === undefined ? {} : { classifyLlm: this.classifyLlm }),
+    });
+    return this.conversation();
   }
 }

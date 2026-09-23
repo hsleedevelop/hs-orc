@@ -5,7 +5,7 @@
  * 엔진 쪽 기록을 진실로 삼으면 교차 벤더 순간 대화가 끊긴다.
  * append-only JSONL. 결정 로그와 같은 규칙으로 읽는다: 깨진 줄은 건너뛰고 **센다**.
  */
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { newDecisionId } from './decision-log.ts';
@@ -120,4 +120,46 @@ export function readTranscript(file: string): LoadedTranscript {
     }
   }
   return { records, broken };
+}
+
+export interface SessionSummary {
+  readonly id: string;
+  readonly dir: string;
+  readonly kind: SessionKind;
+  readonly lastAt: string;
+  readonly preview: string;
+}
+
+export function listSessions(dir: string, kind: SessionKind): SessionSummary[] {
+  const folder = path.join(dir, '.hs-orc', 'sessions');
+  let names: string[];
+  try {
+    names = readdirSync(folder).filter((n) => n.endsWith('.jsonl'));
+  } catch {
+    return []; // 세션을 한 번도 안 연 폴더다 — 정상이다.
+  }
+  return names
+    .map((name): SessionSummary => {
+      const { records } = readTranscript(path.join(folder, name));
+      const first = records.find((r) => r.kind === 'user');
+      return {
+        id: name.slice(0, -'.jsonl'.length),
+        dir,
+        kind,
+        lastAt: records.at(-1)?.at ?? '',
+        preview: first?.kind === 'user' ? first.text.slice(0, 60) : '',
+      };
+    })
+    .sort((a, b) => b.lastAt.localeCompare(a.lastAt));
+}
+
+export function listScratchSessions(env: NodeJS.ProcessEnv = process.env): SessionSummary[] {
+  const root = scratchRoot(env);
+  let dirs: string[];
+  try {
+    dirs = readdirSync(root);
+  } catch {
+    return [];
+  }
+  return dirs.flatMap((d) => listSessions(path.join(root, d), 'scratch'));
 }

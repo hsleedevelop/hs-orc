@@ -16,4 +16,13 @@ contextBridge.exposeInMainWorld('orc', {
   dashboard: () => ipcRenderer.invoke('dashboard'),
   debug: () => ipcRenderer.invoke('debug'),
   crashTest: () => ipcRenderer.invoke('crash-test'),
+  convList: () => ipcRenderer.invoke('conv-list'),
+  convStart: (kind) => ipcRenderer.invoke('conv-start', kind),
+  convOpen: (payload) => ipcRenderer.invoke('conv-open', payload),
+  convView: () => ipcRenderer.invoke('conv-view'),
+  convSend: (text) => ipcRenderer.invoke('conv-send', text),
+  convPlanAs: (taskId) => ipcRenderer.invoke('conv-plan-as', taskId),
+  convApprove: (payload) => ipcRenderer.invoke('conv-approve', payload),
+  convReject: () => ipcRenderer.invoke('conv-reject'),
+  convClose: () => ipcRenderer.invoke('conv-close'),
 });

@@ -28,6 +28,7 @@ const isolated = () => {
   // 최근 목록도 가둔다 — 테스트가 진짜 홈의 projects.json 을 고치면 안 된다.
   process.env['HS_ORC_PROJECTS'] = path.join(dir, 'projects.json');
   process.env['HS_ORC_WORKTREES'] = path.join(dir, 'worktrees');
+  process.env['HS_ORC_SCRATCH'] = path.join(dir, 'scratch');
   return path.join(dir, 'log.jsonl');
 };
 
@@ -200,5 +201,42 @@ describe('GUI — 워크트리', () => {
     assert.ok(samePath(service.cwd, repo), '발밑을 지운 채로 남아 있으면 안 된다');
     assert.equal(after.worktrees.items.length, 1);
     assert.equal(after.project.recent.some((r) => samePath(r.dir, inside)), false, '지운 폴더가 최근 목록에 남으면 안 된다');
+  });
+});
+
+describe('GUI — 대화 세션 (v2.1)', () => {
+  it('스크래치 세션은 HS_ORC_SCRATCH 안에 만들고 목록에 뜬다', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd(), false);
+    const view = service.startConversation('scratch');
+    assert.equal(view.kind, 'scratch');
+    assert.ok(view.dir.startsWith(process.env['HS_ORC_SCRATCH'] ?? '~'));
+    await service.converse('넌 누구니');
+    assert.ok(service.conversations().some((s) => s.id === view.id && s.preview === '넌 누구니'));
+  });
+
+  it('분류되지 않는 메시지에 직접 답한다', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd(), false);
+    service.startConversation('scratch');
+    const view = await service.converse('넌 누구니');
+    assert.deepEqual(view.records.map((r) => r.kind), ['user', 'direct']);
+    assert.equal(view.state, 'waiting_input');
+  });
+
+  it('스크래치에서는 쓰기 승인을 거절한다', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd(), false);
+    service.startConversation('scratch');
+    await service.converse('이 타입 에러 고쳐줘');
+    await assert.rejects(service.converseApprove({ verify: [], write: true }), /쓰기를 켤 수 없다/);
+  });
+
+  it('다른 폴더로 옮기면 그 폴더의 것이 아닌 project 세션을 닫는다', () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd(), false);
+    service.startConversation('project');
+    service.useProject(mkdtempSync(path.join(os.tmpdir(), 'hs-other-')));
+    assert.throws(() => service.conversation(), /열린 세션이 없다/);
   });
 });

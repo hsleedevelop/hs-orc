@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { appendFileSync, existsSync, mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { appendRecord, prepareSession, readTranscript, transcriptPath, type TranscriptRecord } from '../transcript.ts';
+import { appendRecord, listSessions, prepareSession, readTranscript, transcriptPath, type TranscriptRecord } from '../transcript.ts';
 
 const tmp = () => mkdtempSync(path.join(os.tmpdir(), 'hs-transcript-'));
 const user = (turn: number, text: string): TranscriptRecord => ({ v: 1, at: '2026-09-23T00:00:00.000Z', turn, kind: 'user', text });
@@ -41,5 +41,14 @@ describe('대화 기록 (SPEC §6.4.1)', () => {
     const project = prepareSession('project', '/some/project', { HS_ORC_SCRATCH: root });
     assert.equal(project.dir, '/some/project');
     assert.match(project.id, /^\d{4}-\d{4}-[0-9a-f]{3}$/);
+  });
+
+  it('폴더의 세션을 최근 것부터 나열하고 첫 메시지를 미리보기로 쓴다', () => {
+    const dir = tmp();
+    appendRecord(transcriptPath(dir, 'a'), { ...user(1, '옛날'), at: '2026-09-22T00:00:00.000Z' });
+    appendRecord(transcriptPath(dir, 'b'), { ...user(1, '최근'), at: '2026-09-23T00:00:00.000Z' });
+    const list = listSessions(dir, 'project');
+    assert.deepEqual(list.map((s) => [s.id, s.preview]), [['b', '최근'], ['a', '옛날']]);
+    assert.deepEqual(listSessions(path.join(dir, 'none'), 'project'), []);
   });
 });
