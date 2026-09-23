@@ -159,4 +159,14 @@ describe('resume argv (SPEC §3.8, Q10 실측)', () => {
     const { argv } = buildInvocation(catalog, 'luna', 'low', 'hi', { engine: 'codex' });
     assert.ok(!argv.includes('resume'));
   });
+
+  it('선언이 없는 엔진에 resume 을 요청하면 맥락 없는 새 실행으로 떨어지지 않고 던진다', () => {
+    // 선언을 **지운** 카탈로그다. `resume: undefined` 로는 exactOptionalPropertyTypes 가 막는다.
+    const stripped = JSON.parse(JSON.stringify(catalog)) as typeof catalog;
+    delete (stripped.engines.claude as { resume?: unknown }).resume;
+    assert.throws(
+      () => buildInvocation(stripped, 'haiku', 'low', 'hi', { engine: 'claude', resume: 'S1' }),
+      /resume 선언이 없다/,
+    );
+  });
 });
