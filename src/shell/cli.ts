@@ -21,6 +21,7 @@ import { reportError, reportNotice } from '../core/report.ts';
 import { collect, type Evidence } from '../core/evidence.ts';
 import { readUnclassified, recordUnclassified, suggestRows } from '../core/unclassified.ts';
 import { defaultVerify } from '../data/verify.ts';
+import { depStatus } from './deps.ts';
 import { runDuo } from '../core/duo.ts';
 import { Budget } from '../core/budget.ts';
 import { changedFiles, loadEvidenceFile, runCommand } from '../core/evidence-gather.ts';
@@ -176,6 +177,7 @@ async function main(): Promise<void> {
 
   const { plan, reason } = result;
   const { primary, reviewer } = plan.slots;
+  const deps = depStatus(process.cwd());
   process.stderr.write(
     [
       `업무   ${plan.assignment.id} ${plan.assignment.task}  (${reason})`,
@@ -188,6 +190,11 @@ async function main(): Promise<void> {
       args.write
         ? `쓰기   primary ${primary.label} 이 ${process.cwd()} 안의 파일을 고칠 수 있다 (--write). reviewer 는 읽기 전용이다.`
         : `쓰기   꺼짐 — 두 슬롯 다 읽기 전용이다. 파일을 고치게 하려면 --write 다.`,
+      // 의존성이 없으면 검증 명령도, primary 가 스스로 돌리는 test 도 성립하지 않는다.
+      // **실행 전에** 알려야 한다 — 모르고 돌리면 시간과 돈을 태우고 나서야 막힌다 (첫 실사용).
+      ...(deps.kind === 'missing'
+        ? [`의존성 없음 — ${deps.manifest} 는 있는데 node_modules 가 없다. 검증은 \`${deps.install}\` 뒤에 의미가 있다.`]
+        : []),
       '',
     ].join('\n'),
   );
