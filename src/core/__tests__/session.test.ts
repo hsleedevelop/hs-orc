@@ -12,6 +12,14 @@ import { Budget } from '../budget.ts';
 import { Journal } from '../journal.ts';
 import type { SlotExecutor, SlotRun } from '../executor.ts';
 import { ConversationSession, SessionStateError } from '../session.ts';
+import { readDecisions } from '../decision-log.ts';
+
+const isolate = () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-log-'));
+  process.env['HS_ORC_DECISION_LOG'] = path.join(dir, 'log.jsonl');
+  process.env['HS_ORC_RUN_STORE'] = path.join(dir, 'runs');
+  return path.join(dir, 'log.jsonl');
+};
 
 const matrix = loadMatrix();
 const catalog = loadEngines();
@@ -114,5 +122,83 @@ describe('대화 세션 — 메시지 1건 (SPEC §6.4.2)', () => {
     assert.equal(reopened.state, 'waiting_input');
     await reopened.send('넌 누구니');
     assert.equal(reopened.records().at(-1)?.turn, 2);
+  });
+});
+
+describe('대화 세션 — 승인·결과 처리 (SPEC §6.4.4)', () => {
+  it('승인하면 두 슬롯을 돌리고 결과·요약을 남긴 뒤 입력 대기로 돌아간다', async () => {
+    const log = isolate();
+    const d = delegateSpy();
+    const { session } = make(conductSpy().exec, undefined, d.exec);
+    await session.send('이 타입 에러 고쳐줘');
+    const out = await session.approve();
+    assert.deepEqual(out.map((r) => r.kind), ['approval', 'result', 'summary']);
+    assert.equal(session.state, 'waiting_input');
+    assert.equal(d.calls.length, 2);
+    const result = out[1];
+    assert.ok(result?.kind === 'result');
+    assert.equal(readDecisions(log).filter((r) => r.id === result.decisionId).length, 2);
+    assert.match(readDecisions(log)[0]?.note ?? '', /session 0923-1200-aaa$/);
+  });
+
+  it('증거가 없으면 요약 옆에 사다리 첫 단계를 제안한다', async () => {
+    isolate();
+    const { session } = make(conductSpy().exec);
+    await session.send('이 타입 에러 고쳐줘');
+    const summary = (await session.approve()).at(-1);
+    assert.ok(summary?.kind === 'summary');
+    assert.equal(summary.text, '요약 한 줄');
+    assert.match(summary.next, /코드·로그·재현 조건 보강/);
+  });
+
+  it('검증 명령이 통과하면 다음 제안이 없다', async () => {
+    isolate();
+    const { session } = make(conductSpy().exec);
+    await session.send('이 타입 에러 고쳐줘');
+    const summary = (await session.approve({ verify: ['exit 0'] })).at(-1);
+    assert.ok(summary?.kind === 'summary' && summary.next === '');
+  });
+
+  it('위임 프롬프트에 앞 대화를 싣고, 결정 로그에는 사용자 문장만 남긴다', async () => {
+    const log = isolate();
+    const d = delegateSpy();
+    const { session } = make(conductSpy().exec, undefined, d.exec);
+    await session.send('넌 누구니');
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    assert.match(d.calls[0]?.prompt ?? '', /^\[최근 대화\]\n사용자: 넌 누구니/);
+    assert.match(d.calls[0]?.prompt ?? '', /\[이번 요청\]\n이 타입 에러 고쳐줘$/);
+    assert.equal(readDecisions(log)[0]?.task, '이 타입 에러 고쳐줘');
+  });
+
+  it('다음 직접 답은 앞 위임의 요약을 맥락으로 받는다 (G7)', async () => {
+    isolate();
+    const c = conductSpy();
+    const { session } = make(c.exec);
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    await session.send('넌 누구니');
+    assert.match(c.prompts.at(-1) ?? '', /orc\(위임 결과 요약\): 요약 한 줄/);
+  });
+
+  it('거절하면 실행하지 않고 입력 대기로 돌아간다', async () => {
+    const d = delegateSpy();
+    const { session } = make(conductSpy().exec, undefined, d.exec);
+    await session.send('이 타입 에러 고쳐줘');
+    const out = session.reject();
+    assert.ok(out[0]?.kind === 'approval' && out[0].approved === false);
+    assert.equal(session.state, 'waiting_input');
+    assert.equal(d.calls.length, 0);
+  });
+
+  it('스크래치 세션은 쓰기 승인을 거절하고 승인 대기에 남는다', async () => {
+    const budget = new Budget(20, 2_000_000);
+    const session = new ConversationSession({
+      matrix, catalog, kind: 'scratch', dir: mkdtempSync(path.join(os.tmpdir(), 'hs-scratch-')), id: '0923-1200-bbb',
+      budget, journal: new Journal(), conduct: conductSpy().exec, executorFor: () => delegateSpy().exec, classifyLlm: false,
+    });
+    await session.send('이 타입 에러 고쳐줘');
+    await assert.rejects(session.approve({ write: true }), SessionStateError);
+    assert.equal(session.state, 'blocked');
   });
 });

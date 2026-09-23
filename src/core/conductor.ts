@@ -8,7 +8,10 @@
 import type { Engines } from '../data/engines.ts';
 import type { Matrix } from '../data/matrix.ts';
 import { resolveSlot, type ResolvedSlot } from './assign.ts';
+import type { Delegated } from './delegate.ts';
+import type { Verdict } from './duo.ts';
 import type { SlotExecutor, SlotRun } from './executor.ts';
+import { STAGE_LABEL, nextStage } from './ladder.ts';
 
 /**
  * role 을 `reviewer` 로 둔다 — `createExecutor` 가 **쓰기를 절대 주지 않는 자리**다.
@@ -72,4 +75,28 @@ export async function directAnswer(
 ): Promise<DirectAnswer> {
   const run = await conduct(slot, buildDirectPrompt(matrix, context, message));
   return { run, ...parseSuggest(matrix, run.text) };
+}
+
+export function buildSummaryPrompt(title: string, d: Pick<Delegated, 'text' | 'verdict' | 'outcome' | 'report'>): string {
+  return [
+    '아래 위임 결과를 사용자에게 3줄 이내로 요약하라.',
+    '새 사실을 지어내지 않는다. reviewer 판정과 증거 상태를 그대로 전한다.',
+    '',
+    `[요청] ${title}`,
+    `[reviewer 판정] ${d.verdict}`,
+    `[증거] ${d.report.summary}`,
+    `[outcome] ${d.outcome}`,
+    '[primary 출력 앞부분]',
+    d.text.slice(0, 3000),
+  ].join('\n');
+}
+
+/**
+ * 다음 제안은 **코드가 계산한다** (SPEC §6.4.4) — 상향 판단을 모델에 넘기지 않는다 (G1).
+ * v2.1 세션은 상향을 **실행하지 않으므로** 언제나 사다리의 첫 단계를 제안한다 (SPEC §2.4 순서).
+ */
+export function nextSuggestion(outcome: 'ok' | 'unverified' | 'wrong', verdict: Verdict): string {
+  if (outcome === 'ok' && verdict !== 'fail') return '';
+  const stage = nextStage([]);
+  return stage ? `사다리 다음 단계: ${STAGE_LABEL[stage]} — 그 뒤에 다시 위임한다` : '';
 }

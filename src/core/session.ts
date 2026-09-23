@@ -8,9 +8,11 @@
 import type { Engines } from '../data/engines.ts';
 import type { Matrix } from '../data/matrix.ts';
 import { loadLimits } from '../data/limits.ts';
+import type { AssignmentPlan } from './assign.ts';
 import type { Budget } from './budget.ts';
-import { conductorSlot, directAnswer } from './conductor.ts';
+import { buildSummaryPrompt, conductorSlot, directAnswer, nextSuggestion } from './conductor.ts';
 import { buildContext, lastSummary, type ContextLimits } from './context.ts';
+import { delegate, type Delegated } from './delegate.ts';
 import { estimateUsd, type SlotExecutor } from './executor.ts';
 import type { Journal } from './journal.ts';
 import { routeWithFallback } from './pipeline.ts';
@@ -50,11 +52,19 @@ export interface SessionDeps {
 
 const why = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+interface Pending {
+  /** 사용자가 쓴 문장 그대로. 결정 로그에 이것이 남는다. */
+  readonly title: string;
+  readonly plan: AssignmentPlan;
+  readonly reason: string;
+}
+
 export class ConversationSession {
   readonly file: string;
   private readonly deps: SessionDeps;
   private turn: number;
   private stateValue: SessionState = 'waiting_input';
+  private pending: Pending | null = null;
 
   constructor(deps: SessionDeps) {
     this.deps = deps;
@@ -129,6 +139,7 @@ export class ConversationSession {
 
     const { plan } = result;
     const { primary, reviewer } = plan.slots;
+    this.pending = { title: text, plan, reason: result.reason };
     this.stateValue = 'blocked';
     return [
       this.append({
@@ -172,6 +183,91 @@ export class ConversationSession {
       return [this.append({ kind: 'error', text: `직접 답을 받지 못했다: ${why(error)}` })];
     } finally {
       this.stateValue = 'waiting_input';
+    }
+  }
+
+  async approve(options: { readonly verify?: readonly string[]; readonly write?: boolean } = {}): Promise<TranscriptRecord[]> {
+    this.require('blocked', '승인');
+    const pending = this.pending;
+    if (!pending) throw new SessionStateError('승인할 배정이 없다.');
+    const write = options.write === true;
+    if (write && this.deps.kind === 'scratch') {
+      throw new SessionStateError('스크래치 세션은 쓰기를 켤 수 없다 (SPEC §6.4.1).');
+    }
+    const { matrix, dir, budget, journal } = this.deps;
+    const out = [this.append({ kind: 'approval', approved: true, write })];
+    this.pending = null;
+    this.stateValue = 'working';
+    try {
+      const context = buildContext(this.records(), this.contextLimits, { before: this.turn });
+      const prompt = context ? `[최근 대화]\n${context}\n\n[이번 요청]\n${pending.title}` : pending.title;
+      const d = await delegate({
+        matrix,
+        plan: pending.plan,
+        reason: pending.reason,
+        title: pending.title,
+        prompt,
+        verify: options.verify ?? [],
+        cwd: dir,
+        execute: this.deps.executorFor(write),
+        budget,
+        journal,
+        note: `session ${this.deps.id}`,
+      });
+      out.push(
+        this.append({
+          kind: 'result',
+          outcome: d.outcome,
+          verdict: d.verdict,
+          text: d.text.slice(0, 4000),
+          review: d.review ?? '',
+          evidence: d.report.summary,
+          decisionId: d.decisionId,
+        }),
+      );
+      out.push(...(await this.summarize(pending.title, d)));
+    } catch (error) {
+      out.push(this.append({ kind: 'error', text: `위임이 끝나지 못했다: ${why(error)}` }));
+    } finally {
+      this.stateValue = 'waiting_input';
+    }
+    return out;
+  }
+
+  reject(): TranscriptRecord[] {
+    this.require('blocked', '거절');
+    this.pending = null;
+    this.stateValue = 'waiting_input';
+    return [this.append({ kind: 'approval', approved: false, write: false })];
+  }
+
+  /** 모델은 요약만 한다. 다음 제안은 코드가 계산한다 (SPEC §6.4.4). 요약이 실패해도 제안은 남긴다. */
+  private async summarize(title: string, d: Delegated): Promise<TranscriptRecord[]> {
+    const next = nextSuggestion(d.outcome, d.verdict);
+    const { matrix, catalog, budget, conduct } = this.deps;
+    if (budget.limitReached()) {
+      return [
+        this.append({ kind: 'error', text: `누적 상한에 닿아 요약을 시작하지 않는다 (${budget.summary()}) — 결과 카드를 본다.` }),
+        this.append({ kind: 'summary', text: '', next }),
+      ];
+    }
+    const slot = conductorSlot(catalog);
+    try {
+      const run = await conduct(slot, buildSummaryPrompt(title, d));
+      budget.charge(`${slot.label}·${slot.effort}`, run.actualUsd, estimateUsd(matrix, slot), run.meteredUsd, slot.plan);
+      budget.countTokens(run.usage);
+      if (!run.ok) {
+        return [
+          this.append({ kind: 'error', text: `요약을 받지 못했다 — 결과 카드를 본다: ${run.text || '엔진이 실패했다'}` }),
+          this.append({ kind: 'summary', text: '', next }),
+        ];
+      }
+      return [this.append({ kind: 'summary', text: run.text.trim(), next })];
+    } catch (error) {
+      return [
+        this.append({ kind: 'error', text: `요약을 받지 못했다 — 결과 카드를 본다: ${why(error)}` }),
+        this.append({ kind: 'summary', text: '', next }),
+      ];
     }
   }
 }
