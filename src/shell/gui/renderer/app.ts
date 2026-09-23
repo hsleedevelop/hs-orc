@@ -16,7 +16,11 @@ import { createRoot } from 'react-dom/client';
 const SCREENS = ['Run', 'Dashboard', 'Sessions', 'Reviews', 'Debug'] as const;
 type Screen = (typeof SCREENS)[number];
 
-interface ProjectInfo { dir: string; name: string; short: string; git: boolean; exists: boolean }
+type DepStatus =
+  | { kind: 'unknown' }
+  | { kind: 'missing'; manifest: string; install: string }
+  | { kind: 'ready'; manifest: string };
+interface ProjectInfo { dir: string; name: string; short: string; git: boolean; exists: boolean; deps: DepStatus }
 interface ProjectState { current: ProjectInfo; recent: ProjectInfo[] }
 interface WorktreeInfo { dir: string; branch: string | null; head: string; main: boolean; locked: boolean }
 interface WorktreeState { repo: string | null; items: WorktreeInfo[]; current: string }
@@ -211,6 +215,19 @@ function ProjectBar(props: { state: ProjectState | null; onChange: (s: ProjectSt
           h('div', { className: 'spacer' }),
           h('span', { className: note ? 'hint good' : 'hint' },
             note || '쓰기를 켜고 돌릴 때 본체 작업 트리를 건드리지 않는다'))
+      : null,
+
+    // 의존성이 없으면 검증 명령이 성립하지 않는다 — **돌리기 전에** 알려야 한다.
+    current?.deps.kind === 'missing'
+      ? h('div', { className: 'pb-row' },
+          h('span', { className: 'chip nogit' }, '의존성 없음'),
+          h('span', { className: 'hint' }, '검증 명령이 여기서는 성립하지 않는다. 새 워크트리는 node_modules 가 따라오지 않는다.'),
+          h('code', { className: 'inline-cmd' }, `${current.deps.install}`),
+          h('button', {
+            className: 'btn',
+            title: '명령을 클립보드로',
+            onClick: () => { void navigator.clipboard?.writeText(current.deps.kind === 'missing' ? current.deps.install : ''); },
+          }, '복사'))
       : null,
   );
 }

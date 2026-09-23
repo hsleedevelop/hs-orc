@@ -10,6 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { depStatus, type DepStatus } from '../deps.ts';
 
 /** 최근 목록 상한. 더 쌓이면 목록이 아니라 로그다. */
 export const MAX_RECENT = 10;
@@ -27,6 +28,8 @@ export interface ProjectInfo {
   readonly git: boolean;
   /** 지금 이 순간 존재하는가. 지워진 폴더도 목록에는 남기되 회색으로 보여 준다. */
   readonly exists: boolean;
+  /** 검증 명령이 성립하는 상태인가. 새 워크트리는 거의 항상 `missing` 이다. */
+  readonly deps: DepStatus;
 }
 
 export function projectsFile(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string {
@@ -50,6 +53,7 @@ export function describeProject(dir: string, home = os.homedir()): ProjectInfo {
     short: resolved.startsWith(`${home}/`) ? `~${resolved.slice(home.length)}` : resolved,
     git: existsSync(path.join(resolved, '.git')),
     exists: isDir(resolved),
+    deps: depStatus(resolved),
   };
 }
 
@@ -91,3 +95,5 @@ export function forgetProject(dir: string, file = projectsFile()): string[] {
   save(recent, file);
   return recent;
 }
+
+export { depStatus, type DepStatus } from '../deps.ts';
