@@ -3,7 +3,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadMatrix } from '../../data/matrix.ts';
@@ -140,6 +140,23 @@ describe('대화 세션 — 메시지 1건 (SPEC §6.4.2)', () => {
     assert.equal(reopened.state, 'waiting_input');
     await reopened.send('넌 누구니');
     assert.equal(reopened.records().at(-1)?.turn, 2);
+  });
+
+  it('사용자 메시지 기록이 실패하면 working 에 갇히지 않고 턴도 되돌린다', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-'));
+    // `.hs-orc` 자리에 평범한 파일을 둔다 — appendRecord 의 mkdirSync(`<dir>/.hs-orc/sessions`) 가
+    // ENOTDIR 로 던진다. 어느 사용자 권한에서도 재현된다(chmod 불필요).
+    const blocker = path.join(dir, '.hs-orc');
+    writeFileSync(blocker, 'not a directory');
+    const c = conductSpy();
+    const { session } = make(c.exec, dir);
+    await assert.rejects(session.send('넌 누구니'));
+    assert.equal(session.state, 'waiting_input');
+
+    rmSync(blocker);
+    const out = await session.send('넌 누구니');
+    const user = out[0];
+    assert.ok(user?.kind === 'user' && user.turn === 1);
   });
 });
 

@@ -103,7 +103,16 @@ export class ConversationSession {
     // 같은 require() 를 통과해 턴을 두 번 올리는 것을 막는다 (final-review #2).
     this.stateValue = 'working';
     this.turn += 1;
-    const user = this.append({ kind: 'user', text });
+    let user: TranscriptRecord;
+    try {
+      user = this.append({ kind: 'user', text });
+    } catch (error) {
+      // 기록 자체가 안 됐다 — 화면에 남길 곳(트랜스크립트)이 없으니 에러 레코드로 삼키지 않고
+      // 턴·상태를 되돌려 던진다. GUI 가 이 예외를 보여준다.
+      this.turn -= 1;
+      this.stateValue = 'waiting_input';
+      throw error;
+    }
     return [user, ...(await this.route(text))];
   }
 
