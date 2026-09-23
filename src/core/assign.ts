@@ -50,7 +50,7 @@ export interface AssignmentPlan {
   readonly cost: CostEstimate;
 }
 
-function resolveSlot(catalog: Engines, slot: Slot, effort: Effort, role: SlotRole): ResolvedSlot {
+export function resolveSlot(catalog: Engines, slot: Slot, effort: Effort, role: SlotRole): ResolvedSlot {
   const engine = catalog.models[slot.model].defaultEngine;
   // supports() 가 유일한 가용성 판정이다 — 여기서 대체 모델을 고르지 않는다 (D-004).
   if (!createAdapter(engine, catalog).supports(slot.model, effort)) {
