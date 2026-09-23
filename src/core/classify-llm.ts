@@ -16,7 +16,7 @@ export class ClassifierModelError extends Error {
   override name = 'ClassifierModelError';
 }
 
-export function buildClassifyPrompt(matrix: Matrix, task: string): string {
+export function buildClassifyPrompt(matrix: Matrix, task: string, hint?: string): string {
   const rows = matrix.assignments.map((a) => `${a.id}\t${a.task}`).join('\n');
   return [
     '아래 업무 목록 중 주어진 작업에 가장 맞는 행의 id 하나만 출력하라.',
@@ -24,6 +24,8 @@ export function buildClassifyPrompt(matrix: Matrix, task: string): string {
     '',
     rows,
     '',
+    // 대화 세션의 후속 메시지("그거 테스트도")는 앞 맥락 없이는 분류가 안 된다 (SPEC §6.4.2).
+    ...(hint ? [`직전 맥락: ${hint}`] : []),
     `작업: ${task}`,
   ].join('\n');
 }
@@ -42,6 +44,7 @@ export async function classifyWithModel(
      * 화면이 말하는 폴더와 실제로 띄운 폴더가 갈린다.
      */
     cwd?: string;
+    hint?: string;
   } = {},
 ): Promise<Assignment | null> {
   const model = options.model ?? 'haiku';
@@ -54,7 +57,7 @@ export async function classifyWithModel(
   const handle = adapter.start({
     model,
     effort,
-    prompt: buildClassifyPrompt(matrix, task),
+    prompt: buildClassifyPrompt(matrix, task, options.hint),
     cwd: options.cwd ?? process.cwd(),
     timeoutMs: options.timeoutMs ?? 120_000,
   });

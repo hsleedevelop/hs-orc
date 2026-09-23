@@ -96,6 +96,15 @@ describe('대화 세션 — 메시지 1건 (SPEC §6.4.2)', () => {
     await assert.rejects(session.send('또'), SessionStateError);
   });
 
+  it('다음 직접 답에 앞 턴 대화를 싣는다 (G7)', async () => {
+    const c = conductSpy();
+    const { session } = make(c.exec);
+    await session.send('넌 누구니');
+    await session.send('뭘 할 수 있어');
+    assert.match(c.prompts[1] ?? '', /\[최근 대화\]\n사용자: 넌 누구니\norc: 저는 hs-orc 입니다\./);
+    assert.doesNotMatch(c.prompts[1] ?? '', /\[최근 대화\][^[]*뭘 할 수 있어/);
+  });
+
   it('다시 열면 턴을 이어 가고, 남은 배정은 되살리지 않는다', async () => {
     const c = conductSpy();
     const { dir } = make(c.exec);

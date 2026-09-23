@@ -7,8 +7,10 @@
  */
 import type { Engines } from '../data/engines.ts';
 import type { Matrix } from '../data/matrix.ts';
+import { loadLimits } from '../data/limits.ts';
 import type { Budget } from './budget.ts';
 import { conductorSlot, directAnswer } from './conductor.ts';
+import { buildContext, lastSummary, type ContextLimits } from './context.ts';
 import { estimateUsd, type SlotExecutor } from './executor.ts';
 import type { Journal } from './journal.ts';
 import { routeWithFallback } from './pipeline.ts';
@@ -42,6 +44,8 @@ export interface SessionDeps {
   /** D-026: 끄면 유료 분류 폴백이 없다. 테스트는 끈다. */
   readonly classifyLlm?: boolean;
   readonly now?: () => Date;
+  /** 없으면 `loadLimits()` 값 (SPEC §6.4.3). */
+  readonly context?: ContextLimits;
 }
 
 const why = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -71,6 +75,10 @@ export class ConversationSession {
   }
   get id(): string {
     return this.deps.id;
+  }
+
+  private get contextLimits(): ContextLimits {
+    return this.deps.context ?? loadLimits();
   }
 
   records(): TranscriptRecord[] {
@@ -108,10 +116,12 @@ export class ConversationSession {
 
   private async route(text: string, taskId?: string): Promise<TranscriptRecord[]> {
     const { matrix, catalog, dir } = this.deps;
+    const hint = taskId ? null : lastSummary(this.records());
     const routed = await routeWithFallback(matrix, catalog, text, {
       cwd: dir,
       ...(this.deps.classifyLlm === undefined ? {} : { classifyLlm: this.deps.classifyLlm }),
       ...(taskId ? { taskId } : {}),
+      ...(hint ? { hint } : {}),
     });
     const notes = routed.fallback ? [routed.fallback.line] : [];
     const result = routed.result;
@@ -142,7 +152,8 @@ export class ConversationSession {
     const slot = conductorSlot(catalog);
     this.stateValue = 'working';
     try {
-      const answer = await directAnswer(conduct, slot, matrix, '', text);
+      const context = buildContext(this.records(), this.contextLimits, { before: this.turn });
+      const answer = await directAnswer(conduct, slot, matrix, context, text);
       const charge = budget.charge(`${slot.label}·${slot.effort}`, answer.run.actualUsd, estimateUsd(matrix, slot), answer.run.meteredUsd, slot.plan);
       budget.countTokens(answer.run.usage);
       if (!answer.run.ok) {

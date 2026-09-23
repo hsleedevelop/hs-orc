@@ -26,6 +26,12 @@ describe('분류 폴백', () => {
     assert.match(prompt, /NONE/);
   });
 
+  it('hint 가 있으면 직전 맥락을 작업 앞에 한 줄로 싣는다 — 없으면 싣지 않는다', () => {
+    const withHint = buildClassifyPrompt(matrix, '그거 테스트도', '타입 에러를 고쳤다');
+    assert.match(withHint, /직전 맥락: 타입 에러를 고쳤다\n작업: 그거 테스트도$/);
+    assert.doesNotMatch(buildClassifyPrompt(matrix, '그거 테스트도'), /직전 맥락/);
+  });
+
   /**
    * D-029: 분류기는 **넘겨받은 폴더**에서 돈다. PATH 앞에 가짜 `claude` 를 놓고
    * 그 스크립트가 자기 `$PWD` 를 보고 다른 id 를 답하게 한다 — 인자를 읽었다고 단언하는 게 아니라

@@ -9,6 +9,10 @@ export interface Limits {
   readonly maxIterations: number;
   readonly maxNodes: number;
   readonly runTimeoutMs: number;
+  /** 대화 세션이 프롬프트에 싣는 최근 턴 수 (SPEC §6.4.3). */
+  readonly contextTurns: number;
+  /** 그 맥락의 글자 상한. 넘으면 앞을 자른다. */
+  readonly contextChars: number;
 }
 
 const LIMITS_PATH = path.resolve(import.meta.dirname, '..', '..', 'data', 'limits.json');

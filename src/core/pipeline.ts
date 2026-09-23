@@ -79,6 +79,8 @@ export interface FallbackOptions extends PipelineOptions {
    * **숨어 있던 전역 의존을 인자로 드러낸 것**이다.
    */
   readonly cwd?: string;
+  /** 대화 세션의 직전 요약 한 줄 (SPEC §6.4.2). **LLM 폴백에만** 간다 — 규칙 분류기에는 섞지 않는다. */
+  readonly hint?: string;
 }
 
 const TRY_LINE = '규칙 무매치 → Haiku·low 로 분류만 재시도 (+$0.001 내외 · --no-classify-llm 으로 끈다)';
@@ -99,7 +101,10 @@ export async function routeWithFallback(
   if (result.stage !== 'unclassified' || options.classifyLlm === false) return { result, fallback: null };
 
   try {
-    const guessed = await classifyWithModel(matrix, catalog, task, options.cwd === undefined ? {} : { cwd: options.cwd });
+    const guessed = await classifyWithModel(matrix, catalog, task, {
+      ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+      ...(options.hint === undefined ? {} : { hint: options.hint }),
+    });
     if (!guessed) return { result, fallback: { outcome: 'none', line: `${TRY_LINE} → 맞는 행 없음` } };
     return {
       result: route(matrix, catalog, task, { ...options, taskId: guessed.id, reasonLabel: 'Haiku·low 분류' }),
