@@ -49,6 +49,13 @@ export interface EngineSpec {
    * **스크래치 세션에만** 붙인다 — 쓰기가 꺼진 자리라 git 검사가 지키던 것이 없다 (SPEC §6.4.1).
    */
   readonly nonGitArgv?: readonly string[];
+  /**
+   * 비대화 resume (SPEC §3.8, 2026-09-23 Q10 실측). claude·cursor 는 플래그, codex 는 `exec resume <id>` 서브커맨드다.
+   * 선언이 없는 엔진에 resume 을 요청하면 **던진다** — 맥락 없는 새 실행으로 조용히 떨어지지 않는다.
+   */
+  readonly resume?:
+    | { readonly kind: 'flag'; readonly flag: string }
+    | { readonly kind: 'subcommand'; readonly argv: readonly string[] };
 }
 
 /** 해당 엔진이 그 모델을 아예 제공하지 않으면 `null` 이다 — 말없는 치환의 자리가 아니다 (D-004). */

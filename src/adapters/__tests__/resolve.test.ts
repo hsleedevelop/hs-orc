@@ -137,3 +137,26 @@ describe('git 밖 실행 (스크래치, SPEC §6.4.1)', () => {
     assert.deepEqual(nonGit, plain);
   });
 });
+
+describe('resume argv (SPEC §3.8, Q10 실측)', () => {
+  const catalog = loadEngines();
+  it('claude 는 --resume <id> 를 붙인다', () => {
+    const { argv } = buildInvocation(catalog, 'haiku', 'low', 'hi', { engine: 'claude', resume: 'S1' });
+    const i = argv.indexOf('--resume');
+    assert.ok(i >= 0 && argv[i + 1] === 'S1');
+  });
+  it('codex 는 exec resume <id> <prompt> 순서다', () => {
+    const { argv } = buildInvocation(catalog, 'luna', 'low', 'hi', { engine: 'codex', resume: 'T1' });
+    assert.deepEqual(argv.slice(0, 4), ['exec', 'resume', 'T1', 'hi']);
+    assert.ok(argv.includes('-m'));
+  });
+  it('cursor 는 --resume <id> 를 붙인다', () => {
+    const { argv } = buildInvocation(catalog, 'luna', 'low', 'hi', { engine: 'cursor', resume: 'C1' });
+    const i = argv.indexOf('--resume');
+    assert.ok(i >= 0 && argv[i + 1] === 'C1');
+  });
+  it('resume 이 없으면 argv 가 그대로다', () => {
+    const { argv } = buildInvocation(catalog, 'luna', 'low', 'hi', { engine: 'codex' });
+    assert.ok(!argv.includes('resume'));
+  });
+});

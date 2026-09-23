@@ -18,6 +18,7 @@ export function createAdapter(engine: EngineName, catalog: Engines = loadEngines
       engine,
       ...(req.write === true ? { write: true } : {}),
       ...(req.nonGit === true ? { nonGit: true } : {}),
+      ...(req.resume !== undefined ? { resume: req.resume } : {}),
     }).argv,
     ...spec.streamArgv,
   ];

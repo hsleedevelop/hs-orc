@@ -32,9 +32,16 @@ export interface SlotRun {
    */
   readonly usage?: TokenCounts;
   readonly durationMs: number;
+  /** 엔진 세션 id (SPEC §3.8). 못 읽었으면 없다. */
+  readonly sessionId?: string;
 }
 
-export type SlotExecutor = (slot: ResolvedSlot, prompt: string) => Promise<SlotRun>;
+export interface SlotRunOptions {
+  /** 이어 붙일 엔진 세션 id. **primary 에만** 온다 — reviewer 는 잇지 않는다 (SPEC §6.4.3). */
+  readonly resume?: string;
+}
+
+export type SlotExecutor = (slot: ResolvedSlot, prompt: string, options?: SlotRunOptions) => Promise<SlotRun>;
 
 /** 매트릭스 비용표 기준 추정치 (SPEC §2.3). 실측이 없을 때만 쓴다. */
 export function estimateUsd(matrix: Matrix, slot: ResolvedSlot): number {
@@ -58,7 +65,7 @@ export function createExecutor(
   timeoutMs: number,
   options: ExecutorOptions = {},
 ): SlotExecutor {
-  return async (slot, prompt) => {
+  return async (slot, prompt, runOptions) => {
     const write = options.write === true && slot.role === 'primary';
     const handle = createAdapter(slot.engine, catalog).start({
       model: slot.model,
@@ -68,6 +75,7 @@ export function createExecutor(
       timeoutMs,
       ...(write ? { write: true } : {}),
       ...(options.nonGit === true ? { nonGit: true } : {}),
+      ...(runOptions?.resume !== undefined ? { resume: runOptions.resume } : {}),
     });
     const result = await handle.result;
     // 엔진이 비용을 안 주면 토큰으로 계산해 본다 — 단가 선언이 없으면 undefined 로 남는다.
@@ -81,6 +89,7 @@ export function createExecutor(
       ...(metered !== undefined ? { meteredUsd: metered } : {}),
       ...(result.usage !== undefined ? { usage: result.usage } : {}),
       durationMs: result.durationMs,
+      ...(result.sessionId !== undefined ? { sessionId: result.sessionId } : {}),
     };
   };
 }

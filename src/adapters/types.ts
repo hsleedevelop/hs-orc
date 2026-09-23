@@ -12,6 +12,8 @@ export interface RunRequest {
   readonly write?: boolean;
   /** 스크래치 세션 — git 저장소 밖이다. 엔진이 선언한 `nonGitArgv` 를 붙인다. */
   readonly nonGit?: boolean;
+  /** 이어 붙일 엔진 세션 id (SPEC §3.8). */
+  readonly resume?: string;
 }
 
 export interface Usage {
@@ -28,7 +30,8 @@ export type RunEvent =
   | { readonly kind: 'usage'; readonly usage: Usage }
   | { readonly kind: 'done'; readonly ok: boolean; readonly text: string; readonly costUsd?: number }
   /** 파싱 실패한 줄. **버리지 않는다** — 한 줄 실패가 실행 전체를 죽이지 않게 하되 침묵하지도 않는다. */
-  | { readonly kind: 'unparsed'; readonly line: string; readonly reason: string };
+  | { readonly kind: 'unparsed'; readonly line: string; readonly reason: string }
+  | { readonly kind: 'session'; readonly id: string };
 
 export type RunOutcome = 'ok' | 'error' | 'timeout' | 'cancelled';
 
@@ -44,6 +47,8 @@ export interface RunResult {
   readonly rawStdout: string;
   readonly rawStderr: string;
   readonly unparsedLines: readonly string[];
+  /** 스트림에서 읽은 엔진 세션 id. 못 읽으면 없다 — 지어내지 않는다. */
+  readonly sessionId?: string;
 }
 
 export interface RunHandle {

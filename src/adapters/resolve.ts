@@ -72,6 +72,8 @@ export interface InvocationOptions {
   readonly write?: boolean;
   /** 스크래치 세션 (SPEC §6.4.1) — git 저장소 밖이다. 엔진이 선언한 `nonGitArgv` 를 붙인다. */
   readonly nonGit?: boolean;
+  /** 이어 붙일 엔진 세션 id (SPEC §3.8). */
+  readonly resume?: string;
 }
 
 export function buildInvocation(
@@ -113,7 +115,14 @@ export function buildInvocation(
   const modelId = options.fast === true ? `${baseId}-fast` : baseId;
   if (!modelId) throw new EngineError(`${target}/${model} 의 모델 id 가 비어 있다 — engines.json 이 깨졌다.`);
 
-  const argv = [...spec.promptArgv, prompt, spec.modelFlag, modelId];
+  const resume = options.resume;
+  if (resume !== undefined && !spec.resume) {
+    throw new EngineError(`${target} 는 resume 선언이 없다 — 맥락 없는 새 실행으로 바꾸지 않는다 (SPEC §3.8).`);
+  }
+  const argv =
+    resume !== undefined && spec.resume?.kind === 'subcommand'
+      ? [...spec.promptArgv, ...spec.resume.argv, resume, prompt, spec.modelFlag, modelId]
+      : [...spec.promptArgv, prompt, spec.modelFlag, modelId];
   switch (spec.effort.kind) {
     case 'flag':
       argv.push(spec.effort.flag, effort);
@@ -137,6 +146,8 @@ export function buildInvocation(
 
   // 스크래치 세션에서만 붙인다 — codex exec 는 git 저장소 밖에서 이게 없으면 거절한다 (SPEC §6.4.1).
   if (options.nonGit === true && spec.nonGitArgv) argv.push(...spec.nonGitArgv);
+
+  if (resume !== undefined && spec.resume?.kind === 'flag') argv.push(spec.resume.flag, resume);
 
   return { engine: target, argv, modelId, effort };
 }

@@ -77,3 +77,18 @@ describe('줄 분할', () => {
     assert.deepEqual(split('2}\n'), ['{"b":2}']);
   });
 });
+
+describe('엔진 세션 id (SPEC §3.8)', () => {
+  it('claude·cursor 는 result 줄의 session_id 를 낸다', () => {
+    const line = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'ok', session_id: 'b338a8c5-2660-4dd9-bba2-d665ae8e9759' });
+    assert.ok(parseLine('claude', line).some((e) => e.kind === 'session' && e.id === 'b338a8c5-2660-4dd9-bba2-d665ae8e9759'));
+  });
+  it('codex 는 thread.started 의 thread_id 를 낸다', () => {
+    const line = JSON.stringify({ type: 'thread.started', thread_id: '01a0cdb0-2134-7742-932e-ffeb293f61c1' });
+    assert.deepEqual(parseLine('codex', line), [{ kind: 'session', id: '01a0cdb0-2134-7742-932e-ffeb293f61c1' }]);
+  });
+  it('id 가 문자열이 아니면 내지 않는다 — 지어내지 않는다', () => {
+    const line = JSON.stringify({ type: 'result', result: 'ok', session_id: 42 });
+    assert.ok(!parseLine('claude', line).some((e) => e.kind === 'session'));
+  });
+});

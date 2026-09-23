@@ -34,6 +34,7 @@ export function runProcess(spec: SpawnSpec, onEvent?: (event: RunEvent) => void)
   let ok = true;
   let usage: Usage | undefined;
   let costUsd: number | undefined;
+  let sessionId: string | undefined;
   const unparsedLines: string[] = [];
   let outcome: RunOutcome | undefined;
 
@@ -52,6 +53,9 @@ export function runProcess(spec: SpawnSpec, onEvent?: (event: RunEvent) => void)
         break;
       case 'unparsed':
         unparsedLines.push(event.line);
+        break;
+      case 'session':
+        sessionId = event.id;
         break;
       case 'notice':
         break;
@@ -112,6 +116,7 @@ export function runProcess(spec: SpawnSpec, onEvent?: (event: RunEvent) => void)
         rawStdout,
         rawStderr,
         unparsedLines,
+        ...(sessionId ? { sessionId } : {}),
       });
     };
 

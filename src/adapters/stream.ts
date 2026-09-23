@@ -23,6 +23,8 @@ function claudeEvents(event: Record<string, unknown>): RunEvent[] {
   if (event['type'] !== 'result') return [];
 
   const out: RunEvent[] = [];
+  // Q10 실측: claude·cursor 모두 result 줄에 session_id 를 싣는다. 한 번만 내도록 result 줄에서만 읽는다.
+  if (typeof event['session_id'] === 'string') out.push({ kind: 'session', id: event['session_id'] });
   const usage = asRecord(event['usage']);
   if (usage) {
     // claude 는 snake_case, cursor 는 camelCase 로 같은 자리를 채운다.
@@ -48,6 +50,8 @@ function claudeEvents(event: Record<string, unknown>): RunEvent[] {
 
 function codexEvents(event: Record<string, unknown>): RunEvent[] {
   switch (event['type']) {
+    case 'thread.started':
+      return typeof event['thread_id'] === 'string' ? [{ kind: 'session', id: event['thread_id'] }] : [];
     case 'item.completed': {
       const item = asRecord(event['item']);
       if (!item) return [];
