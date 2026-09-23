@@ -28,5 +28,8 @@ build/
 # `.claude/handoffs/` 는 세션 인계 기록이라 남긴다 — 여기서 무시하지 않는다.
 .claude/worktrees/
 
+# 인계 문서의 **최신본 사본**. 날짜 파일이 원본이라 같이 두면 인계마다 같은 내용이 두 번 들어간다.
+.claude/handoffs/latest.md
+
 # GUI 렌더러 번들 (생성물)
 src/shell/gui/renderer/bundle.js
