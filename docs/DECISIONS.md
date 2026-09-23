@@ -846,6 +846,33 @@ D-034 가 "기록만" 으로 남긴 빈틈을 닫는다. CLI 의 pingpong·loop�
 
 ---
 
+## D-036 — CLI loop 는 실패하면 재시도하고, reviewer 의 FAIL 사유를 다음 사이클에 싣는다 (L2 + L4)
+
+**배경**
+CLI 의 loop 는 `recover: () => 'abort'` 라 **1사이클짜리**였다 — PASS 면 goal-reached, FAIL 이면 aborted. `maxIterations`(8) 에 닿을 길이 없었고, 실행 전 "최대 8사이클 · 최악 $…" 안내도 부풀려진 값이었다. 그렇다고 retry 로만 바꾸면 **눈먼 재시도**다: reviewer 프롬프트가 "PASS/FAIL 만 한 줄" 이라 사유가 생성조차 되지 않고, Planner 는 2사이클부터 "직전 사이클의 지적을 반영하라" 만 붙였다. 또 판정 정규식 `/\bPASS\b/i` 는 사유 텍스트 속 PASS 에도 매치된다. 별개로 Evaluator 과금은 추정 금액만 적고 토큰을 세지 않아 D-035 토큰 상한이 reviewer 몫을 빼먹었다.
+
+**결정**
+1. **(L2)** CLI loop 는 검증 FAIL 이면 `retry` — `maxIterations`·금액·토큰 상한까지 돈다. Core `runLoop` 의 기본값(recover 미지정 = abort)은 그대로 둔다. 예전 동작은 `--max-iterations 1` 로 똑같이 얻는다 — 그래서 `--recover` 옵션(L3)은 만들지 않는다.
+2. **(L4)** reviewer 는 **첫 줄에 PASS 또는 FAIL 만**, FAIL 이면 둘째 줄부터 부족한 점을 적는다. 그 사유는 `LoopContext.feedback` 으로 다음 사이클의 Planner 에 넘어가고, CLI Planner 는 이를 프롬프트에 싣는다.
+3. 판정은 **첫 줄 엄격 일치**로 읽는다(마크다운 강조 기호는 허용). 형식을 어기면 FAIL 로 본다 — 모르면 통과가 아니다(fail-closed).
+4. reviewer 실행 자체가 실패하면(`ok: false`) 재시도하지 않고 `escalate` 한다 — 망가진 엔진에 primary 를 반복해서 태우지 않는다.
+5. Evaluator 도 Executor 와 같은 우선순위(actual > metered > estimate)로 과금하고 토큰을 센다. `Verdict.cost` 로 실행 결과를 돌려받는다.
+
+**규모** (추정 — D-035 와 같은 근거, 실측 아님): 1사이클 ≈ 34만 토큰. 기본 상한 200만이면 재시도 포함 약 5~6사이클에서 멈춘다. reviewer 토큰을 세기 시작하므로 이전 추정보다 조금 일찍 멈출 수 있다.
+
+**기각**
+- *L1 abort 유지 + 문서화* — loop 가 pipeline(실행 + 리뷰 1회)과 사실상 같아진다.
+- *L2 단독* — 사유 없는 재시도는 같은 실수를 반복하며 토큰만 쓴다.
+- *L3 `--recover` 옵션* — abort 는 `--max-iterations 1` 로 이미 된다. 옵션 표면만 는다.
+- *직전 산출물도 Planner 에 싣기* — `--write` 에서는 작업 트리에 이미 남아 있다. 쓰기 없는 모드의 이득은 실측이 없어 열지 않는다.
+
+**영향**
+CLI loop 가 실패 시 여러 사이클을 돈다 — 실패 경로가 이전보다 비싸지만 상한(D-017·D-035) 안에서다. 판정 형식이 바뀌어 reviewer 가 형식을 어기면 통과가 FAIL 로 뒤집힐 수 있다(의도된 방향).
+
+**상태** 확정 — 2026-09-24 사용자 결정 (L2 + L4).
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |
