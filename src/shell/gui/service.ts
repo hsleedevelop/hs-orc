@@ -9,14 +9,10 @@ import { loadEngines } from '../../data/engines.ts';
 import { loadLimits } from '../../data/limits.ts';
 import { routeWithFallback } from '../../core/pipeline.ts';
 import { createExecutor, type SlotExecutor } from '../../core/executor.ts';
-import { runDuo } from '../../core/duo.ts';
 import { Budget } from '../../core/budget.ts';
 import { Journal } from '../../core/journal.ts';
-import { appendDecision } from '../../core/decision-log.ts';
-import { firstLine, secondLine } from '../../core/decide.ts';
-import { runStoreRoot, storeRun } from '../../core/run-store.ts';
-import { collect, type Evidence, type EvidenceReport } from '../../core/evidence.ts';
-import { changedFiles, runCommand } from '../../core/evidence-gather.ts';
+import { delegate } from '../../core/delegate.ts';
+import type { EvidenceReport } from '../../core/evidence.ts';
 import { reportError } from '../../core/report.ts';
 import { dashboardView, runView, titleInfo, type RunView } from '../tui/model.ts';
 import {
@@ -217,61 +213,28 @@ export class GuiService {
     if (result.stage !== 'assigned')
       return { ok: false, text: '', view: runView(result, payload.task, { write: payload.write === true, ...notes }) };
 
-    const slot = result.plan.slots.primary;
     const execute =
       this.execute ??
       createExecutor(loadEngines(), this.workdir, loadLimits().runTimeoutMs, { write: payload.write === true });
-    // 1차 결정 로그 — 배정을 확정한 이 시점에 남긴다 (SPEC §8).
-    const decision = firstLine(matrix, result.plan, payload.task, result.reason);
-    appendDecision(decision);
-
-    // **두 슬롯을 실제로 돌린다** (D-009) — primary 만 돌리면 단일 엔진 선택기다.
-    const duo = await runDuo(matrix, result.plan, execute, payload.task, this.budget);
-    const run = duo.primary;
-    const charge = this.budget.charges.at(-1);
-
-    let stored = '';
-    try {
-      stored = storeRun(decision.id, this.journal.records.length + 1, slot.label, {
-        rawStdout: run.rawStdout,
-        rawStderr: run.rawStderr,
-        meta: { outcome: run.ok ? 'ok' : 'failed', durationMs: run.durationMs, modelId: slot.modelId, verdict: duo.verdict },
-      }, runStoreRoot(this.workdir)).dir;
-    } catch (error) {
-      // catch 후 무동작 금지.
-      process.stderr.write(`${reportError('run-store', 'persist', error).display}\n`);
-    }
-
-    const evidence: Evidence[] = [...duo.evidence, ...payload.verify.filter((v) => v.trim()).map((v) => runCommand(v, this.workdir))];
-    if (evidence.length > 0) evidence.push(changedFiles(this.workdir));
-    const report = collect(result.plan.assignment, evidence);
-
-    this.journal.append({
-      index: this.journal.records.length + 1,
-      unit: '실행',
-      model: slot.label,
-      effort: slot.effort,
-      outcome: run.ok ? 'ok' : 'failed',
-      evidence: `운영 기준: ${result.plan.assignment.operatingCriterion}`,
-      change: run.text.slice(0, 200),
-      // 증거가 모였을 때만 채운다. 빈 값은 "통과"가 아니라 "검증 안 함"이다.
-      verification: report.satisfied ? report.summary : '',
-      ...(charge ? { charge } : {}),
+    const d = await delegate({
+      matrix,
+      plan: result.plan,
+      reason: result.reason,
+      title: payload.task,
+      prompt: payload.task,
+      verify: payload.verify,
+      cwd: this.workdir,
+      execute,
+      budget: this.budget,
+      journal: this.journal,
     });
-
-    // 2차 — 같은 id 로 append. 증거가 모였을 때만 ok 다 (SPEC §5).
-    const outcome = !run.ok ? 'wrong' : report.satisfied ? 'ok' : 'unverified';
-    appendDecision(
-      secondLine(decision, outcome, [stored && `원시 로그 ${stored}`, report.summary].filter(Boolean).join(' · ')),
-    );
-
     return {
-      ok: run.ok,
-      text: run.text,
-      outcome,
-      report,
-      verdict: duo.verdict,
-      ...(duo.review ? { review: duo.review.text.slice(0, 2000) } : {}),
+      ok: d.ok,
+      text: d.text,
+      outcome: d.outcome,
+      report: d.report,
+      verdict: d.verdict,
+      ...(d.review ? { review: d.review } : {}),
       budget: this.budget.summary(),
       journal: this.journal.render(),
     };
