@@ -145,7 +145,11 @@ export async function routeWithFallback(
     }
     const line = tryLine(label, outcome.effort, costText(outcome.actualUsd, outcome.meteredUsd));
 
-    if (!outcome.ok || outcome.assignment === null) {
+    if (!outcome.ok) {
+      // 엔진이 죽은 것은 "맞는 행이 없다"는 답이 아니다 — 실패로 올린다 (D-034 리뷰).
+      return { result, fallback: { outcome: 'failed', line: `${line} → 분류 엔진 실패: ${outcome.failure ?? '사유 없음'}` } };
+    }
+    if (outcome.assignment === null) {
       return { result, fallback: { outcome: 'none', line: `${line} → 맞는 행 없음` } };
     }
     return {

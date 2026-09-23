@@ -25,6 +25,8 @@ export interface ClassifyOutcome {
   readonly assignment: Assignment | null;
   /** false = 엔진이 실패했다. 그래도 쓴 것은 과금한다 (D-034). */
   readonly ok: boolean;
+  /** ok 가 false 일 때 그 사유 — 셸이 "맞는 행 없음"(NONE)과 엔진 실패를 구분해 보여준다. */
+  readonly failure?: string;
   readonly actualUsd?: number;
   readonly meteredUsd?: number;
   readonly usage?: TokenCounts;
@@ -90,7 +92,11 @@ export async function classifyWithModel(
     ...(metered !== undefined ? { meteredUsd: metered } : {}),
     ...(result.usage !== undefined ? { usage: result.usage } : {}),
   };
-  if (result.outcome !== 'ok') return { ...outcome, assignment: null };
+  if (result.outcome !== 'ok') {
+    const detail = (result.rawStderr.trim() || result.text.trim()).split('\n', 1)[0]?.slice(0, 120) ?? '';
+    const exit = result.exitCode === null ? '' : ` exit ${result.exitCode}`;
+    return { ...outcome, assignment: null, failure: `${result.outcome}${exit}${detail ? `: ${detail}` : ''}` };
+  }
 
   const answer = result.text.trim().toUpperCase();
   if (answer.startsWith('NONE')) return { ...outcome, assignment: null };

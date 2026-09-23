@@ -196,6 +196,24 @@ describe('routeWithFallback — 예산 과금 (D-034)', () => {
     }
   });
 
+  it('분류 엔진이 실패하면 "맞는 행 없음"이 아니라 실패로 올린다 — 과금은 그대로 한다', async () => {
+    const here = mkdtempSync(path.join(os.tmpdir(), 'hs-classify-engine-fail-'));
+    const bin = path.join(here, 'claude');
+    writeFileSync(bin, ['#!/bin/sh', 'printf \'{"type":"result","is_error":true,"result":"","total_cost_usd":0.004}\\n\'', ''].join('\n'), 'utf8');
+    chmodSync(bin, 0o755);
+    process.env['PATH'] = `${here}${path.delimiter}${originalPath}`;
+    try {
+      const budget = new Budget(20);
+      const r = await routeWithFallback(matrix, catalog, '오늘 점심 뭐 먹지', { budget });
+      assert.equal(r.fallback?.outcome, 'failed');
+      assert.match(r.fallback?.line ?? '', /분류 엔진 실패/);
+      assert.doesNotMatch(r.fallback?.line ?? '', /맞는 행 없음/);
+      assert.equal(budget.charges[0]?.usd, 0.004, '실패했어도 쓴 것은 과금한다 (D-034).');
+    } finally {
+      process.env['PATH'] = originalPath;
+    }
+  });
+
   it('예산이 이미 상한이면 폴백을 시작하지 않는다 — 가짜 바이너리도 뜨지 않는다', async () => {
     const here = mkdtempSync(path.join(os.tmpdir(), 'hs-classify-skip-'));
     const marker = path.join(here, 'spawned');

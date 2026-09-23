@@ -113,6 +113,7 @@ describe('분류 폴백', () => {
       assert.equal(outcome.ok, false);
       assert.equal(outcome.assignment, null);
       assert.equal(outcome.actualUsd, 0.004);
+      assert.match(outcome.failure ?? '', /error/, '실패 사유가 없으면 셸이 "맞는 행 없음"과 구분하지 못한다.');
     } finally {
       process.env['PATH'] = realPath;
     }
