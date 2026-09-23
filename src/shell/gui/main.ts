@@ -36,9 +36,10 @@ function createWindow(): void {
   void window.loadFile(path.resolve(import.meta.dirname, 'renderer', 'index.html'));
 }
 
-ipcMain.handle('plan', (_e, payload: { task: string; write?: boolean }) =>
-  service.plan(payload.task, { write: payload.write === true }),
+ipcMain.handle('plan', (_e, payload: { task: string; write?: boolean; taskId?: string }) =>
+  service.plan(payload.task, { write: payload.write === true, ...(payload.taskId ? { taskId: payload.taskId } : {}) }),
 );
+ipcMain.handle('tasks', () => service.tasks());
 ipcMain.handle('run', (_e, payload: RunPayload) => service.run(payload));
 ipcMain.handle('projects', () => service.projects());
 ipcMain.handle('project-use', (_e, dir: string) => service.useProject(dir));

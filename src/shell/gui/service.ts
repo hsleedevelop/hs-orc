@@ -41,6 +41,11 @@ export interface PlanOptions {
   readonly write?: boolean;
   /** D-026: 규칙이 빗나갔을 때 LLM 분류 폴백. 기본 켜짐. 끄면 유료 호출이 아예 없다. */
   readonly classifyLlm?: boolean;
+  /**
+   * 사용자가 고른 업무 행 (CLI `--task` 와 같다). 분류를 건너뛴다.
+   * **plan 과 run 에 같은 값이 가야 한다** — run 이 다시 분류하면 승인한 배정과 다른 행이 돈다.
+   */
+  readonly taskId?: string;
 }
 
 export interface RunPayload extends PlanOptions {
@@ -128,8 +133,14 @@ export class GuiService {
       // 분류기도 이 폴더에서 돈다 (D-029) — 분류만 옛 폴더에 남으면 화면과 실행이 갈린다.
       cwd: this.workdir,
       ...(options.classifyLlm === undefined ? {} : { classifyLlm: options.classifyLlm }),
+      ...(options.taskId ? { taskId: options.taskId } : {}),
     });
     return runView(routed.result, task, { write, ...(routed.fallback ? { notes: [routed.fallback.line] } : {}) });
+  }
+
+  /** 분류가 빗나갔을 때 화면에서 고를 업무 행. 매트릭스를 그대로 읽는다 — 목록을 셸에 따로 적지 않는다. */
+  tasks(): { id: string; task: string }[] {
+    return loadMatrix().assignments.map((a) => ({ id: a.id, task: a.task }));
   }
 
   dashboard() {
@@ -199,6 +210,7 @@ export class GuiService {
     const routed = await routeWithFallback(matrix, catalog, payload.task, {
       cwd: this.workdir,
       ...(payload.classifyLlm === undefined ? {} : { classifyLlm: payload.classifyLlm }),
+      ...(payload.taskId ? { taskId: payload.taskId } : {}),
     });
     const result = routed.result;
     const notes = routed.fallback ? { notes: [routed.fallback.line] } : {};

@@ -62,6 +62,8 @@ export interface RunView {
   readonly cost: CostLine | null;
   /** 승인 대기 중인가 — 비용을 본 뒤에만 true 다. */
   readonly awaitingApproval: boolean;
+  /** 어느 분기에서 멈췄는가. 셸이 `lines` 문자열을 다시 해석해 다음 행동을 고르지 않게 한다. */
+  readonly stage: 'input' | RouteResult['stage'];
 }
 
 export interface RunViewOptions {
@@ -75,10 +77,10 @@ export function runView(result: RouteResult | null, task: string, options: RunVi
   const title = titleInfo('Run');
   const notes = options.notes ?? [];
   if (result === null)
-    return { title, lines: [...notes, `작업: ${task || '(입력 대기)'}`], cost: null, awaitingApproval: false };
+    return { title, lines: [...notes, `작업: ${task || '(입력 대기)'}`], cost: null, awaitingApproval: false, stage: 'input' };
 
   if (result.stage === 'unclassified') {
-    return { title, lines: [...notes, '분류: 해당 없음 — 임의 배정하지 않는다', result.message], cost: null, awaitingApproval: false };
+    return { title, lines: [...notes, '분류: 해당 없음 — 임의 배정하지 않는다', result.message], cost: null, awaitingApproval: false, stage: 'unclassified' };
   }
   if (result.stage === 'direct') {
     return {
@@ -86,6 +88,7 @@ export function runView(result: RouteResult | null, task: string, options: RunVi
       lines: [...notes, '판정: ② 유지 — §1 하한선에 걸렸다. 엔진을 띄우지 않는다.', ...result.reasons.map((r) => `· ${r}`)],
       cost: null,
       awaitingApproval: false,
+      stage: 'direct',
     };
   }
 
@@ -105,6 +108,7 @@ export function runView(result: RouteResult | null, task: string, options: RunVi
     ],
     cost: costLine(plan),
     awaitingApproval: true,
+    stage: 'assigned',
   };
 }
 

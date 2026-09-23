@@ -10,7 +10,7 @@
  *   2. **전송은 명시적이다.** 타이핑이 곧 호출이면 분류 폴백(D-026)이 키 입력마다 돈다.
  *   3. **승인은 화면에 찍힌 그 작업으로만 간다.** 입력을 고친 뒤 누른 승인은 막는다.
  */
-import { createElement as h, useCallback, useEffect, useState, type ReactElement, type ReactNode } from 'react';
+import { createElement as h, useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 const SCREENS = ['Run', 'Dashboard', 'Sessions', 'Reviews', 'Debug'] as const;
@@ -26,8 +26,9 @@ interface WorktreeInfo { dir: string; branch: string | null; head: string; main:
 interface WorktreeState { repo: string | null; items: WorktreeInfo[]; current: string }
 
 interface Bridge {
-  plan(payload: { task: string; write: boolean }): Promise<RunView>;
-  run(payload: { task: string; verify: string[]; write: boolean }): Promise<RunResult>;
+  plan(payload: { task: string; write: boolean; taskId?: string }): Promise<RunView>;
+  run(payload: { task: string; verify: string[]; write: boolean; taskId?: string }): Promise<RunResult>;
+  tasks(): Promise<TaskRow[]>;
   projects(): Promise<ProjectState>;
   pickProject(): Promise<ProjectState | null>;
   useProject(dir: string): Promise<ProjectState>;
@@ -45,7 +46,9 @@ interface RunView {
   lines: string[];
   cost: { line: string; badge: { grade: string; text: string }; disclaimer: string } | null;
   awaitingApproval: boolean;
+  stage: 'input' | 'unclassified' | 'direct' | 'assigned';
 }
+interface TaskRow { id: string; task: string }
 interface EvidenceReport { satisfied: boolean; missing: string[]; rejected: { why: string }[]; summary: string }
 interface RunResult {
   ok: boolean; text: string; outcome?: string; report?: EvidenceReport;
@@ -233,7 +236,8 @@ function ProjectBar(props: { state: ProjectState | null; onChange: (s: ProjectSt
 }
 
 // ── Run ────────────────────────────────────────────────────
-interface Planned { task: string; write: boolean; view: RunView }
+/** `taskId` 가 있으면 사용자가 고른 행이다 — 승인할 때 run 에도 같은 행을 보낸다. */
+interface Planned { task: string; write: boolean; taskId?: string; view: RunView }
 
 function RunScreen(props: { projectDir: string | undefined }): ReactElement {
   const [draft, setDraft] = useState('');
@@ -244,24 +248,30 @@ function RunScreen(props: { projectDir: string | undefined }): ReactElement {
   const [error, setError] = useState('');
   const [planning, setPlanning] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [rows, setRows] = useState<TaskRow[]>([]);
+  /** 배정·결과가 새로 뜨면 그 자리로 옮긴다 — 입력 아래 카드들에 가려 "아무 일 없음"으로 보이지 않게. */
+  const outcomeRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { orc.tasks().then(setRows, (e: unknown) => setError(why(e))); }, []);
+  useEffect(() => { outcomeRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [planned, result]);
 
   // 폴더가 바뀌면 이전 배정·결과는 **다른 프로젝트의 것이다.** 남겨 두면 잘못된 폴더로 승인하게 된다.
   useEffect(() => { setPlanned(null); setResult(null); setError(''); }, [props.projectDir]);
 
-  const plan = useCallback((task: string, w: boolean) => {
+  const plan = useCallback((task: string, w: boolean, taskId?: string) => {
     if (!task.trim()) { setPlanned(null); return; }
     setPlanning(true);
     setError('');
     setResult(null);
-    orc.plan({ task, write: w })
-      .then((view) => setPlanned({ task, write: w, view }), (e: unknown) => setError(why(e)))
+    orc.plan({ task, write: w, ...(taskId ? { taskId } : {}) })
+      .then((view) => setPlanned({ task, write: w, ...(taskId ? { taskId } : {}), view }), (e: unknown) => setError(why(e)))
       .finally(() => setPlanning(false));
   }, []);
 
   const toggleWrite = useCallback((next: boolean) => {
     setWrite(next);
     // 쓰기 여부는 배정 화면에 찍히는 값이다 — 이미 배정을 봤다면 그 자리에서 다시 받는다.
-    if (planned) plan(planned.task, next);
+    if (planned) plan(planned.task, next, planned.taskId);
   }, [planned, plan]);
 
   const approve = useCallback(() => {
@@ -270,7 +280,12 @@ function RunScreen(props: { projectDir: string | undefined }): ReactElement {
     setResult(null);
     setError('');
     // **화면에 찍힌 그 작업**을 보낸다. 입력창의 최신 글자가 아니다.
-    orc.run({ task: planned.task, verify: verify.split('\n').map((v) => v.trim()).filter(Boolean), write: planned.write })
+    orc.run({
+      task: planned.task,
+      verify: verify.split('\n').map((v) => v.trim()).filter(Boolean),
+      write: planned.write,
+      ...(planned.taskId ? { taskId: planned.taskId } : {}),
+    })
       .then(setResult, (e: unknown) => setError(why(e)))
       .finally(() => setBusy(false));
   }, [planned, verify]);
@@ -312,7 +327,30 @@ function RunScreen(props: { projectDir: string | undefined }): ReactElement {
           write ? h('b', null, 'primary 슬롯이 이 폴더의 파일을 고칠 수 있다') : 'primary 슬롯 파일 쓰기 (--write)',
           h('span', { className: 'dim' }, ' · reviewer 는 언제나 읽기 전용')))),
 
+    h('div', { ref: outcomeRef, className: 'stack', style: { padding: 0, width: '100%' } },
     view ? card('배정', ...view.lines.map((l, i) => planLine(l, i))) : null,
+
+    // 승인 버튼이 없는 분기는 **왜 없는지와 다음 행동**을 말한다. 말없이 멈추면 고장처럼 보인다.
+    view?.stage === 'unclassified'
+      ? h('div', { className: 'banner note' }, '분류되지 않아 실행할 배정이 없다 — 아래에서 업무 행을 직접 고르면 배정과 비용이 나온다.')
+      : null,
+    view?.stage === 'direct'
+      ? h('div', { className: 'banner note' }, '하한선 판정 — 엔진을 띄울 작업이 아니다. 승인할 실행이 없다.')
+      : null,
+
+    // `--task` 의 GUI 판. 한 번 고른 뒤에도 남겨 두어 다른 행으로 바꿀 수 있게 한다.
+    planned && (view?.stage === 'unclassified' || planned.taskId)
+      ? card('업무 행 직접 지정',
+          h('div', { className: 'row' },
+            h('select', {
+              value: planned.taskId ?? '',
+              disabled: planning || busy || stale,
+              onChange: (e: { target: { value: string } }) => { if (e.target.value) plan(planned.task, planned.write, e.target.value); },
+            },
+            h('option', { key: 'none', value: '' }, '행을 고른다…'),
+            ...rows.map((r) => h('option', { key: r.id, value: r.id }, `${r.id} · ${r.task}`))),
+            h('span', { className: 'hint' }, stale ? '작업이 바뀌었다 — 먼저 다시 전송' : '분류를 건너뛴다 (CLI --task 와 같다)')))
+      : null,
 
     view?.cost
       ? h('section', { className: 'card accented' },
@@ -329,7 +367,7 @@ function RunScreen(props: { projectDir: string | undefined }): ReactElement {
           busy ? '실행 중…' : stale ? '작업이 바뀌었다 — 다시 전송' : `승인하고 실행 · 두 슬롯${planned?.write ? ' · 쓰기 켜짐' : ''}`)
       : null,
 
-    result ? ResultCards(result) : null,
+    result ? ResultCards(result) : null),
   );
 }
 
@@ -438,8 +476,12 @@ function App(): ReactElement {
     orc.projects().then(setProjects, (e: unknown) => setError(why(e)));
   }, []);
 
+  // Run 은 **숨기기만 한다.** 언마운트하면 입력·배정·진행 중인 실행 결과가 탭 이동 한 번에 사라진다.
+  // 나머지 화면은 읽기 전용 조회라 들어올 때마다 다시 불러오는 편이 맞다(실행 뒤 대시보드가 낡지 않게).
+  const run = h('div', { key: 'run', hidden: screen !== 'Run' },
+    h(RunScreen, { projectDir: projects?.current.dir, key: projects?.current.dir ?? 'none' }));
   const body =
-    screen === 'Run' ? h(RunScreen, { projectDir: projects?.current.dir, key: projects?.current.dir ?? 'none' })
+    screen === 'Run' ? null
     : screen === 'Dashboard' ? h(DashboardScreen, null)
     : screen === 'Sessions' ? h(SessionsScreen, null)
     : screen === 'Reviews' ? h(ReviewsScreen, null)
@@ -454,6 +496,7 @@ function App(): ReactElement {
       h('button', { key: s, 'aria-current': s === screen, onClick: () => setScreen(s) }, s))),
     h('main', null,
       error ? h('div', { className: 'stack' }, h('div', { className: 'banner error' }, error)) : null,
+      run,
       body));
 }
 

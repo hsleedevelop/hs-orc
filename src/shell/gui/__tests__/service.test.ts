@@ -51,6 +51,19 @@ describe('GUI — Core 를 그대로 쓴다', () => {
     const view = await new GuiService(fake).plan('오늘 점심 뭐 먹지', { classifyLlm: false });
     assert.equal(view.cost, null);
     assert.equal(view.awaitingApproval, false);
+    assert.equal(view.stage, 'unclassified');
+  });
+
+  it('분류가 빗나가도 화면에서 고른 행으로 배정하고, run 도 같은 행으로 돈다', async () => {
+    isolated();
+    const service = new GuiService(fake);
+    const view = await service.plan('넌 누구니', { classifyLlm: false, taskId: 'R01' });
+    assert.equal(view.stage, 'assigned');
+    assert.equal(view.awaitingApproval, true);
+    assert.match(view.lines[0] ?? '', /수동 지정 R01/);
+
+    const result = await service.run({ task: '넌 누구니', verify: [], classifyLlm: false, taskId: 'R01' });
+    assert.equal(result.ok, true, 'run 이 다시 분류하면 여기서 미분류로 떨어진다');
   });
 });
 
