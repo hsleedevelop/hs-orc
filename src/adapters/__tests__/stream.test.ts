@@ -38,15 +38,25 @@ describe('stream 파싱', () => {
     assert.equal(parseLine('claude', CURSOR_RESULT).find((e) => e.kind === 'done')?.costUsd, undefined);
   });
 
-  it('codex 는 agent_message 에서 텍스트를, turn.completed 에서 사용량을 준다', () => {
+  it('codex 는 agent_message 에서 텍스트를, turn.completed 에서 사용량을 준다 (input 은 cached 를 뺀 값)', () => {
     assert.deepEqual(parseLine('codex', CODEX_MESSAGE), [{ kind: 'text', text: 'ok' }]);
     assert.deepEqual(parseLine('codex', CODEX_USAGE).find((e) => e.kind === 'usage')?.usage, {
-      inputTokens: 37675, outputTokens: 5, cachedInputTokens: 11008, cacheWriteTokens: 0,
+      inputTokens: 26667, outputTokens: 5, cachedInputTokens: 11008, cacheWriteTokens: 0,
     });
   });
 
   it('codex 의 item.type="error" 는 실행 실패가 아니라 notice 다', () => {
     assert.deepEqual(parseLine('codex', CODEX_NOTICE), [{ kind: 'notice', level: 'warn', message: '경고' }]);
+  });
+
+  it('codex 의 input_tokens 가 cached_input_tokens 이하라도 inputTokens 는 음수로 내려가지 않는다', () => {
+    const line = JSON.stringify({
+      type: 'turn.completed',
+      usage: { input_tokens: 100, cached_input_tokens: 100, cache_write_input_tokens: 0, output_tokens: 5 },
+    });
+    assert.deepEqual(parseLine('codex', line).find((e) => e.kind === 'usage')?.usage, {
+      inputTokens: 0, outputTokens: 5, cachedInputTokens: 100, cacheWriteTokens: 0,
+    });
   });
 });
 

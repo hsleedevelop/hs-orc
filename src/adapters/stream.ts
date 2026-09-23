@@ -67,13 +67,17 @@ function codexEvents(event: Record<string, unknown>): RunEvent[] {
     case 'turn.completed': {
       const usage = asRecord(event['usage']);
       if (!usage) return [];
+      const cachedInputTokens = num(usage['cached_input_tokens']);
+      // D-032: codex 의 input_tokens 는 캐시 입력을 이미 포함한다 (codex 세션 로그: total = input + output).
+      // claude/cursor 는 반대로 입력이 캐시를 빼고 온다 — 여기서만 빼서 이후 Usage 네 칸이 벤더와 무관하게 겹치지 않게 한다.
+      const inputTokens = Math.max(0, num(usage['input_tokens']) - cachedInputTokens);
       return [
         {
           kind: 'usage',
           usage: {
-            inputTokens: num(usage['input_tokens']),
+            inputTokens,
             outputTokens: num(usage['output_tokens']),
-            cachedInputTokens: num(usage['cached_input_tokens']),
+            cachedInputTokens,
             cacheWriteTokens: num(usage['cache_write_input_tokens']),
           },
         },
