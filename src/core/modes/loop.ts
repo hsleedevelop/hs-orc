@@ -136,10 +136,13 @@ export async function runLoop(
       verdict.cost?.meteredUsd,
       plan.slots.reviewer.plan,
     );
-    if (verdict.cost) budget.countTokens(verdict.cost.usage);
+    // cost 가 없으면 reviewer 토큰을 못 본 것이다 — 0 으로 치지 않고 미보고로 센다 (D-030).
+    budget.countTokens(verdict.cost?.usage);
 
     const critique = components.critique ? await components.critique(ctx, run.text) : '';
-    history.push(`#${iteration} ${task} → ${verdict.passed ? 'pass' : 'fail'}`);
+    // 재시도 작업에는 직전 지적이 여러 줄로 붙는다 — 기록에는 첫 줄만 남긴다 (D-036 리뷰).
+    const summary = task.split('\n', 1)[0] ?? task;
+    history.push(`#${iteration} ${summary} → ${verdict.passed ? 'pass' : 'fail'}`);
 
     journal.append({
       index: iteration,
@@ -147,7 +150,7 @@ export async function runLoop(
       model: plan.slots.primary.label,
       effort: plan.slots.primary.effort,
       outcome: verdict.passed ? 'ok' : 'failed',
-      evidence: critique ? `${task} / critic: ${critique}` : task,
+      evidence: critique ? `${summary} / critic: ${critique}` : summary,
       change: run.text.slice(0, 200),
       verification: verdict.verification,
       charge: execCharge,

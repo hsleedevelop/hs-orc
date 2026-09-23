@@ -254,17 +254,24 @@ async function main(): Promise<void> {
     const maxIterations = args.maxIterations ?? limits.maxIterations;
     // 위에 찍힌 비용은 **1사이클**이다. 루프는 최대 maxIterations 번 돈다 —
     // 실행 전에 최악값을 보여주지 않으면 "실행 전 비용 표시"가 거짓말이 된다.
-    const worst = Math.min(plan.cost.totalUsd * maxIterations, budgetUsd);
+    // 상한은 사이클을 **시작하기 전에** 본다 — 상한 직전에 시작한 사이클 하나만큼은 넘을 수 있다 (D-036 리뷰).
+    const worst = Math.min(plan.cost.totalUsd * maxIterations, budgetUsd + plan.cost.totalUsd);
     process.stderr.write(
-      `상한   최대 ${maxIterations}사이클 · 최악 $${worst.toFixed(2)}(추정, 상한 $${budgetUsd} 에서 강제 중단)` +
+      `상한   최대 ${maxIterations}사이클 · 최악 $${worst.toFixed(2)}(추정, 상한 $${budgetUsd} 을 넘으면 다음 사이클을 시작하지 않는다)` +
         ` · 토큰 ${tokenBudget} (0 = 없음)\n\n`,
     );
-    // reviewer 실행 자체가 죽으면 재시도하지 않는다 — 망가진 엔진에 primary 를 반복해 태우지 않는다 (D-036).
-    let reviewerBroken = false;
+    // 엔진 실행 자체가 죽으면 재시도하지 않는다 (D-036). primary 가 죽으면 에러 문자열을 채점하지 않고,
+    // reviewer 가 죽으면 망가진 엔진에 primary 를 반복해 태우지 않는다 — 둘 다 사람에게 올린다.
+    let broken: 'primary' | 'reviewer' | undefined;
+    const loopExecute: typeof execute = async (slot, prompt, runOptions) => {
+      const run = await execute(slot, prompt, runOptions);
+      if (!run.ok) broken = slot.role === 'primary' ? 'primary' : 'reviewer';
+      return run;
+    };
     const result = await runLoop(
       matrix,
       plan,
-      execute,
+      loopExecute,
       {
         // 재시도면 직전 reviewer 의 지적을 싣는다 — 사유 없는 재시도는 같은 실수를 반복한다 (D-036).
         plan: (ctx) =>
@@ -274,8 +281,12 @@ async function main(): Promise<void> {
         // Evaluator 는 reviewer 슬롯이 돈다 (D-003). 형식·판정은 once 의 독립 리뷰와 같다 —
         // 마지막 줄 PASS/FAIL, 못 읽으면 unknown 이고 통과로 봐주지 않는다.
         evaluate: async (_ctx, output) => {
-          const check = await execute(plan.slots.reviewer, reviewPrompt(plan, args.task, output));
-          reviewerBroken = !check.ok;
+          if (broken === 'primary') {
+            // reviewer 는 돌지 않았다 — 0 은 "미보고"가 아니라 실제로 0 이다.
+            const none = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 };
+            return { passed: false, verification: `primary 실행 실패 — reviewer 생략: ${output.slice(0, 80)}`, cost: { actualUsd: 0, usage: none } };
+          }
+          const check = await loopExecute(plan.slots.reviewer, reviewPrompt(plan, args.task, output));
           const verdict = check.ok ? parseVerdict(check.text) : 'unknown';
           return {
             passed: verdict === 'pass',
@@ -287,7 +298,7 @@ async function main(): Promise<void> {
           };
         },
         stop: (_ctx, verdict) => verdict.passed,
-        recover: () => (reviewerBroken ? 'escalate' : 'retry'),
+        recover: () => (broken ? 'escalate' : 'retry'),
       },
       // 분류 폴백이 이미 과금한 같은 budget 을 넘긴다 — 합산이다 (D-034).
       { goal: args.task, maxIterations, budgetUsd, budget },

@@ -855,7 +855,7 @@ CLI 의 loop 는 `recover: () => 'abort'` 라 **1사이클짜리**였다 — PAS
 1. **(L2)** CLI loop 는 검증 FAIL 이면 `retry` — `maxIterations`·금액·토큰 상한까지 돈다. Core `runLoop` 의 기본값(recover 미지정 = abort)은 그대로 둔다. 예전 동작은 `--max-iterations 1` 로 똑같이 얻는다 — 그래서 `--recover` 옵션(L3)은 만들지 않는다.
 2. **(L4)** loop 의 reviewer 는 once 의 독립 리뷰와 **같은 프롬프트·판정**을 쓴다 (`duo.reviewPrompt`·`parseVerdict`): 누락·반례를 먼저 적고 마지막 줄에 PASS/FAIL. FAIL 이면 그 리뷰 본문이 `Verdict.reason` → `LoopContext.feedback` 으로 다음 사이클의 Planner 에 넘어가고, CLI Planner 는 이를 프롬프트에 싣는다.
 3. 판정을 못 읽으면 `unknown` 이고 통과로 봐주지 않는다(fail-closed). 사유 텍스트 속 "PASS" 에 걸리던 `/\bPASS\b/i` 는 버린다. 모드마다 형식을 따로 두지 않는다 — 처음엔 "첫 줄 판정" 새 형식을 적었으나, 이미 검증된 duo 형식이 있어 구현 중 이쪽으로 바꿨다.
-4. reviewer 실행 자체가 실패하면(`ok: false`) 재시도하지 않고 `escalate` 한다 — 망가진 엔진에 primary 를 반복해서 태우지 않는다.
+4. primary 나 reviewer 의 실행 자체가 실패하면(`ok: false`) 재시도하지 않고 `escalate` 한다. primary 가 죽으면 reviewer 를 부르지 않는다 — 에러 문자열을 채점해 FAIL → 재시도로 상한까지 도는 길을 막는다(구독제에서 실패한 실행은 토큰도 보고하지 않아 토큰 상한이 못 막는다). reviewer 가 죽으면 망가진 엔진에 primary 를 반복해서 태우지 않는다.
 5. Evaluator 도 Executor 와 같은 우선순위(actual > metered > estimate)로 과금하고 토큰을 센다. `Verdict.cost` 로 실행 결과를 돌려받는다.
 
 **규모** (추정 — D-035 와 같은 근거, 실측 아님): 1사이클 ≈ 34만 토큰. 기본 상한 200만이면 재시도 포함 약 5~6사이클에서 멈춘다. reviewer 토큰을 세기 시작하므로 이전 추정보다 조금 일찍 멈출 수 있다.

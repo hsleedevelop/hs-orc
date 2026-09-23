@@ -251,6 +251,7 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     fakeClaude,
     [
       '#!/bin/sh',
+      'if [ -n "$PRIMARY_EXIT" ]; then exit "$PRIMARY_EXIT"; fi',
       `printf '%s\\n<<END>>\\n' "$*" >> '${claudeArgs}'`,
       `printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"result":"draft","duration_ms":1,"total_cost_usd":0.01,"usage":{"input_tokens":10,"output_tokens":10,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}'`,
       '',
@@ -290,5 +291,13 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run'], { PATH: fakeDir, REVIEWER_EXIT: '3' });
     assert.notEqual(r.code, 0);
     assert.match(r.err, /중단 {3}escalated · 1회/);
+  });
+
+  it('primary 실행이 실패하면 reviewer 를 부르지 않고 사람에게 올린다 — 에러 문자열을 채점하며 상한까지 돌지 않는다', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run'], { PATH: fakeDir, PRIMARY_EXIT: '3' });
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /중단 {3}escalated · 1회/);
+    assert.equal(existsSync(reviewCount), false, 'primary 가 죽었는데 reviewer 가 돌았다.');
   });
 });
