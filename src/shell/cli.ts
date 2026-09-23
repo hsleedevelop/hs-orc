@@ -81,12 +81,14 @@ function parseArgs(argv: readonly string[]): Parsed {
       case '--budget': parsed.budgetUsd = Number(value()); break;
       case '--token-budget': {
         // 조용히 커지는 상한은 없다(D-035) — 잘못된 값은 그 자리에서 던진다.
+        // `Number("")` 도 `Number("  ")` 도 0 이다 — 빈 값이 조용히 "상한 없음"으로 통과하면
+        // D-035 가 막으려는 fail-open 그 자체다. 변환 전에 원본 문자열을 정규식으로 먼저 본다:
+        // 순수 10진 정수만 통과한다(공백·부호·소수점·지수 표기 전부 거절).
         const v = value();
-        const n = Number(v);
-        if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
+        if (!/^\d+$/.test(v)) {
           throw new Error(`--token-budget 은 0 이상의 정수여야 한다: ${v}`);
         }
-        parsed.tokenBudget = n;
+        parsed.tokenBudget = Number(v);
         break;
       }
       case '--graph': parsed.graphFile = value(); break;
@@ -128,6 +130,16 @@ function parseArgs(argv: readonly string[]): Parsed {
   parsed.task = positional.join(' ').trim();
   if (!parsed.task) throw new Error(`작업 문자열이 없다.\n  ${USAGE}`);
   return parsed;
+}
+
+/**
+ * 토큰 쪽이 막았을 때만 --token-budget 을 안내한다 — $ 상한이 막았으면 --budget 얘기다 (D-035).
+ * once·pingpong·loop·graph 네 자리가 전부 같은 문구를 썼다 — 여기 하나로 합친다.
+ */
+function printTokenCapHint(budget: Budget): void {
+  if (budget.tokensExceeded()) {
+    process.stderr.write(`안내   토큰 상한(${budget.limitTokens})에 닿았다 — 이번 실행만 올리려면 --token-budget N.\n`);
+  }
 }
 
 async function main(): Promise<void> {
@@ -234,10 +246,7 @@ async function main(): Promise<void> {
     const turn = await session.turn({ prompt: args.task, side: args.side });
     process.stdout.write(`${turn.text}\n`);
     process.stderr.write(`\n${session.journal.render()}\n누적   ${turn.budget}\n제안   ${turn.suggestion}\n`);
-    // 상한을 세운 쪽이 토큰이면 그렇게 말한다 — $ 상한은 --budget 이지 --token-budget 이 아니다 (D-035).
-    if (budget.tokensExceeded()) {
-      process.stderr.write(`안내   토큰 상한(${budget.limitTokens})에 닿았다 — 이번 실행만 올리려면 --token-budget N.\n`);
-    }
+    printTokenCapHint(budget);
     return;
   }
 
@@ -276,10 +285,7 @@ async function main(): Promise<void> {
     if (result.journal.unverified.length > 0) {
       process.stderr.write(`경고   검증 기록이 빈 사이클 ${result.journal.unverified.length}건 — "통과"가 아니다.\n`);
     }
-    // 토큰 쪽이 막았을 때만 --token-budget 을 안내한다 — $ 상한이 막았으면 --budget 얘기다 (D-035).
-    if (result.budget.tokensExceeded()) {
-      process.stderr.write(`안내   토큰 상한(${result.budget.limitTokens})에 닿았다 — 이번 실행만 올리려면 --token-budget N.\n`);
-    }
+    printTokenCapHint(result.budget);
     if (result.stopReason !== 'goal-reached') process.exitCode = 1;
     return;
   }
@@ -306,10 +312,7 @@ async function main(): Promise<void> {
       `\n${result.journal.render()}\n묶음   ${result.batches.map((b) => b.join('+')).join(' → ')}\n` +
         `건너뜀 ${result.skipped.join(', ') || '없음'}\n중단   ${result.stopReason}\n누적   ${result.budget.summary()}\n`,
     );
-    // 토큰 쪽이 막았을 때만 --token-budget 을 안내한다 — $ 상한이 막았으면 --budget 얘기다 (D-035).
-    if (result.budget.tokensExceeded()) {
-      process.stderr.write(`안내   토큰 상한(${result.budget.limitTokens})에 닿았다 — 이번 실행만 올리려면 --token-budget N.\n`);
-    }
+    printTokenCapHint(result.budget);
     if (result.stopReason !== 'completed') process.exitCode = 1;
     return;
   }
@@ -343,11 +346,10 @@ async function main(): Promise<void> {
     );
   } else if (duo.primary.ok) {
     process.stderr.write(`검증   reviewer 를 시작하지 못했다 (비용 상한 또는 primary 실패)\n`);
-    // 토큰 쪽이 막았을 때만 --token-budget 을 안내한다 — $ 상한이 막았으면 --budget 얘기다 (D-035).
-    if (budget.tokensExceeded()) {
-      process.stderr.write(`안내   토큰 상한(${budget.limitTokens})에 닿았다 — 이번 실행만 올리려면 --token-budget N.\n`);
-    }
   }
+  // 어느 분기를 탔든 상관없이 본다 — reviewer 가 실제로 돌아서 그 토큰이 합산 후에야 상한을
+  // 넘긴 경우(duo.review 분기)도 있다. self-gates on tokensExceeded() 라 중복 호출도 안전하다.
+  printTokenCapHint(budget);
 
   // 원시 로그를 먼저 보존한다 — 이후 단계가 터져도 원본은 남는다.
   let stored = '';

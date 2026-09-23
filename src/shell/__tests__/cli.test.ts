@@ -152,6 +152,20 @@ describe('D-035 — CLI 의 모든 진행 방식에 토큰 상한 (T1) + --token
     assert.doesNotMatch(r.err, /실행 가능한 바이너리를 찾지 못했다/);
   });
 
+  it('--token-budget "" 은 Number("")===0 으로 조용히 통과하지 않는다 — 빈 값도 던진다', () => {
+    const r = cli(['이 아키텍처 설계 검토해줘', '--token-budget', ''], NO_PATH);
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /--token-budget 은 0 이상의 정수여야 한다: $/m);
+    assert.doesNotMatch(r.err, /실행 가능한 바이너리를 찾지 못했다/);
+  });
+
+  it('--token-budget 1e3 은 지수 표기라 정수 리터럴이 아니다 — 던진다', () => {
+    const r = cli(['이 아키텍처 설계 검토해줘', '--token-budget', '1e3'], NO_PATH);
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /--token-budget 은 0 이상의 정수여야 한다: 1e3/);
+    assert.doesNotMatch(r.err, /실행 가능한 바이너리를 찾지 못했다/);
+  });
+
   it('사용법에 --token-budget 이 있다', () => {
     const r = cli([], NO_PATH);
     assert.match(r.err, /--token-budget/);
@@ -179,6 +193,43 @@ describe('D-035 — CLI 의 모든 진행 방식에 토큰 상한 (T1) + --token
       assert.equal(r.code, 0);
       assert.match(r.err, /누적.*토큰 2500000\/2000000/);
       assert.match(r.err, /안내 {3}토큰 상한\(2000000\)에 닿았다 — 이번 실행만 올리려면 --token-budget N\./);
+    });
+  });
+
+  describe('가짜 claude+codex 로 once 모드가 reviewer 분기에서도 안내를 찍는지 증명한다', () => {
+    // primary(claude) 혼자는 상한(150만) 밑이라 reviewer(codex)가 정상적으로 돈다 — duo.review
+    // 분기다. reviewer 토큰까지 합산해야 넘는다 — 리뷰가 실제로 실행됐을 때도 안내가 뜨는지가
+    // 이 회귀의 핵심이다(고치기 전에는 else-if 분기 밖이라 이 경우 안내가 안 떴다).
+    const fakeDir = mkdtempSync(path.join(os.tmpdir(), 'hs-orc-cli-fakebin-once-'));
+    const fakeClaude = path.join(fakeDir, 'claude');
+    const fakeCodex = path.join(fakeDir, 'codex');
+    writeFileSync(
+      fakeClaude,
+      [
+        '#!/bin/sh',
+        `printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"result":"ok","duration_ms":1,"total_cost_usd":0.01,"usage":{"input_tokens":700000,"output_tokens":300000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}'`,
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    chmodSync(fakeClaude, 0o755);
+    writeFileSync(
+      fakeCodex,
+      [
+        '#!/bin/sh',
+        `printf '%s\\n' '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"없음\\nPASS"}}'`,
+        `printf '%s\\n' '{"type":"turn.completed","usage":{"input_tokens":1000000,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":0}}'`,
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    chmodSync(fakeCodex, 0o755);
+    after(() => rmSync(fakeDir, { recursive: true, force: true }));
+
+    it('primary 만으로는 상한 밑이라 reviewer 가 돌고, 합산 후에야 넘겨도 안내가 뜬다', () => {
+      const r = cli(['이 아키텍처 설계 검토해줘', '--token-budget', '1500000', '--run'], { PATH: fakeDir });
+      assert.match(r.err, /검증 {3}reviewer Astra·xhigh → PASS/);
+      assert.match(r.err, /안내 {3}토큰 상한\(1500000\)에 닿았다 — 이번 실행만 올리려면 --token-budget N\./);
     });
   });
 });
