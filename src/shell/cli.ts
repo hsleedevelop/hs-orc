@@ -36,6 +36,8 @@ interface Parsed {
   mode: Mode;
   maxIterations?: number;
   budgetUsd?: number;
+  /** 이 실행 한정 토큰 상한. 없으면 `limits.tokenBudget` (D-035) — 조용히 커지는 상한은 없다. */
+  tokenBudget?: number;
   graphFile?: string;
   verify: { cmd: string; phase?: string }[];
   evidenceFile?: string;
@@ -55,8 +57,8 @@ interface Parsed {
 
 const USAGE = `사용법: hs-orc "<작업>" [--task R01] [--effort high] [--reviewer-effort high]
        [--gate <${GATE_CHECKS.join('|')}>]... [--no-classify-llm] [--run] [--write] [--timeout 600] [--raw]
-       [--mode once|pingpong|loop|graph] [--max-iterations N] [--budget 20] [--graph <nodes.json>]
-       (그래프 스펙 예제: examples/graph-nodes.json)
+       [--mode once|pingpong|loop|graph] [--max-iterations N] [--budget 20] [--token-budget N] [--graph <nodes.json>]
+       (그래프 스펙 예제: examples/graph-nodes.json · --token-budget 0 = 토큰 상한 없음, D-035)
        [--verify "[phase:]<명령>"]... [--evidence <file.json>] [--crash-test]
        [--no-reviewer] [--side primary|reviewer]`;
 
@@ -77,6 +79,16 @@ function parseArgs(argv: readonly string[]): Parsed {
       case '--mode': parsed.mode = value() as Mode; break;
       case '--max-iterations': parsed.maxIterations = Number(value()); break;
       case '--budget': parsed.budgetUsd = Number(value()); break;
+      case '--token-budget': {
+        // 조용히 커지는 상한은 없다(D-035) — 잘못된 값은 그 자리에서 던진다.
+        const v = value();
+        const n = Number(v);
+        if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
+          throw new Error(`--token-budget 은 0 이상의 정수여야 한다: ${v}`);
+        }
+        parsed.tokenBudget = n;
+        break;
+      }
       case '--graph': parsed.graphFile = value(); break;
       case '--verify': {
         // `phase:명령` 이면 단계를 붙인다 (R05 before/after, R06 reproduce/fix/regress 용).
@@ -139,11 +151,13 @@ async function main(): Promise<void> {
   };
 
   // D-034: 분류 전에 이 실행의 예산을 만든다 — 분류 폴백부터 진행 방식까지 **같은 예산에 합산**한다.
-  // 토큰 상한은 진행 방식별로 지금 값 그대로다: once 만 tokenBudget 을 받는다 — pingpong·loop·graph 는
-  // 0(상한 없음)인 기존 빈틈을 이 변경이 메우지 않는다 (D-034 "드러난 기존 빈틈").
+  // D-035: 토큰 상한은 진행 방식과 무관하게 같은 값을 쓴다 — pingpong·loop·graph 도 once 와 같다.
+  // once 만 상한을 받던 D-034 의 빈틈을 여기서 닫는다. 올리거나 내리는 것은 --token-budget 으로만,
+  // 조용히 커지는 상한은 없다.
   const limits = loadLimits();
   const budgetUsd = args.budgetUsd ?? limits.budgetUsd;
-  const budget = new Budget(budgetUsd, args.mode === 'once' ? limits.tokenBudget : 0);
+  const tokenBudget = args.tokenBudget ?? limits.tokenBudget;
+  const budget = new Budget(budgetUsd, tokenBudget);
 
   // 분류·하한선·배정 + LLM 폴백. 순서의 소유자는 Core 다 (SPEC §4, D-026).
   const routed = await routeWithFallback(matrix, catalog, args.task, { ...options, classifyLlm: args.classifyLlm, budget });
@@ -220,6 +234,10 @@ async function main(): Promise<void> {
     const turn = await session.turn({ prompt: args.task, side: args.side });
     process.stdout.write(`${turn.text}\n`);
     process.stderr.write(`\n${session.journal.render()}\n누적   ${turn.budget}\n제안   ${turn.suggestion}\n`);
+    // 상한을 세운 쪽이 토큰이면 그렇게 말한다 — $ 상한은 --budget 이지 --token-budget 이 아니다 (D-035).
+    if (budget.tokensExceeded()) {
+      process.stderr.write(`안내   토큰 상한(${budget.limitTokens})에 닿았다 — 이번 실행만 올리려면 --token-budget N.\n`);
+    }
     return;
   }
 
@@ -229,7 +247,8 @@ async function main(): Promise<void> {
     // 실행 전에 최악값을 보여주지 않으면 "실행 전 비용 표시"가 거짓말이 된다.
     const worst = Math.min(plan.cost.totalUsd * maxIterations, budgetUsd);
     process.stderr.write(
-      `상한   최대 ${maxIterations}사이클 · 최악 $${worst.toFixed(2)}(추정, 상한 $${budgetUsd} 에서 강제 중단)\n\n`,
+      `상한   최대 ${maxIterations}사이클 · 최악 $${worst.toFixed(2)}(추정, 상한 $${budgetUsd} 에서 강제 중단)` +
+        ` · 토큰 ${tokenBudget} (0 = 없음)\n\n`,
     );
     const result = await runLoop(
       matrix,
@@ -257,6 +276,10 @@ async function main(): Promise<void> {
     if (result.journal.unverified.length > 0) {
       process.stderr.write(`경고   검증 기록이 빈 사이클 ${result.journal.unverified.length}건 — "통과"가 아니다.\n`);
     }
+    // 토큰 쪽이 막았을 때만 --token-budget 을 안내한다 — $ 상한이 막았으면 --budget 얘기다 (D-035).
+    if (result.budget.tokensExceeded()) {
+      process.stderr.write(`안내   토큰 상한(${result.budget.limitTokens})에 닿았다 — 이번 실행만 올리려면 --token-budget N.\n`);
+    }
     if (result.stopReason !== 'goal-reached') process.exitCode = 1;
     return;
   }
@@ -272,7 +295,7 @@ async function main(): Promise<void> {
       [
         '그래프 노드별 예상 비용 (primary 슬롯 기준, AA 추정):',
         ...nodes.map((n) => `       ${n.id.padEnd(10)} ${n.plan.assignment.id} ${n.plan.slots.primary.label}·${n.plan.slots.primary.effort}  $${n.plan.cost.primaryUsd}`),
-        `       ${'합계'.padEnd(10)} $${total.toFixed(2)} (상한 $${budgetUsd} 에서 강제 중단)`,
+        `       ${'합계'.padEnd(10)} $${total.toFixed(2)} (상한 $${budgetUsd} 에서 강제 중단) · 토큰 ${tokenBudget} (0 = 없음)`,
         '',
       ].join('\n'),
     );
@@ -283,6 +306,10 @@ async function main(): Promise<void> {
       `\n${result.journal.render()}\n묶음   ${result.batches.map((b) => b.join('+')).join(' → ')}\n` +
         `건너뜀 ${result.skipped.join(', ') || '없음'}\n중단   ${result.stopReason}\n누적   ${result.budget.summary()}\n`,
     );
+    // 토큰 쪽이 막았을 때만 --token-budget 을 안내한다 — $ 상한이 막았으면 --budget 얘기다 (D-035).
+    if (result.budget.tokensExceeded()) {
+      process.stderr.write(`안내   토큰 상한(${result.budget.limitTokens})에 닿았다 — 이번 실행만 올리려면 --token-budget N.\n`);
+    }
     if (result.stopReason !== 'completed') process.exitCode = 1;
     return;
   }
@@ -316,6 +343,10 @@ async function main(): Promise<void> {
     );
   } else if (duo.primary.ok) {
     process.stderr.write(`검증   reviewer 를 시작하지 못했다 (비용 상한 또는 primary 실패)\n`);
+    // 토큰 쪽이 막았을 때만 --token-budget 을 안내한다 — $ 상한이 막았으면 --budget 얘기다 (D-035).
+    if (budget.tokensExceeded()) {
+      process.stderr.write(`안내   토큰 상한(${budget.limitTokens})에 닿았다 — 이번 실행만 올리려면 --token-budget N.\n`);
+    }
   }
 
   // 원시 로그를 먼저 보존한다 — 이후 단계가 터져도 원본은 남는다.

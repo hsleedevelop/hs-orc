@@ -1,7 +1,7 @@
 import { after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -111,5 +111,74 @@ describe('CLI 순서 보장', () => {
       repoBefore,
       '저장소의 미분류 로그가 이 테스트 때문에 늘었다 — 제품의 "행 추가 제안"이 테스트 쓰레기로 오염된다.',
     );
+  });
+});
+
+/**
+ * D-035 — CLI 의 모든 진행 방식에 토큰 상한을 걸고, 올리는 것은 --token-budget 로만.
+ *
+ * loop 의 실행 전 "상한" 줄은 **엔진을 띄우기 전에** 찍힌다(runLoop 진입 전). 그래서 PATH 를
+ * 비워도(NO_PATH) 그 줄은 항상 찍히고, 이후 spawn 실패로 넘어간다 — "assert the Budget passed
+ * into the mode has limitTokens === limits.tokenBudget" 를 **표시된 값**으로 검증하는
+ * 가장 작고 신뢰할 수 있는 방법이다(엔진을 띄우지 않고도 값이 새 나온다).
+ */
+describe('D-035 — CLI 의 모든 진행 방식에 토큰 상한 (T1) + --token-budget (T3)', () => {
+  it('loop 는 --token-budget 없이도 기본 토큰 상한(limits.tokenBudget)을 쓴다', () => {
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run'], NO_PATH);
+    assert.match(r.err, /상한.*토큰 2000000 \(0 = 없음\)/);
+  });
+
+  it('--token-budget 5 는 그 실행의 토큰 상한을 5 로 낮춘다', () => {
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--token-budget', '5', '--run'], NO_PATH);
+    assert.match(r.err, /토큰 5 \(0 = 없음\)/);
+  });
+
+  it('--token-budget 0 은 토큰 상한을 끈다', () => {
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--token-budget', '0', '--run'], NO_PATH);
+    assert.match(r.err, /토큰 0 \(0 = 없음\)/);
+  });
+
+  it('--token-budget -1 은 엔진을 띄우기 전에 던진다', () => {
+    const r = cli(['이 아키텍처 설계 검토해줘', '--token-budget', '-1'], NO_PATH);
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /--token-budget 은 0 이상의 정수여야 한다: -1/);
+    assert.doesNotMatch(r.err, /실행 가능한 바이너리를 찾지 못했다/);
+  });
+
+  it('--token-budget abc 도 마찬가지로 엔진을 띄우기 전에 던진다', () => {
+    const r = cli(['이 아키텍처 설계 검토해줘', '--token-budget', 'abc'], NO_PATH);
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /--token-budget 은 0 이상의 정수여야 한다: abc/);
+    assert.doesNotMatch(r.err, /실행 가능한 바이너리를 찾지 못했다/);
+  });
+
+  it('사용법에 --token-budget 이 있다', () => {
+    const r = cli([], NO_PATH);
+    assert.match(r.err, /--token-budget/);
+  });
+
+  describe('가짜 claude 바이너리로 pingpong 이 기본 토큰 상한에 실제로 걸리는지 증명한다', () => {
+    // D-035 이전에는 pingpong 이 tokenBudget=0(상한 없음)을 받았다 — 얼마를 써도 안 걸렸다.
+    // 큰 토큰 사용량을 보고하는 가짜 claude 로 기본 상한(2,000,000)이 실제로 막는지 본다.
+    const fakeDir = mkdtempSync(path.join(os.tmpdir(), 'hs-orc-cli-fakebin-'));
+    const fakeClaude = path.join(fakeDir, 'claude');
+    writeFileSync(
+      fakeClaude,
+      [
+        '#!/bin/sh',
+        `printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"result":"ok","duration_ms":1,"total_cost_usd":0.01,"usage":{"input_tokens":1500000,"output_tokens":1000000,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}'`,
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    chmodSync(fakeClaude, 0o755);
+    after(() => rmSync(fakeDir, { recursive: true, force: true }));
+
+    it('기본 토큰 상한(2,000,000)이 pingpong 에도 걸리고, 걸리면 --token-budget 안내가 뜬다', () => {
+      const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'pingpong', '--run'], { PATH: fakeDir });
+      assert.equal(r.code, 0);
+      assert.match(r.err, /누적.*토큰 2500000\/2000000/);
+      assert.match(r.err, /안내 {3}토큰 상한\(2000000\)에 닿았다 — 이번 실행만 올리려면 --token-budget N\./);
+    });
   });
 });
