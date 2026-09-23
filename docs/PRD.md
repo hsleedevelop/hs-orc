@@ -150,7 +150,7 @@ Terminal-Bench 4.0(독립 벤치마크, model+agent harness 구성), Artificial 
 
 ### FR-15 맥락 전달
 
-세션 기록은 orc 가 append-only 로 소유한다. 위임 프롬프트에 세션 요약과 최근 턴을 싣는다. 같은 슬롯으로 이어지는 후속은 엔진 resume 을 쓸 수 있다 (실측 전 — D-031 Q10).
+세션 기록은 orc 가 append-only 로 소유한다. 위임 프롬프트에 세션 요약과 최근 턴을 싣는다. 같은 세션 폴더·같은 슬롯으로 이어지는 후속은 엔진 resume 을 쓸 수 있다 (세 엔진 실측 통과 — D-031).
 
 ## 7. 릴리스 단계
 
@@ -188,6 +188,6 @@ Terminal-Bench 4.0(독립 벤치마크, model+agent harness 구성), Artificial 
 2. 누적 비용 상한의 기본값
 3. `/loop`를 Claude Code 내장 `/loop` 스킬 위에 얹을 것인가 자체 구현할 것인가 (SPEC §6.2 참조)
 4. ~~v2 GUI의 기술 선택~~ → D-021 (Electron + React)
-5. 엔진 resume 비대화 왕복 실측과 세션 id 획득 경로 (DECISIONS Q10)
+5. ~~엔진 resume 비대화 왕복 실측~~ → D-031 에 기록 (세 엔진 통과)
 6. 직접 답의 모델·effort와, 답이 작업 결과를 대신하지 않게 할 경계 (Q11)
 7. 스크래치 세션 보존·정리 정책 (Q12)

@@ -699,7 +699,21 @@ AO 에서 **빌리는 것**: 진입 두 갈래, orc 소유 대화 기록, 세션
 PRD §2(제품 정의)·§4·§6·§7·§8 을 개정한다 (PRD v0.2). SPEC §6.1·§7 은 PRD 승인 뒤에 따라 고친다.
 2026-09-23 커밋 `fe60bff` 의 "업무 행 직접 지정" 은 FR-1 수동 덮어쓰기로 남는다 — 지휘자가 제안한 행을 사용자가 바꾸는 자리가 된다.
 
-**상태** 방향 확정 — 2026-09-23 사용자 결정. 세부는 Q10~Q12 로 연다.
+**Q10 실측** (2026-09-23, 스크래치 폴더 · git 아님 · 무작위 코드워드 `ORC-619901` 을 1턴에 심고 resume 한 2턴에서 되묻기)
+
+| 엔진 | 1턴 | 세션 id 출처 | 2턴 (resume) | 결과 |
+|---|---|---|---|---|
+| claude 2.1.278 · Haiku 4.5 | `claude -p … --output-format json` | `session_id` (stream-json 에서도 `system`·`assistant`·`result` 줄마다 실림) | `claude -p --resume <id> …` | **코드워드 회수**. id 불변 |
+| codex 0.154.0 · Luna low | `codex exec --json --skip-git-repo-check …` | 첫 줄 `thread.started.thread_id` — 어댑터가 이미 읽는 `--json` 스트림 | `codex exec resume <id> --json -m … -c model_reasoning_effort=…` | **코드워드 회수**. id 불변, resume 이 `-m`·effort 를 받는다 |
+| cursor-agent · Luna low | `cursor-agent -p --trust --output-format json …` | `session_id` (stream-json 의 `system init` 부터 실림) | `cursor-agent -p --resume <id> …` | **코드워드 회수**. id 불변 |
+
+결론: **세 엔진 모두 비대화 resume 이 실제로 맥락을 잇고, 세션 id 는 어댑터가 이미 읽는 스트림에 있다.** 결정 4(같은 슬롯 후속에만 resume)를 그대로 간다 — 실측이 막는 것은 없다.
+
+실측이 **보장하지 않는** 것: 다른 cwd 에서의 resume(codex 는 세션 목록을 cwd 로 거른다 — `resume --all` 이 그것을 끈다), resume 중 모델·effort 변경, 긴 세션의 컨텍스트 압축. 결정 4 가 resume 을 **같은 세션 폴더·같은 슬롯**으로만 좁히는 이유가 여기서 하나 더 생긴다.
+
+부수 관찰: 위임된 엔진은 **사용자 전역 설정을 그대로 싣고 뜬다** — claude 스트림에 `hook_progress`/`hook_response`(전역 hook), codex 에 skills 로드와 MCP 인증 실패 로그. 비대화 실행의 비용·동작이 사용자 환경에 따라 달라진다. D-031 범위 밖이라 Q13 으로 연다.
+
+**상태** 방향 확정 — 2026-09-23 사용자 결정. Q10 은 같은 날 실측으로 닫았다. 남은 세부는 Q11·Q12.
 
 ---
 
@@ -716,6 +730,7 @@ PRD §2(제품 정의)·§4·§6·§7·§8 을 개정한다 (PRD v0.2). SPEC §6
 | ~~Q7~~ | ~~v2 GUI 기술 선택~~ → **D-021 확정** (Electron + React) | — |
 | ~~Q8~~ | ~~규칙 분류기가 실제 작업 문장을 놓친다~~ → **D-026 확정** (기본 폴백 + 비용 명시) | — |
 | ~~Q9~~ | ~~`core/classify-llm.ts` 의 분류 CLI 가 `process.cwd()` 에서 돈다~~ → **D-029 에 흡수** (`cwd` 를 `routeWithFallback` 옵션으로, 기본은 `process.cwd()`) | — |
-| Q10 | 엔진 resume 비대화 왕복 실측 — `--help` 로는 세 CLI 모두 지원(2026-09-23)하나 **실제 왕복은 미검증**. 세션 id 를 어디서 받는가(claude stream-json·codex `--json`·cursor `create-chat`) | D-031 결정 4 |
+| ~~Q10~~ | ~~엔진 resume 비대화 왕복 실측~~ → **D-031 에 기록** (세 엔진 모두 회수, id 는 기존 스트림에 있음) | — |
 | Q11 | 직접 답 모델·effort (Haiku·low 대 Luna) — 단일 슬롯이라 reviewer 가 없다. 하한선 경로라 허용하되, 답이 **작업 결과를 대신하지 않게** 할 경계 | D-031 결정 3 |
 | Q12 | 스크래치 세션 보존·정리 정책 (몇 개·며칠, 증거가 남은 세션은 지우지 않는다 — D-028 과 같은 정신) | D-031 결정 1 |
+| Q13 | 위임된 엔진이 사용자 전역 hook·skills·MCP 를 싣고 뜬다 (2026-09-23 관찰). 격리할지(`--settings`·빈 `CODEX_HOME` 류), 그대로 둘지 — 격리하면 사용자 규칙도 빠진다 | 없음 (관찰) |
