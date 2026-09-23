@@ -11,7 +11,7 @@ import { loadLimits } from '../data/limits.ts';
 import type { AssignmentPlan } from './assign.ts';
 import type { Budget } from './budget.ts';
 import { buildSummaryPrompt, conductorSlot, directAnswer, nextSuggestion } from './conductor.ts';
-import { buildContext, lastSummary, type ContextLimits } from './context.ts';
+import { buildContext, type ContextLimits } from './context.ts';
 import { delegate, type Delegated } from './delegate.ts';
 import { estimateUsd, type SlotExecutor } from './executor.ts';
 import type { Journal } from './journal.ts';
@@ -43,8 +43,6 @@ export interface SessionDeps {
   readonly conduct: SlotExecutor;
   /** 위임 실행기. 쓰기 여부는 승인 때 정해진다 (D-025). */
   readonly executorFor: (write: boolean) => SlotExecutor;
-  /** D-026: 끄면 유료 분류 폴백이 없다. 테스트는 끈다. */
-  readonly classifyLlm?: boolean;
   readonly now?: () => Date;
   /** 없으면 `loadLimits()` 값 (SPEC §6.4.3). */
   readonly context?: ContextLimits;
@@ -146,12 +144,12 @@ export class ConversationSession {
   private async route(text: string, taskId?: string): Promise<TranscriptRecord[]> {
     const { matrix, catalog, dir } = this.deps;
     try {
-      const hint = taskId ? null : lastSummary(this.records());
+      // D-033: 지휘자가 대화 맥락으로 직접 답하고 SUGGEST 로 행을 제안한다 — 맥락 없는
+      // 폴백의 선택이 대화성 후속을 잘못 위임하는 일이 없다. 규칙이 놓친 메시지는 항상 직접 답으로 간다.
       const routed = await routeWithFallback(matrix, catalog, text, {
         cwd: dir,
-        ...(this.deps.classifyLlm === undefined ? {} : { classifyLlm: this.deps.classifyLlm }),
+        classifyLlm: false,
         ...(taskId ? { taskId } : {}),
-        ...(hint ? { hint } : {}),
       });
       const notes = routed.fallback ? [routed.fallback.line] : [];
       const result = routed.result;

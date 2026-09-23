@@ -37,12 +37,3 @@ export function buildContext(
     .join('\n');
   return text.length <= limits.contextChars ? text : `…${text.slice(-(limits.contextChars - 1))}`;
 }
-
-/** 분류 폴백 hint (SPEC §6.4.2). 규칙 분류기에는 섞지 않는다 — G1. */
-export function lastSummary(records: readonly TranscriptRecord[]): string | null {
-  for (let i = records.length - 1; i >= 0; i -= 1) {
-    const r = records[i];
-    if (r?.kind === 'summary' && r.text) return r.text.split('\n')[0] ?? null;
-  }
-  return null;
-}

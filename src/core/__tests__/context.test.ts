@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildContext, lastSummary } from '../context.ts';
+import { buildContext } from '../context.ts';
 import type { TranscriptRecord } from '../transcript.ts';
 
 const at = '2026-09-23T00:00:00.000Z';
@@ -41,10 +41,5 @@ describe('맥락 자르기 (SPEC §6.4.3)', () => {
     const text = buildContext(records, wide, { before: 3, after: 1 });
     assert.doesNotMatch(text, /넌 누구니/);
     assert.match(text, /타입 고쳐줘/);
-  });
-
-  it('직전 요약의 첫 줄을 돌려준다', () => {
-    assert.equal(lastSummary(records), '타입을 고쳤다');
-    assert.equal(lastSummary(records.slice(0, 2)), null);
   });
 });

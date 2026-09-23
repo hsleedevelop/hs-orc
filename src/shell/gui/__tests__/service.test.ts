@@ -207,7 +207,7 @@ describe('GUI — 워크트리', () => {
 describe('GUI — 대화 세션 (v2.1)', () => {
   it('스크래치 세션은 HS_ORC_SCRATCH 안에 만들고 목록에 뜬다', async () => {
     isolated();
-    const service = new GuiService(fake, 20, process.cwd(), false);
+    const service = new GuiService(fake, 20, process.cwd());
     const view = service.startConversation('scratch');
     assert.equal(view.kind, 'scratch');
     assert.ok(view.dir.startsWith(process.env['HS_ORC_SCRATCH'] ?? '~'));
@@ -217,7 +217,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
 
   it('분류되지 않는 메시지에 직접 답한다', async () => {
     isolated();
-    const service = new GuiService(fake, 20, process.cwd(), false);
+    const service = new GuiService(fake, 20, process.cwd());
     service.startConversation('scratch');
     const view = await service.converse('넌 누구니');
     assert.deepEqual(view.records.map((r) => r.kind), ['user', 'direct']);
@@ -226,7 +226,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
 
   it('스크래치에서는 쓰기 승인을 거절한다', async () => {
     isolated();
-    const service = new GuiService(fake, 20, process.cwd(), false);
+    const service = new GuiService(fake, 20, process.cwd());
     service.startConversation('scratch');
     await service.converse('이 타입 에러 고쳐줘');
     await assert.rejects(service.converseApprove({ verify: [], write: true }), /쓰기를 켤 수 없다/);
@@ -234,7 +234,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
 
   it('다른 폴더로 옮기면 그 폴더의 것이 아닌 project 세션을 닫는다', () => {
     isolated();
-    const service = new GuiService(fake, 20, process.cwd(), false);
+    const service = new GuiService(fake, 20, process.cwd());
     service.startConversation('project');
     service.useProject(mkdtempSync(path.join(os.tmpdir(), 'hs-other-')));
     assert.throws(() => service.conversation(), /열린 세션이 없다/);
@@ -242,7 +242,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
 
   it('세션마다 Budget 이 따로다 — 한 세션이 쓴 돈이 다른 세션에 새지 않는다 (D-032 A2)', async () => {
     isolated();
-    const service = new GuiService(fake, 20, process.cwd(), false);
+    const service = new GuiService(fake, 20, process.cwd());
     service.startConversation('scratch');
     const afterA = await service.converse('넌 누구니');
     service.closeConversation();
@@ -256,7 +256,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
 
   it('같은 세션을 다시 열면 Budget 을 그대로 이어간다', async () => {
     isolated();
-    const service = new GuiService(fake, 20, process.cwd(), false);
+    const service = new GuiService(fake, 20, process.cwd());
     service.startConversation('scratch');
     const afterA = await service.converse('넌 누구니');
     service.closeConversation();

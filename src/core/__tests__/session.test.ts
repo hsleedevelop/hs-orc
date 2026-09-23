@@ -67,7 +67,7 @@ const make = (conduct: SlotExecutor, dir = mkdtempSync(path.join(os.tmpdir(), 'h
   const budget = new Budget(20, 2_000_000);
   const session = new ConversationSession({
     matrix, catalog, kind: 'project', dir, id: '0923-1200-aaa',
-    budget, journal: new Journal(), conduct, executorFor: () => execute, classifyLlm: false,
+    budget, journal: new Journal(), conduct, executorFor: () => execute,
   });
   return { session, budget, dir };
 };
@@ -230,7 +230,7 @@ describe('대화 세션 — 승인·결과 처리 (SPEC §6.4.4)', () => {
     const budget = new Budget(20, 2_000_000);
     const session = new ConversationSession({
       matrix, catalog, kind: 'scratch', dir: mkdtempSync(path.join(os.tmpdir(), 'hs-scratch-')), id: '0923-1200-bbb',
-      budget, journal: new Journal(), conduct: conductSpy().exec, executorFor: () => delegateSpy().exec, classifyLlm: false,
+      budget, journal: new Journal(), conduct: conductSpy().exec, executorFor: () => delegateSpy().exec,
     });
     await session.send('이 타입 에러 고쳐줘');
     await assert.rejects(session.approve({ write: true }), SessionStateError);
@@ -355,12 +355,38 @@ describe('대화 세션 — 재진입 방지 (final-review #2)', () => {
     const budget = new Budget(20, 2_000_000);
     const session = new ConversationSession({
       matrix, catalog: broken, kind: 'project', dir: mkdtempSync(path.join(os.tmpdir(), 'hs-session-')), id: '0923-1200-ddd',
-      budget, journal: new Journal(), conduct: conductSpy().exec, executorFor: () => delegateSpy().exec, classifyLlm: false,
+      budget, journal: new Journal(), conduct: conductSpy().exec, executorFor: () => delegateSpy().exec,
     });
     const out = await session.send('이 타입 에러 고쳐줘');
     assert.deepEqual(out.map((r) => r.kind), ['user', 'error']);
     const error = out[1];
     assert.ok(error?.kind === 'error' && /라우팅이 끝나지 못했다/.test(error.text));
     assert.equal(session.state, 'waiting_input');
+  });
+});
+
+describe('대화 세션 — 분류 폴백은 돌지 않는다 (D-033)', () => {
+  it('규칙이 놓친 메시지는 LLM 분류 폴백 없이 지휘자가 바로 답한다', async () => {
+    const c = conductSpy();
+    const budget = new Budget(20, 2_000_000);
+    const session = new ConversationSession({
+      matrix, catalog, kind: 'project', dir: mkdtempSync(path.join(os.tmpdir(), 'hs-session-')), id: '0923-1200-eee',
+      budget, journal: new Journal(), conduct: c.exec, executorFor: () => delegateSpy().exec,
+    });
+    // 분류 옵션을 아예 안 넘겨도 폴백이 돌면 안 된다 — PATH 를 비워 돈다면(=버그) 진짜 모델을 못 찾고
+    // "시도하지 못했다" note 를 남긴다. 그 note 를 notes.length === 0 이 잡아낸다.
+    const originalPath = process.env['PATH'];
+    process.env['PATH'] = '';
+    let out;
+    try {
+      out = await session.send('넌 누구니');
+    } finally {
+      process.env['PATH'] = originalPath;
+    }
+    assert.deepEqual(out.map((r) => r.kind), ['user', 'direct']);
+    const direct = out[1];
+    assert.ok(direct?.kind === 'direct');
+    assert.equal(direct.notes.length, 0);
+    assert.equal(c.prompts.length, 1);
   });
 });

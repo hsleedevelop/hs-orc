@@ -118,15 +118,13 @@ export class GuiService {
    * 폴더를 바꿔도 엔진이나 검증 명령이 예전 폴더에서 돌면 그게 가장 위험한 종류의 버그다.
    */
   private workdir: string;
-  private readonly classifyLlm: boolean | undefined;
   private session: ConversationSession | null = null;
 
-  constructor(execute?: SlotExecutor, budgetUsd = loadLimits().budgetUsd, cwd = process.cwd(), classifyLlm?: boolean) {
+  constructor(execute?: SlotExecutor, budgetUsd = loadLimits().budgetUsd, cwd = process.cwd()) {
     this.budget = new Budget(budgetUsd, loadLimits().tokenBudget);
     this.budgetUsd = budgetUsd;
     this.execute = execute;
     this.workdir = cwd;
-    this.classifyLlm = classifyLlm;
   }
 
   /** 세션 하나의 Budget 을 얻는다 — 없으면 새로 만들고, 있으면 그대로 재사용한다 (D-032 A2). */
@@ -375,7 +373,6 @@ export class GuiService {
       // 지휘자(직접 답·요약)만 격리한다 (D-032 B1) — 위임 실행기(executorFor)는 그대로 사용자 설정을 싣는다.
       conduct: this.execute ?? createExecutor(catalog, dir, timeout, { nonGit, isolate: true }),
       executorFor: (write) => this.execute ?? createExecutor(catalog, dir, timeout, { write, nonGit }),
-      ...(this.classifyLlm === undefined ? {} : { classifyLlm: this.classifyLlm }),
     });
     return this.conversation();
   }
