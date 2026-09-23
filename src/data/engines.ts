@@ -44,6 +44,11 @@ export interface EngineSpec {
     readonly scope: 'workspace';
     readonly note: string;
   };
+  /**
+   * git 저장소 밖에서 돌 때 필요한 인자. codex exec 는 없으면 거절한다.
+   * **스크래치 세션에만** 붙인다 — 쓰기가 꺼진 자리라 git 검사가 지키던 것이 없다 (SPEC §6.4.1).
+   */
+  readonly nonGitArgv?: readonly string[];
 }
 
 /** 해당 엔진이 그 모델을 아예 제공하지 않으면 `null` 이다 — 말없는 치환의 자리가 아니다 (D-004). */

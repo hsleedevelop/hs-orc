@@ -120,3 +120,20 @@ describe('Cursor -fast (D-023)', () => {
     assert.equal(buildInvocation(catalog, 'sol', 'xhigh', 'P', 'cursor').modelId, 'gpt-5.6-sol-xhigh');
   });
 });
+
+describe('git 밖 실행 (스크래치, SPEC §6.4.1)', () => {
+  const catalog = loadEngines();
+  it('codex 는 nonGit 이면 --skip-git-repo-check 를 붙인다', () => {
+    const { argv } = buildInvocation(catalog, 'luna', 'low', 'hi', { engine: 'codex', nonGit: true });
+    assert.ok(argv.includes('--skip-git-repo-check'));
+  });
+  it('기본은 붙이지 않는다 — git 검사가 지키던 것을 project 세션에서 버리지 않는다', () => {
+    const { argv } = buildInvocation(catalog, 'luna', 'low', 'hi', { engine: 'codex' });
+    assert.ok(!argv.includes('--skip-git-repo-check'));
+  });
+  it('선언이 없는 엔진은 nonGit 이어도 아무것도 붙이지 않는다', () => {
+    const plain = buildInvocation(catalog, 'haiku', 'low', 'hi', { engine: 'claude' }).argv;
+    const nonGit = buildInvocation(catalog, 'haiku', 'low', 'hi', { engine: 'claude', nonGit: true }).argv;
+    assert.deepEqual(nonGit, plain);
+  });
+});

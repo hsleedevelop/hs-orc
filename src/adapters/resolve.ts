@@ -70,6 +70,8 @@ export interface InvocationOptions {
    * **reviewer 슬롯에는 절대 켜지지 않는다.** 그 강제는 `createExecutor` 가 한다.
    */
   readonly write?: boolean;
+  /** 스크래치 세션 (SPEC §6.4.1) — git 저장소 밖이다. 엔진이 선언한 `nonGitArgv` 를 붙인다. */
+  readonly nonGit?: boolean;
 }
 
 export function buildInvocation(
@@ -132,6 +134,9 @@ export function buildInvocation(
     }
     argv.push(...spec.write.argv);
   }
+
+  // 스크래치 세션에서만 붙인다 — codex exec 는 git 저장소 밖에서 이게 없으면 거절한다 (SPEC §6.4.1).
+  if (options.nonGit === true && spec.nonGitArgv) argv.push(...spec.nonGitArgv);
 
   return { engine: target, argv, modelId, effort };
 }

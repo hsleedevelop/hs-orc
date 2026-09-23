@@ -17,6 +17,7 @@ export function createAdapter(engine: EngineName, catalog: Engines = loadEngines
     ...buildInvocation(catalog, req.model, req.effort, req.prompt, {
       engine,
       ...(req.write === true ? { write: true } : {}),
+      ...(req.nonGit === true ? { nonGit: true } : {}),
     }).argv,
     ...spec.streamArgv,
   ];

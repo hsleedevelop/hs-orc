@@ -10,6 +10,8 @@ export interface RunRequest {
   readonly timeoutMs: number;
   /** 파일 쓰기 허용 (D-025). 기본(생략)은 읽기 전용이다. */
   readonly write?: boolean;
+  /** 스크래치 세션 — git 저장소 밖이다. 엔진이 선언한 `nonGitArgv` 를 붙인다. */
+  readonly nonGit?: boolean;
 }
 
 export interface Usage {

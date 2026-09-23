@@ -48,6 +48,8 @@ export interface ExecutorOptions {
    * 독립 검증(INV-1·D-003)이 성립하지 않는다. 그 강제가 아래 한 줄이고, 여기가 유일한 부여 지점이다.
    */
   readonly write?: boolean;
+  /** 스크래치 세션 (SPEC §6.4.1). git 밖에서 돌려야 하는 엔진에 그 인자를 붙인다. */
+  readonly nonGit?: boolean;
 }
 
 export function createExecutor(
@@ -65,6 +67,7 @@ export function createExecutor(
       cwd,
       timeoutMs,
       ...(write ? { write: true } : {}),
+      ...(options.nonGit === true ? { nonGit: true } : {}),
     });
     const result = await handle.result;
     // 엔진이 비용을 안 주면 토큰으로 계산해 본다 — 단가 선언이 없으면 undefined 로 남는다.
