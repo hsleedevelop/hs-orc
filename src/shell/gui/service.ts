@@ -372,7 +372,8 @@ export class GuiService {
       id,
       budget: this.sessionBudget(dir, id),
       journal: this.journal,
-      conduct: this.execute ?? createExecutor(catalog, dir, timeout, { nonGit }),
+      // 지휘자(직접 답·요약)만 격리한다 (D-032 B1) — 위임 실행기(executorFor)는 그대로 사용자 설정을 싣는다.
+      conduct: this.execute ?? createExecutor(catalog, dir, timeout, { nonGit, isolate: true }),
       executorFor: (write) => this.execute ?? createExecutor(catalog, dir, timeout, { write, nonGit }),
       ...(this.classifyLlm === undefined ? {} : { classifyLlm: this.classifyLlm }),
     });

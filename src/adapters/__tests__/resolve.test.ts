@@ -184,3 +184,23 @@ describe('resume argv (SPEC §3.8, Q10 실측)', () => {
     assert.deepEqual(writeOnly.slice(-2), ['-s', 'workspace-write']);
   });
 });
+
+describe('격리 (D-032 B1) — 지휘자만 사용자 전역 설정에서 뗀다', () => {
+  const catalog = loadEngines();
+  it('claude 는 isolate 요청 시 선언된 네 인자를 그대로, 순서대로 붙인다', () => {
+    const { argv } = buildInvocation(catalog, 'haiku', 'low', 'hi', { engine: 'claude', isolate: true });
+    assert.deepEqual(argv.slice(-4), ['--setting-sources', 'project,local', '--strict-mcp-config', '--disable-slash-commands']);
+  });
+
+  it('claude 는 isolate 를 요청하지 않으면 격리 인자가 하나도 없다', () => {
+    const { argv } = buildInvocation(catalog, 'haiku', 'low', 'hi', { engine: 'claude' });
+    assert.doesNotMatch(argv.join(' '), /--setting-sources|--strict-mcp-config|--disable-slash-commands/);
+  });
+
+  it('선언이 없는 엔진(codex)에 isolate 를 요청하면 격리 없이 조용히 돌리지 않고 던진다', () => {
+    assert.throws(
+      () => buildInvocation(catalog, 'luna', 'low', 'hi', { engine: 'codex', isolate: true }),
+      /격리 인자 선언이 없다/,
+    );
+  });
+});

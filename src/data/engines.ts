@@ -58,6 +58,12 @@ export interface EngineSpec {
   readonly resume?:
     | { readonly kind: 'flag'; readonly flag: string; readonly write?: false }
     | { readonly kind: 'subcommand'; readonly argv: readonly string[]; readonly write?: false };
+  /**
+   * 사용자 전역 hook·설정·MCP·skills 를 싣지 않게 막는 argv (D-032 B1). **지휘자 역할에만** 쓴다
+   * (직접 답·요약·분류 폴백) — primary·reviewer 는 격리하지 않는다, 사용자의 작업 규칙이
+   * 위임 품질의 일부다. 선언이 없는 엔진에 격리를 요청하면 격리 없이 조용히 돌리지 않고 던진다.
+   */
+  readonly isolateArgv?: readonly string[];
 }
 
 /** 해당 엔진이 그 모델을 아예 제공하지 않으면 `null` 이다 — 말없는 치환의 자리가 아니다 (D-004). */

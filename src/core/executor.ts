@@ -57,6 +57,8 @@ export interface ExecutorOptions {
   readonly write?: boolean;
   /** 스크래치 세션 (SPEC §6.4.1). git 밖에서 돌려야 하는 엔진에 그 인자를 붙인다. */
   readonly nonGit?: boolean;
+  /** 지휘자 전용 실행기에서만 켠다 (D-032 B1) — 사용자 전역 hook·설정·MCP·skills 를 싣지 않는다. */
+  readonly isolate?: boolean;
 }
 
 export function createExecutor(
@@ -75,6 +77,7 @@ export function createExecutor(
       timeoutMs,
       ...(write ? { write: true } : {}),
       ...(options.nonGit === true ? { nonGit: true } : {}),
+      ...(options.isolate === true ? { isolate: true } : {}),
       ...(runOptions?.resume !== undefined ? { resume: runOptions.resume } : {}),
     });
     const result = await handle.result;

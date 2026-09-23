@@ -74,6 +74,11 @@ export interface InvocationOptions {
   readonly nonGit?: boolean;
   /** 이어 붙일 엔진 세션 id (SPEC §3.8). */
   readonly resume?: string;
+  /**
+   * 사용자 전역 hook·설정·MCP·skills 를 싣지 않는다 (D-032 B1). **지휘자 역할에만** 켠다.
+   * 선언(`isolateArgv`)이 없는 엔진에 요청하면 던진다 — 격리 없이 조용히 돌리지 않는다.
+   */
+  readonly isolate?: boolean;
 }
 
 export function buildInvocation(
@@ -153,6 +158,15 @@ export function buildInvocation(
   if (options.nonGit === true && spec.nonGitArgv) argv.push(...spec.nonGitArgv);
 
   if (resume !== undefined && spec.resume?.kind === 'flag') argv.push(spec.resume.flag, resume);
+
+  // 지휘자만 격리한다 (D-032 B1). 선언이 없는 엔진에 격리를 요청하면 격리 없이 조용히 돌리지
+  // 않는다 — 사용자 전역 설정이 새는 쪽이 더 위험하다 (D-032 Q13).
+  if (options.isolate === true) {
+    if (!spec.isolateArgv) {
+      throw new EngineError(`${target} 는 격리 인자 선언이 없다 (engines.json). 격리 없이 조용히 돌리지 않는다 (D-032 B1).`);
+    }
+    argv.push(...spec.isolateArgv);
+  }
 
   return { engine: target, argv, modelId, effort };
 }

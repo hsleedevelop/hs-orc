@@ -14,6 +14,8 @@ export interface RunRequest {
   readonly nonGit?: boolean;
   /** 이어 붙일 엔진 세션 id (SPEC §3.8). */
   readonly resume?: string;
+  /** 사용자 전역 hook·설정·MCP·skills 를 싣지 않는다 (D-032 B1). 지휘자 역할에만 켠다. */
+  readonly isolate?: boolean;
 }
 
 export interface Usage {

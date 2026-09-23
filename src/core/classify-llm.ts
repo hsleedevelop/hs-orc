@@ -60,6 +60,8 @@ export async function classifyWithModel(
     prompt: buildClassifyPrompt(matrix, task, options.hint),
     cwd: options.cwd ?? process.cwd(),
     timeoutMs: options.timeoutMs ?? 120_000,
+    // 분류기도 지휘자 계층이다 — 사용자 전역 hook·설정·MCP·skills 를 싣지 않는다 (D-032 B1).
+    isolate: true,
   });
   const result = await handle.result;
   if (result.outcome !== 'ok') return null;
