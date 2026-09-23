@@ -99,6 +99,9 @@ export class ConversationSession {
     this.require('waiting_input', '메시지 전송');
     const text = message.trim();
     if (!text) return [];
+    // require() 를 지난 뒤, 첫 await 전에 바로 working 으로 바꾼다 — 겹쳐 들어온 두 번째 호출이
+    // 같은 require() 를 통과해 턴을 두 번 올리는 것을 막는다 (final-review #2).
+    this.stateValue = 'working';
     this.turn += 1;
     const user = this.append({ kind: 'user', text });
     return [user, ...(await this.route(text))];
@@ -109,6 +112,8 @@ export class ConversationSession {
     this.require('waiting_input', '행 지정');
     const last = this.records().findLast((r) => r.kind === 'user');
     if (last?.kind !== 'user') throw new SessionStateError('배정할 메시지가 없다.');
+    // send() 와 같은 이유로 첫 await 전에 바로 바꾼다 (final-review #2).
+    this.stateValue = 'working';
     return this.route(last.text, taskId);
   }
 
@@ -124,45 +129,57 @@ export class ConversationSession {
     }
   }
 
+  /**
+   * 라우팅이 던지면(routeWithFallback 자체 또는 그 안의 assign() 등) working 을 남기지 않는다 —
+   * 에러 기록을 남기고 입력 대기로 돌아간다 (final-review #2). assigned 는 blocked 로,
+   * 그 외는 answer() 가 자신의 종료 상태(direct/error → waiting_input)를 책임진다.
+   */
   private async route(text: string, taskId?: string): Promise<TranscriptRecord[]> {
     const { matrix, catalog, dir } = this.deps;
-    const hint = taskId ? null : lastSummary(this.records());
-    const routed = await routeWithFallback(matrix, catalog, text, {
-      cwd: dir,
-      ...(this.deps.classifyLlm === undefined ? {} : { classifyLlm: this.deps.classifyLlm }),
-      ...(taskId ? { taskId } : {}),
-      ...(hint ? { hint } : {}),
-    });
-    const notes = routed.fallback ? [routed.fallback.line] : [];
-    const result = routed.result;
-    if (result.stage !== 'assigned') return this.answer(text, notes);
+    try {
+      const hint = taskId ? null : lastSummary(this.records());
+      const routed = await routeWithFallback(matrix, catalog, text, {
+        cwd: dir,
+        ...(this.deps.classifyLlm === undefined ? {} : { classifyLlm: this.deps.classifyLlm }),
+        ...(taskId ? { taskId } : {}),
+        ...(hint ? { hint } : {}),
+      });
+      const notes = routed.fallback ? [routed.fallback.line] : [];
+      const result = routed.result;
+      if (result.stage !== 'assigned') return this.answer(text, notes);
 
-    const { plan } = result;
-    const { primary, reviewer } = plan.slots;
-    this.pending = { title: text, plan, reason: result.reason };
-    this.stateValue = 'blocked';
-    return [
-      this.append({
-        kind: 'plan',
-        taskId: plan.assignment.id,
-        title: plan.assignment.task,
-        reason: result.reason,
-        primary: `${primary.label}·${primary.effort} → ${primary.engine}/${primary.modelId}`,
-        reviewer: `${reviewer.label}·${reviewer.effort} → ${reviewer.engine}/${reviewer.modelId}`,
-        estimateUsd: plan.cost.totalUsd,
-        notes,
-      }),
-    ];
+      const { plan } = result;
+      const { primary, reviewer } = plan.slots;
+      this.pending = { title: text, plan, reason: result.reason };
+      this.stateValue = 'blocked';
+      return [
+        this.append({
+          kind: 'plan',
+          taskId: plan.assignment.id,
+          title: plan.assignment.task,
+          reason: result.reason,
+          primary: `${primary.label}·${primary.effort} → ${primary.engine}/${primary.modelId}`,
+          reviewer: `${reviewer.label}·${reviewer.effort} → ${reviewer.engine}/${reviewer.modelId}`,
+          estimateUsd: plan.cost.totalUsd,
+          notes,
+        }),
+      ];
+    } catch (error) {
+      this.stateValue = 'waiting_input';
+      return [this.append({ kind: 'error', text: `라우팅이 끝나지 못했다: ${why(error)}` })];
+    }
   }
 
   private async answer(text: string, notes: readonly string[]): Promise<TranscriptRecord[]> {
     const { matrix, catalog, budget, conduct } = this.deps;
-    if (budget.limitReached()) {
-      return [this.append({ kind: 'error', text: `누적 상한에 닿아 직접 답도 시작하지 않는다 (${budget.summary()}).` })];
-    }
-    const slot = conductorSlot(catalog);
+    // route() 가 이미 working 으로 바꿔 놓았을 수 있다 — 여기서도 다시 대입해 answer() 를 단독으로
+    // 불러도(테스트 등) 같은 보장이 서게 하고, 모든 탈출 경로를 finally 하나로 묶는다 (final-review #2).
     this.stateValue = 'working';
     try {
+      if (budget.limitReached()) {
+        return [this.append({ kind: 'error', text: `누적 상한에 닿아 직접 답도 시작하지 않는다 (${budget.summary()}).` })];
+      }
+      const slot = conductorSlot(catalog);
       const context = buildContext(this.records(), this.contextLimits, { before: this.turn });
       const answer = await directAnswer(conduct, slot, matrix, context, text);
       const charge = budget.charge(`${slot.label}·${slot.effort}`, answer.run.actualUsd, estimateUsd(matrix, slot), answer.run.meteredUsd, slot.plan);
@@ -199,7 +216,7 @@ export class ConversationSession {
     this.pending = null;
     this.stateValue = 'working';
     try {
-      const ref = this.resumable(pending.plan);
+      const ref = this.resumable(pending.plan, write);
       const context = buildContext(this.records(), this.contextLimits, {
         before: this.turn,
         ...(ref ? { after: ref.turn } : {}),
@@ -250,13 +267,18 @@ export class ConversationSession {
    * 이을 엔진 세션 (SPEC §6.4.3): **가장 최근 위임**이 성공해 엔진 세션을 남겼고, 그 primary 가
    * 이번 primary 와 엔진·모델·effort 가 모두 같을 때만. 최근 위임이 실패했으면 더 앞을 찾지 않는다.
    * 세션 폴더는 이 세션이 늘 같다 (codex 는 cwd 로 세션을 거른다).
+   *
+   * 쓰기가 켜져 있고 그 엔진의 resume 경로가 쓰기를 못 받으면(`resume?.write === false`) 잇지 않는다 —
+   * `buildInvocation` 이 던지게 두지 않고 여기서 미리 새 실행으로 돌린다(맥락은 그대로 싣는다, final-review #1).
    */
-  private resumable(plan: AssignmentPlan): { id: string; turn: number } | null {
+  private resumable(plan: AssignmentPlan, write: boolean): { id: string; turn: number } | null {
     const last = this.records().findLast((r) => r.kind === 'result');
     if (last?.kind !== 'result' || !last.engineSession) return null;
     const p = plan.slots.primary;
     const s = last.engineSession;
-    return s.engine === p.engine && s.modelId === p.modelId && s.effort === p.effort ? { id: s.id, turn: last.turn } : null;
+    if (s.engine !== p.engine || s.modelId !== p.modelId || s.effort !== p.effort) return null;
+    if (write && this.deps.catalog.engines[p.engine].resume?.write === false) return null;
+    return { id: s.id, turn: last.turn };
   }
 
   reject(): TranscriptRecord[] {

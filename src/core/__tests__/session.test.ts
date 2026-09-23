@@ -45,13 +45,17 @@ const delegateSpy = () => {
   return { exec, calls };
 };
 
-/** primary 는 세션 id 를 돌려주고, 두 번째 primary 실행의 성패를 고를 수 있다. */
+/**
+ * primary 는 세션 id 를 돌려주고, 두 번째 primary 실행의 성패를 고를 수 있다.
+ * reviewer 판정은 `slot.role` 로 가른다 — R10 의 reviewer(Astra)는 label 이 Haiku 가 아니라서
+ * label 로 가르면 reviewer 를 primary 로 잘못 센다.
+ */
 const resumeSpy = (secondOk = true) => {
-  const calls: { label: string; prompt: string; resume: string | undefined }[] = [];
+  const calls: { label: string; role: string; prompt: string; resume: string | undefined }[] = [];
   let primaries = 0;
   const exec: SlotExecutor = (slot, prompt, options) => {
-    calls.push({ label: slot.label, prompt, resume: options?.resume });
-    if (slot.label === 'Haiku') return Promise.resolve(reply('PASS'));
+    calls.push({ label: slot.label, role: slot.role, prompt, resume: options?.resume });
+    if (slot.role === 'reviewer') return Promise.resolve(reply('PASS'));
     primaries += 1;
     const ok = primaries === 1 || secondOk;
     return Promise.resolve({ ...reply(ok ? 'ran' : '', ok), sessionId: `eng-${primaries}` });
@@ -265,5 +269,81 @@ describe('대화 세션 — resume (SPEC §6.4.3)', () => {
     const primaries = r.calls.filter((c) => c.label !== 'Haiku');
     assert.deepEqual(primaries.map((c) => c.resume), [undefined, 'eng-1', undefined]);
     assert.match(primaries[2]?.prompt ?? '', /^\[최근 대화\]/);
+  });
+
+  it('codex 는 쓰기가 켜져 있으면 잇지 않는다 — 맥락을 실어 새로 띄운다 (final-review #1)', async () => {
+    isolate();
+    const r = resumeSpy();
+    // R01 의 primary 는 Luna→codex (data/matrix.json, data/engines.json) — codex 는 resume+write 를 못 받는다.
+    const { session } = make(conductSpy().exec, undefined, r.exec);
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve({ write: true });
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve({ write: true });
+    const primaries = r.calls.filter((c) => c.role === 'primary');
+    assert.equal(primaries.length, 2);
+    assert.equal(primaries[1]?.resume, undefined);
+    assert.match(primaries[1]?.prompt ?? '', /^\[최근 대화\]/);
+  });
+
+  it('슬롯이 다른 다음 위임은 잇지 않는다 (SPEC §10, final-review #3)', async () => {
+    isolate();
+    const r = resumeSpy();
+    const { session } = make(conductSpy().exec, undefined, r.exec);
+    await session.send('이 타입 에러 고쳐줘'); // R01: Luna → codex
+    await session.approve();
+    await session.send('이 아키텍처 설계 검토해줘'); // R10: Fable → claude — 엔진이 다르다
+    await session.approve();
+    const primaries = r.calls.filter((c) => c.role === 'primary');
+    assert.equal(primaries.length, 2);
+    assert.equal(primaries[1]?.resume, undefined);
+    assert.match(primaries[1]?.prompt ?? '', /^\[최근 대화\]/);
+  });
+});
+
+describe('대화 세션 — 재진입 방지 (final-review #2)', () => {
+  it('메시지 처리 중 두 번째 send 는 거절된다 — 첫 await 전에 working 으로 바뀐다', async () => {
+    const c = conductSpy();
+    const { session } = make(c.exec);
+    const first = session.send('이 타입 에러 고쳐줘');
+    await assert.rejects(session.send('또'), SessionStateError);
+    await first;
+    assert.equal(session.state, 'blocked');
+  });
+
+  it('빈 메시지는 상태를 바꾸지 않는다', async () => {
+    const { session } = make(conductSpy().exec);
+    await session.send('   ');
+    assert.equal(session.state, 'waiting_input');
+  });
+
+  it('라우팅 중 예외가 나면 에러 기록을 남기고 입력 대기로 돌아간다 — working 을 남기지 않는다', async () => {
+    // classify()/assignmentById() 의 ClassifyError 는 route() 가 흡수해 unclassified 로 떨어뜨리므로
+    // 던지지 않는다. 대신 assign() 안에서 모델 id 가 비어 던지도록 카탈로그를 망가뜨려 주입한다
+    // (engines.json 이 깨진 상황의 재현 — 실제 엔진은 하나도 띄우지 않는다).
+    // `id` 를 빼고 다시 만든다 — `delete` 는 readonly 필드라 안 되고, exactOptionalPropertyTypes 아래에서
+    // 선택 필드를 지우는 이 저장소의 관례(constraints.md)는 값을 아예 담지 않는 쪽이다.
+    const codexLuna = catalog.models.luna.availability.codex;
+    const codexWithoutId = codexLuna ? { efforts: codexLuna.efforts } : null;
+    const broken: typeof catalog = {
+      ...catalog,
+      models: {
+        ...catalog.models,
+        luna: {
+          ...catalog.models.luna,
+          availability: { ...catalog.models.luna.availability, codex: codexWithoutId },
+        },
+      },
+    };
+    const budget = new Budget(20, 2_000_000);
+    const session = new ConversationSession({
+      matrix, catalog: broken, kind: 'project', dir: mkdtempSync(path.join(os.tmpdir(), 'hs-session-')), id: '0923-1200-ddd',
+      budget, journal: new Journal(), conduct: conductSpy().exec, executorFor: () => delegateSpy().exec, classifyLlm: false,
+    });
+    const out = await session.send('이 타입 에러 고쳐줘');
+    assert.deepEqual(out.map((r) => r.kind), ['user', 'error']);
+    const error = out[1];
+    assert.ok(error?.kind === 'error' && /라우팅이 끝나지 못했다/.test(error.text));
+    assert.equal(session.state, 'waiting_input');
   });
 });
