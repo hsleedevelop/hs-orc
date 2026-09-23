@@ -873,6 +873,34 @@ CLI loop 가 실패 시 여러 사이클을 돈다 — 실패 경로가 이전�
 
 ---
 
+## D-037 — 분류기 후보는 Haiku 하나다 (luna 제거 — codex 는 지휘자 격리 수단이 없다)
+
+**배경**
+`CLASSIFIER_MODELS` 는 `['haiku', 'luna']` 였지만, 분류기는 지휘자 계층이라 격리해서 띄운다 (D-032 B1). codex 에는 격리 인자 선언이 없어 luna 분류는 **실행 전에 던진다** — 도달할 수 없는 선택지였다. 그래서 분류 폴백의 metered 경로도 테스트할 수 없었다 (D-034 리뷰 Minor, PLAN S10).
+
+**실측** (2026-09-24, codex-cli 0.154.0, 빈 스크래치 폴더, `codex debug prompt-input` — 모델을 부르지 않는다)
+
+| | 입력 크기 | 전역 AGENTS.md("전하") | skills 목록 | 플러그인·권한 규칙 |
+|---|---|---|---|---|
+| 현행 | 32KB | 실림 | 실림(22KB) | 실림 |
+| `--disable plugins` + `-c include_permissions_instructions=false` | 26KB | **실림** | 실림 | 빠짐 |
+| 빈 `CODEX_HOME` | 33KB | 빠짐 | **실림** (`~/.agents/skills`) | 빠짐 |
+
+`project_doc_max_bytes=0`·`project_doc_fallback_filenames=[]`·`include_skills_usage_instructions=false`·`--disable memories` 는 효과가 없었다. `exec` 의 `--ignore-user-config`·`--ignore-rules` 는 prompt-input 이 받지 않아 무료로 재지 못했다.
+
+**결정**
+분류기 후보를 Haiku 하나로 줄인다. luna 요청은 다른 비싼 모델과 같이 `ClassifierModelError` 로 던진다. codex 에 전역 지침까지 떼는 수단이 생기면 다시 연다.
+
+**기각**
+- *부분 격리 선언* — 설정·플러그인·규칙은 빠지지만 전역 AGENTS.md 와 skills 가 남는다. "격리" 라는 선언이 과장된다 (D-032 B1 의 판정 기준은 전역 지침이 사라지는 것이다).
+- *전용 `CODEX_HOME` + 로그인 공유* — 전역 지침까지 빠지는 유일한 길이지만 `auth.json` 을 링크·복사해야 하고, 토큰 갱신이 사용자의 원래 codex 로그인을 어긋낼 수 있다 (D-032 의 기각 사유가 그대로다).
+
+**영향**
+분류 폴백의 metered 경로는 "해당 경로 없음" 으로 닫힌다 — Haiku 는 claude 가 실제 금액을 준다. `classifyWithModel` 의 metered 계산은 다른 저비용 모델이 들어올 때를 위해 남긴다 (createExecutor 와 같은 규칙).
+
+**상태** 확정 — 2026-09-24 사용자 결정.
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |

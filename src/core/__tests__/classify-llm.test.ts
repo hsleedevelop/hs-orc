@@ -11,9 +11,16 @@ const matrix = loadMatrix();
 
 describe('분류 폴백', () => {
   it('분류에는 저비용 모델만 허용한다 — Fable 요청은 던진다', async () => {
-    assert.deepEqual([...CLASSIFIER_MODELS], ['haiku', 'luna']);
+    assert.deepEqual([...CLASSIFIER_MODELS], ['haiku']);
     await assert.rejects(
       () => classifyWithModel(matrix, loadEngines(), '아무거나', { model: 'fable' }),
+      ClassifierModelError,
+    );
+  });
+
+  it('luna 도 던진다 — codex 는 지휘자 격리 수단이 없어 실행 전에 막는다 (D-037)', async () => {
+    await assert.rejects(
+      () => classifyWithModel(matrix, loadEngines(), '아무거나', { model: 'luna' }),
       ClassifierModelError,
     );
   });

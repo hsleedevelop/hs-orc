@@ -10,8 +10,11 @@ import { assignmentById } from './classify.ts';
 import type { Assignment } from '../data/matrix.ts';
 import { meteredUsd, type TokenCounts } from '../data/pricing.ts';
 
-/** 분류 전용으로 허용된 모델. 이 목록 밖은 던진다 — 분류에 비싼 모델이 새어 들어가는 것을 막는다. */
-export const CLASSIFIER_MODELS: readonly ModelKey[] = ['haiku', 'luna'];
+/**
+ * 분류 전용으로 허용된 모델. 이 목록 밖은 던진다 — 분류에 비싼 모델이 새어 들어가는 것을 막는다.
+ * luna 는 뺐다 (D-037): 분류기는 격리해서 띄우는데(D-032 B1) codex 에는 전역 지침을 떼는 수단이 없다.
+ */
+export const CLASSIFIER_MODELS: readonly ModelKey[] = ['haiku'];
 
 export class ClassifierModelError extends Error {
   override name = 'ClassifierModelError';

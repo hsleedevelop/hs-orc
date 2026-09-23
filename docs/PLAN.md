@@ -297,7 +297,7 @@ PRD §7 은 v1 을 **"실제 작업 1건이 분류→배정→실행→증거 �
 **후속 (이 계획에서 고치지 않은 것):**
 - 위 1·2 — 결정이 필요하다 (상한 단위: 앱 수명 vs 세션 / Q13 격리 / 분류 폴백이 "대화 후속"을 NONE 으로 둘 기준).
 - ~~분류 폴백(Haiku) 호출은 `Budget` 에 과금·상한 판정되지 않는다~~ → **D-034 해결** (받은 예산에 과금, 상한이면 시작하지 않는다). 리뷰 Minor 중 "분류 엔진 실패가 '맞는 행 없음'으로 표시"도 해결 (`failed` + 사유).
-- 분류기 후보 luna(codex)는 격리 인자 선언이 없어 실행 전에 던진다 (D-032 B1). 그래서 분류 폴백의 **metered 경로는 지금 도달할 수 없고** 끝-끝 테스트가 없다 (D-034 리뷰 Minor) — Haiku 는 claude 가 금액을 주므로 단가를 일부러 비웠다. codex 격리를 실측·선언하면 그때 테스트를 붙인다. `meteredUsd` 계산 자체는 `pricing.test.ts` 가 덮는다.
+- ~~분류 폴백의 metered 경로 테스트 없음 (D-034 리뷰 Minor)~~ → **D-037** 로 닫음: luna(codex)는 지휘자 격리 수단이 없어 분류기 후보에서 뺐다. Haiku 는 claude 가 실제 금액을 주므로 해당 경로가 없다.
 - `delegate()` 의 journal `charge` 는 reviewer 가 돌면 reviewer 의 charge 다 (`GuiService.run` 때부터).
 - git 이 아닌 **project** 폴더에서 codex 위임은 여전히 거절된다 (nonGit 은 스크래치에만).
 - 다른 cwd resume, resume 중 모델 변경, 긴 세션 압축 — 미실측. codex 는 resume 에 쓰기를 실을 수 없어 쓰기 켠 후속은 잇지 않는다 (최종 리뷰 #1).
