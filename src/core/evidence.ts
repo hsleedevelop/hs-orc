@@ -16,7 +16,8 @@ export type EvidenceKind =
   | 'measurement'
   | 'citation'
   | 'review'
-  | 'ordering';
+  | 'ordering'
+  | 'test-files';
 
 export type Evidence =
   /** 실행 명령과 **exit code**. 출력만 있고 코드가 없으면 증거가 아니다. */
@@ -28,7 +29,9 @@ export type Evidence =
   /** `path:line` 형태만 받는다. */
   | { readonly kind: 'citation'; readonly ref: string; readonly quote: string }
   | { readonly kind: 'review'; readonly reviewer: string; readonly verdict: 'pass' | 'fail'; readonly text: string }
-  | { readonly kind: 'ordering'; readonly earlierLabel: string; readonly earlier: string; readonly laterLabel: string; readonly later: string };
+  | { readonly kind: 'ordering'; readonly earlierLabel: string; readonly earlier: string; readonly laterLabel: string; readonly later: string }
+  /** 선언된 기존 테스트의 변화 (D-047). `weakened` 는 줄이 바뀌거나 지워진 파일, `added` 는 새 파일·줄 추가 — 추가는 허용이다. */
+  | { readonly kind: 'test-files'; readonly weakened: readonly string[]; readonly added: readonly string[] };
 
 export interface Requirement {
   readonly kind: EvidenceKind;
@@ -93,6 +96,8 @@ export function validate(evidence: Evidence): string | null {
     case 'review':
       if (!evidence.reviewer.trim()) return '리뷰어가 비었다';
       return null;
+    case 'test-files':
+      return null;
     case 'ordering':
       return Date.parse(evidence.earlier) < Date.parse(evidence.later)
         ? null
@@ -141,6 +146,8 @@ export function contradiction(evidence: Evidence): string | null {
     return expectFail ? `\`${label}\` 는 실패해야 하는 단계인데 exit 0` : `\`${label}\` exit=${evidence.exitCode}`;
   }
   if (evidence.kind === 'review' && evidence.verdict === 'fail') return `reviewer ${evidence.reviewer} FAIL`;
+  // 게이트를 통과시키려고 기존 테스트를 약하게 만드는 길을 막는다 — 추가는 허용한다 (D-047).
+  if (evidence.kind === 'test-files' && evidence.weakened.length > 0) return `기존 테스트가 약해졌다 — ${evidence.weakened.join(' · ')}`;
   return null;
 }
 

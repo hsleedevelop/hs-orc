@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadMatrix } from '../../data/matrix.ts';
@@ -59,5 +59,30 @@ describe('위임 1건 (SPEC §4 5~7단계)', () => {
 
     assert.equal(d.outcome, 'rework');
     assert.equal(readDecisions(log).filter((r) => r.id === d.decisionId).at(-1)?.outcome, 'rework');
+  });
+
+  it('primary 가 선언된 기존 테스트를 약화하면 rework 다 — GUI·TUI 경로도 같다 (D-047)', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-delegate-'));
+    process.env['HS_ORC_DECISION_LOG'] = path.join(dir, 'log.jsonl');
+    process.env['HS_ORC_RUN_STORE'] = path.join(dir, 'runs');
+    const config = path.join(dir, 'verify.json');
+    writeFileSync(config, JSON.stringify({ tests: ['t/*.test.ts'] }), 'utf8');
+    mkdirSync(path.join(dir, 't'));
+    writeFileSync(path.join(dir, 't', 'a.test.ts'), 'expect(1)\n', 'utf8');
+    process.env['HS_ORC_VERIFY_CONFIG'] = config;
+    const execute: SlotExecutor = (slot) => {
+      if (slot.label !== 'Haiku') writeFileSync(path.join(dir, 't', 'a.test.ts'), 'skip\n', 'utf8');
+      return Promise.resolve({ ok: true, text: slot.label === 'Haiku' ? 'PASS' : 'ran', rawStdout: '', rawStderr: '', durationMs: 1 });
+    };
+    try {
+      const d = await delegate({
+        matrix, plan: assign(matrix, catalog, row('R01')), reason: '수동 지정 R01', title: '타입 고쳐줘', prompt: '타입 고쳐줘',
+        verify: [], cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
+      });
+      assert.equal(d.outcome, 'rework');
+      assert.match(d.report.summary, /기존 테스트가 약해졌다/);
+    } finally {
+      delete process.env['HS_ORC_VERIFY_CONFIG'];
+    }
   });
 });

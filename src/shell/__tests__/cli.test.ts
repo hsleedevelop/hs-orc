@@ -1,7 +1,7 @@
 import { after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -257,6 +257,8 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
       'if [ -n "$PRIMARY_EXIT" ]; then exit "$PRIMARY_EXIT"; fi',
       `printf '%s\\n<<END>>\\n' "$*" >> '${claudeArgs}'`,
       `n=0; [ -f '${primaryCount}' ] && read n < '${primaryCount}'; n=$((n+1)); echo "$n" > '${primaryCount}'`,
+      // 가짜 primary 가 작업 트리를 건드리게 한다 — 테스트 약화 시나리오용 (D-047).
+      'if [ -n "$PRIMARY_DO" ]; then eval "$PRIMARY_DO"; fi',
       `printf '%s\\n' "{\\"type\\":\\"result\\",\\"subtype\\":\\"success\\",\\"is_error\\":false,\\"result\\":\\"draft-$n\\",\\"duration_ms\\":1,\\"total_cost_usd\\":0.01,\\"usage\\":{\\"input_tokens\\":10,\\"output_tokens\\":10,\\"cache_read_input_tokens\\":0,\\"cache_creation_input_tokens\\":0}}"`,
       '',
     ].join('\n'),
@@ -418,6 +420,48 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     assert.match(r.err, /reviewer Astra 생략 — 검증 명령을 실행할 수 없다\(환경\)/);
     assert.match(r.err, /중단 {3}escalated · 1회/);
     assert.equal(existsSync(codexArgs), false, '돌지 못한 검증에 reviewer 를 태웠다.');
+  });
+
+  // D-047: 선언된 기존 테스트(tw/*.test.txt)를 가짜 primary 가 약화·추가한다.
+  const testsConfig = path.join(fakeDir, 'verify-tests.json');
+  writeFileSync(testsConfig, JSON.stringify({ tests: ['tw/*.test.txt'] }), 'utf8');
+  const seedTest = () => {
+    mkdirSync(path.join(sandbox, 'tw'), { recursive: true });
+    writeFileSync(path.join(sandbox, 'tw', 'a.test.txt'), 'one\ntwo\n', 'utf8');
+  };
+  const weakenThenGrow =
+    `if [ "$n" -eq 1 ]; then echo one > tw/a.test.txt; else printf 'one\\ntwo\\nthree\\n' > tw/a.test.txt; fi`;
+
+  it('loop 는 기존 테스트를 약화하면 reviewer 없이 FAIL 로 재시도하고, 줄 추가는 허용한다 (D-047)', () => {
+    reset();
+    seedTest();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write'], {
+      PATH: fakeDir,
+      REVIEWER_PASS: '1',
+      HS_ORC_VERIFY_CONFIG: testsConfig,
+      PRIMARY_DO: weakenThenGrow,
+    });
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.err, /기존 테스트\(tw\/\*\.test\.txt\)는 줄 추가만 허용/);
+    assert.match(r.err, /reviewer Astra 생략 — 기존 테스트 약화: `tw\/a\.test\.txt` 기존 줄이 바뀌거나 지워졌다/);
+    assert.match(r.err, /테스트 추가\(허용\): `tw\/a\.test\.txt` \+1줄/);
+    assert.match(r.err, /중단 {3}goal-reached · 2회/);
+    const prompts = readFileSync(claudeArgs, 'utf8').split('<<END>>');
+    assert.match(prompts[1] ?? '', /기존 테스트를 약하게 만들지 말고 코드를 고쳐라/);
+  });
+
+  it('once 는 기존 테스트를 약화하면 rework·exit 1 이다 (D-047)', () => {
+    reset();
+    seedTest();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--run', '--write'], {
+      PATH: fakeDir,
+      REVIEWER_PASS: '1',
+      HS_ORC_VERIFY_CONFIG: testsConfig,
+      PRIMARY_DO: 'echo one > tw/a.test.txt',
+    });
+    assert.match(r.err, /✗ 불일치: 기존 테스트가 약해졌다 — `tw\/a\.test\.txt` 기존 줄이 바뀌거나 지워졌다/);
+    assert.match(r.err, /outcome=rework/);
+    assert.equal(r.code, 1);
   });
 
   it('--fix-red-baseline 은 --mode loop --write 밖에서 조용히 무시되지 않고 던진다 (D-042)', () => {

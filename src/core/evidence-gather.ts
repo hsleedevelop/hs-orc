@@ -3,7 +3,8 @@
  * 사람이 적어 줘야 하는 것(문서 절·리뷰·측정)은 `--evidence <file.json>` 으로 받는다.
  */
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, globSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import type { Evidence } from './evidence.ts';
 
 /** 명령을 실제로 돌려 exit code 를 받는다. **출력이 아니라 코드가 증거다.** */
@@ -27,6 +28,54 @@ export function changedFiles(cwd = process.cwd()): Evidence {
     .map((l) => l.slice(3).trim())
     .filter(Boolean);
   return { kind: 'changed-files', files };
+}
+
+/** 선언된 테스트 파일의 작업 전 내용 (D-047). 키는 cwd 기준 상대 경로다. */
+export type TestSnapshot = ReadonlyMap<string, string>;
+
+const findTests = (globs: readonly string[], cwd: string): string[] =>
+  globSync([...globs], { cwd, exclude: (p) => /(^|\/)(node_modules|\.git)$/.test(p) }).sort();
+
+export function snapshotTests(globs: readonly string[], cwd = process.cwd()): TestSnapshot {
+  return new Map(findTests(globs, cwd).map((f) => [f, readFileSync(path.join(cwd, f), 'utf8')]));
+}
+
+/** `before` 의 줄이 `after` 안에 **순서대로 전부** 있는가 — 줄 추가만 한 변경이다. */
+function appendOnly(before: string, after: string): boolean {
+  const next = after.split('\n');
+  let i = 0;
+  for (const line of before.split('\n')) {
+    while (i < next.length && next[i] !== line) i += 1;
+    if (i === next.length) return false;
+    i += 1;
+  }
+  return true;
+}
+
+/**
+ * 기존 테스트가 약해졌는가 (D-047). 파일이 지워졌거나 원래 줄이 바뀌거나 빠졌으면 `weakened`, 새 파일·줄 추가는 `added`.
+ * 줄 단위라 원래 줄을 남긴 채 사이에 `return;` 을 끼우는 약화는 못 잡는다 — reviewer·사람 몫이다.
+ */
+export function testChanges(
+  before: TestSnapshot,
+  globs: readonly string[],
+  cwd = process.cwd(),
+): Extract<Evidence, { kind: 'test-files' }> {
+  const weakened: string[] = [];
+  const added: string[] = [];
+  for (const [file, old] of before) {
+    const full = path.join(cwd, file);
+    if (!existsSync(full)) {
+      weakened.push(`\`${file}\` 가 지워졌다`);
+      continue;
+    }
+    const now = readFileSync(full, 'utf8');
+    if (now === old) continue;
+    if (appendOnly(old, now)) added.push(`\`${file}\` +${now.split('\n').length - old.split('\n').length}줄`);
+    else weakened.push(`\`${file}\` 기존 줄이 바뀌거나 지워졌다`);
+  }
+  for (const file of findTests(globs, cwd)) if (!before.has(file)) added.push(`\`${file}\` 새 파일`);
+  return { kind: 'test-files', weakened, added };
 }
 
 /** `--evidence <file.json>` — 배열 하나. 모양 검사는 `collect` 가 한다. */

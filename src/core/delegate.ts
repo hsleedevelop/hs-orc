@@ -12,7 +12,8 @@ import { appendDecision } from './decision-log.ts';
 import { firstLine, secondLine } from './decide.ts';
 import { runDuo, type Verdict } from './duo.ts';
 import { collect, outcomeOf, type Evidence, type EvidenceReport, type SettledOutcome } from './evidence.ts';
-import { changedFiles, runCommand } from './evidence-gather.ts';
+import { changedFiles, runCommand, snapshotTests, testChanges } from './evidence-gather.ts';
+import { declaredTests } from '../data/verify.ts';
 import type { SlotExecutor } from './executor.ts';
 import type { Journal } from './journal.ts';
 import { reportError } from './report.ts';
@@ -57,6 +58,10 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
   const decision = input.note ? { ...first, note: `${first.note ?? ''} · ${input.note}` } : first;
   appendDecision(decision);
 
+  // 기존 테스트의 작업 전 내용 — 약해졌는지는 primary 뒤에 본다 (D-047). 선언이 없으면 보지 않는다.
+  const testGlobs = declaredTests();
+  const testsBefore = testGlobs.length > 0 ? snapshotTests(testGlobs, input.cwd) : undefined;
+
   // **두 슬롯을 실제로 돌린다** (D-009) — primary 만 돌리면 단일 엔진 선택기다.
   let duo;
   try {
@@ -84,6 +89,7 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
 
   const evidence: Evidence[] = [...duo.evidence, ...input.verify.filter((v) => v.trim()).map((v) => runCommand(v, input.cwd))];
   if (evidence.length > 0) evidence.push(changedFiles(input.cwd));
+  if (testsBefore) evidence.push(testChanges(testsBefore, testGlobs, input.cwd));
   const report = collect(plan.assignment, evidence);
 
   journal.append({

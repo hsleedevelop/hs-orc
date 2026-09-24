@@ -24,6 +24,20 @@ export function parseVerify(entry: string): VerifyCommand {
     : { cmd: entry };
 }
 
+/**
+ * 기존 테스트로 지킬 경로(glob) — `verify.json` 의 `tests` (D-047). 선언이 없으면 빈 배열이고 게이트도 없다 —
+ * 테스트가 어디 있는지 제품은 추측하지 않는다.
+ */
+export function declaredTests(env: NodeJS.ProcessEnv = process.env): string[] {
+  try {
+    const parsed = JSON.parse(readFileSync(VERIFY_PATH(env), 'utf8')) as Record<string, unknown>;
+    const tests = parsed['tests'];
+    return Array.isArray(tests) ? tests.filter((t): t is string => typeof t === 'string' && t.trim() !== '') : [];
+  } catch {
+    return [];
+  }
+}
+
 /** 선언이 없으면 **빈 배열**이다 — "기본값이 있겠지"로 채우지 않는다. */
 export function defaultVerify(rowId: string, env: NodeJS.ProcessEnv = process.env): VerifyCommand[] {
   let parsed: Record<string, unknown>;
