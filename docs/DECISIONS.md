@@ -935,6 +935,29 @@ D-033 으로 LLM 폴백의 대화성 오분류는 사라졌지만 **규칙 분�
 
 ---
 
+## D-039 — loop 의 primary 실행 실패는 Core 가 채점 없이 사람에게 올린다 (A)
+
+**배경**
+D-036 결정 4 의 "primary 가 죽으면 reviewer 를 부르지 않고 escalate" 는 **CLI 클로저에만** 있었다 — `loopExecute` 래퍼가 `ok: false` 를 보고 `evaluate` 가 `skipped: true` 판정을, `recover` 가 `escalate` 를 돌려줬다. Core `runLoop` 는 `run.ok` 를 보지 않는다. 기본 `recover`(없음 = abort)라면 한 사이클로 끝나 안전하지만, retry 를 고른 호출자(앞으로의 TUI/GUI loop)는 에러 문자열을 채점하고 FAIL → 재시도로 `maxIterations` 까지 돌 수 있다. 구독제에서 실패한 실행은 토큰을 보고하지 않아 토큰 상한이 이를 막지 못한다 (D-036).
+
+**결정**
+1. `runLoop` 는 primary 실행이 `ok: false` 면 `evaluate`·`critique` 를 부르지 않고, 그 사이클을 `failed` 로 journal 에 남긴 뒤 `escalated` 로 끝낸다. `recover` 가 무엇을 돌려주든 같다.
+2. 종료 사유는 새로 만들지 않는다 — 기존 `escalated` 다. journal 검증 문구는 CLI 가 쓰던 `primary 실행 실패 — reviewer 생략: …` 을 그대로 쓴다. CLI 출력은 바뀌지 않는다.
+3. CLI 는 primary 쪽 감지를 지우고 reviewer 실패 감지(→ escalate)만 남긴다. reviewer 실행은 호출자의 `evaluate` 안에 있어 Core 가 볼 수 없다.
+4. 쓸 곳이 없어진 `Verdict.skipped` 는 지운다.
+5. 실패한 primary 에도 Executor 추정 금액을 과금하는 기존 동작은 그대로다 (보수적 방향, 이번 범위 밖).
+
+**기각**
+- *B — `run` 을 `evaluate`/`recover` 에 넘기고 호출자가 판단* — 새 호출자마다 같은 가드를 다시 써야 하고, 잊으면 상한까지 돈다.
+- *C — 현상 유지 + 문서화* — 토큰 상한이 못 막는 경로를 문서로만 막는다.
+
+**영향**
+Core 테스트 "검증에 실패하면 기본은 중단이다" 의 Executor fixture 를 `failingExec` → `fakeExec` 로 바꿨다 — 그 테스트가 보는 것은 검증 FAIL 의 기본 처리이고, 실행 실패는 이제 다른 경로(escalated)다. 호출자가 "실행이 실패해도 재시도" 를 고를 길은 없다 — 요구가 생기면 그때 연다.
+
+**상태** 확정 — 2026-09-24 사용자 결정 (A).
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |

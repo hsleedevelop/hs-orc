@@ -167,12 +167,31 @@ describe('/loop — 반복 상한과 비용 상한', () => {
 
   it('검증에 실패하면 기본은 중단이다 — 검증 없이 다음 사이클로 넘어가지 않는다', async () => {
     const result = await runLoop(
-      matrix, planR01, failingExec,
+      matrix, planR01, fakeExec,
       { plan: () => 'work', evaluate: () => ({ passed: false, verification: 'exit code 1' }) },
       { goal: 'g', maxIterations: 5, budgetUsd: 20 },
     );
     assert.equal(result.stopReason, 'aborted');
     assert.equal(result.iterations, 1);
+  });
+
+  it('primary 실행이 실패하면 recover 가 retry 여도 채점하지 않고 사람에게 올린다 (D-039)', async () => {
+    let evaluated = 0;
+    let critiqued = 0;
+    const result = await runLoop(
+      matrix, planR01, failingExec,
+      {
+        plan: () => 'work',
+        evaluate: () => { evaluated += 1; return { passed: false, verification: 'reviewer' }; },
+        critique: () => { critiqued += 1; return ''; },
+        recover: () => 'retry',
+      },
+      { goal: 'g', maxIterations: 5, budgetUsd: 20 },
+    );
+    assert.deepEqual([result.stopReason, result.iterations], ['escalated', 1]);
+    assert.deepEqual([evaluated, critiqued], [0, 0], '에러 문자열을 채점했다.');
+    assert.equal(result.budget.charges.some((c) => c.label.includes('Evaluator')), false, '돌지 않은 reviewer 를 과금했다.');
+    assert.match(result.journal.records[0]?.verification ?? '', /primary 실행 실패 — reviewer 생략: boom/);
   });
 
   it('retry 사이클의 Planner 는 직전 FAIL 사유를 feedback 으로 받는다 — 눈먼 재시도가 아니다 (D-036)', async () => {

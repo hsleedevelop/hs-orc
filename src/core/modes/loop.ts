@@ -31,8 +31,6 @@ export interface Verdict {
    * 없으면 추정 금액만 적는다 — 토큰 상한이 reviewer 몫을 세지 못한다.
    */
   readonly cost?: Pick<SlotRun, 'actualUsd' | 'meteredUsd' | 'usage'>;
-  /** reviewer 를 아예 부르지 않았다 (예: primary 실행 실패). 과금하지 않는다 — 돌지 않은 실행에 출처를 지어내지 않는다. */
-  readonly skipped?: boolean;
 }
 
 export interface LoopComponents {
@@ -42,7 +40,7 @@ export interface LoopComponents {
   evaluate(ctx: LoopContext, output: string): Promise<Verdict> | Verdict;
   /** 누락된 근거·리스크. 판정을 바꾸지 않고 기록만 한다. */
   critique?(ctx: LoopContext, output: string): Promise<string> | string;
-  /** 실패 시: 재시도 / 중단 / 사람에게 올림. */
+  /** 검증 실패 시: 재시도 / 중단 / 사람에게 올림. primary 실행 자체가 실패하면 부르지 않고 올린다 (D-039). */
   recover?(ctx: LoopContext, verdict: Verdict): Promise<Recovery> | Recovery;
   /** 완료 조건. true 면 정상 종료. */
   stop?(ctx: LoopContext, verdict: Verdict): Promise<boolean> | boolean;
@@ -129,23 +127,41 @@ export async function runLoop(
     );
     budget.countTokens(run.usage);
 
-    // Evaluator — reviewer 슬롯. 같은 모델이면 자기 채점이 된다 (D-003).
-    const verdict = await components.evaluate(ctx, run.text);
-    if (verdict.skipped !== true) {
-      budget.charge(
-        `#${iteration} Evaluator ${plan.slots.reviewer.label}`,
-        verdict.cost?.actualUsd,
-        estimateUsd(matrix, plan.slots.reviewer),
-        verdict.cost?.meteredUsd,
-        plan.slots.reviewer.plan,
-      );
-      // cost 가 없으면 reviewer 토큰을 못 본 것이다 — 0 으로 치지 않고 미보고로 센다 (D-030).
-      budget.countTokens(verdict.cost?.usage);
-    }
-
-    const critique = components.critique ? await components.critique(ctx, run.text) : '';
     // 재시도 작업에는 직전 지적(최대 4000자)이 붙는다 — 기록에는 change 와 같이 앞 200자만 남긴다 (D-036 리뷰).
     const summary = task.slice(0, 200);
+
+    // primary 가 죽으면 에러 문자열을 채점하지 않는다 — recover 가 retry 여도 사람에게 올린다 (D-039).
+    // 구독제에서 실패한 실행은 토큰도 보고하지 않아 토큰 상한이 이 재시도를 막지 못한다 (D-036).
+    if (!run.ok) {
+      history.push(`#${iteration} ${summary} → fail`);
+      journal.append({
+        index: iteration,
+        unit: '반복',
+        model: plan.slots.primary.label,
+        effort: plan.slots.primary.effort,
+        outcome: 'failed',
+        evidence: summary,
+        change: run.text.slice(0, 200),
+        verification: `primary 실행 실패 — reviewer 생략: ${run.text.slice(0, 80)}`,
+        charge: execCharge,
+      });
+      stopReason = 'escalated';
+      break;
+    }
+
+    // Evaluator — reviewer 슬롯. 같은 모델이면 자기 채점이 된다 (D-003).
+    const verdict = await components.evaluate(ctx, run.text);
+    budget.charge(
+      `#${iteration} Evaluator ${plan.slots.reviewer.label}`,
+      verdict.cost?.actualUsd,
+      estimateUsd(matrix, plan.slots.reviewer),
+      verdict.cost?.meteredUsd,
+      plan.slots.reviewer.plan,
+    );
+    // cost 가 없으면 reviewer 토큰을 못 본 것이다 — 0 으로 치지 않고 미보고로 센다 (D-030).
+    budget.countTokens(verdict.cost?.usage);
+
+    const critique = components.critique ? await components.critique(ctx, run.text) : '';
     history.push(`#${iteration} ${summary} → ${verdict.passed ? 'pass' : 'fail'}`);
 
     journal.append({
