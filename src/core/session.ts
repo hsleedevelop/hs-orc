@@ -295,6 +295,18 @@ export class ConversationSession {
     return [this.append({ kind: 'approval', approved: false, write: false })];
   }
 
+  /**
+   * 규칙이 대화성 후속을 작업 행으로 잡았을 때(D-038) — 배정을 거절로 남기고 **같은 메시지**를
+   * 지휘자 직접 답으로 보낸다. 새 사용자 메시지·새 턴을 만들지 않는다 (`planAs` 와 같은 모양).
+   */
+  async askConductor(): Promise<TranscriptRecord[]> {
+    this.require('blocked', '지휘자에게 묻기');
+    const pending = this.pending;
+    if (!pending) throw new SessionStateError('물을 메시지가 없다.');
+    const rejected = this.reject();
+    return [...rejected, ...(await this.answer(pending.title, []))];
+  }
+
   /** 모델은 요약만 한다. 다음 제안은 코드가 계산한다 (SPEC §6.4.4). 요약이 실패해도 제안은 남긴다. */
   private async summarize(title: string, d: Delegated): Promise<TranscriptRecord[]> {
     const next = nextSuggestion(d.outcome, d.verdict);

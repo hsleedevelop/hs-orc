@@ -75,6 +75,7 @@ ipcMain.handle('conv-send', (_e, text: string) => service.converse(text));
 ipcMain.handle('conv-plan-as', (_e, taskId: string) => service.conversePlanAs(taskId));
 ipcMain.handle('conv-approve', (_e, p: { verify: string[]; write: boolean }) => service.converseApprove(p));
 ipcMain.handle('conv-reject', () => service.converseReject());
+ipcMain.handle('conv-ask', () => service.converseAsk());
 ipcMain.handle('conv-close', () => service.closeConversation());
 
 void app.whenReady().then(() => {

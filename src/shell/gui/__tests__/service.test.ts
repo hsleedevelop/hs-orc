@@ -224,6 +224,16 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     assert.equal(view.state, 'waiting_input');
   });
 
+  it('배정 카드에서 지휘자에게 물으면 거절 뒤 직접 답을 보여준다 (D-038)', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    service.startConversation('scratch');
+    await service.converse('방금 리팩터링한 부분 설명해');
+    const view = await service.converseAsk();
+    assert.deepEqual(view.records.map((r) => r.kind), ['user', 'plan', 'approval', 'direct']);
+    assert.equal(view.state, 'waiting_input');
+  });
+
   it('스크래치에서는 쓰기 승인을 거절한다', async () => {
     isolated();
     const service = new GuiService(fake, 20, process.cwd());

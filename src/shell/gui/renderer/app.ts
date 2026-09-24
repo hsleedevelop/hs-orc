@@ -47,6 +47,7 @@ interface Bridge {
   convPlanAs(taskId: string): Promise<SessionView>;
   convApprove(payload: { verify: string[]; write: boolean }): Promise<SessionView>;
   convReject(): Promise<SessionView>;
+  convAsk(): Promise<SessionView>;
   convClose(): Promise<void>;
   tasks(): Promise<TaskRow[]>;
   projects(): Promise<ProjectState>;
@@ -338,7 +339,9 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
                 className: 'btn accent', disabled: busy,
                 onClick: () => act(orc.convApprove({ verify: lines(verify), write: write && view.kind !== 'scratch' })),
               }, busy ? '실행 중…' : `승인하고 실행 · 두 슬롯${write && view.kind !== 'scratch' ? ' · 쓰기 켜짐' : ''}`),
-              h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convReject()) }, '거절')))
+              h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convReject()) }, '거절'),
+              // 규칙이 대화성 후속을 작업 행으로 잡았을 때 — 거절하고 같은 메시지를 지휘자가 답한다 (D-038).
+              h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convAsk()) }, '지휘자에게 묻기')))
         : null);
 
   const record = (r: Rec, i: number): ReactNode => {

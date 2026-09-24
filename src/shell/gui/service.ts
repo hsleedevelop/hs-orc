@@ -353,6 +353,11 @@ export class GuiService {
     return this.conversation();
   }
 
+  async converseAsk(): Promise<SessionView> {
+    await this.requireConversation().askConductor();
+    return this.conversation();
+  }
+
   closeConversation(): void {
     this.session = null;
   }

@@ -226,6 +226,28 @@ describe('대화 세션 — 승인·결과 처리 (SPEC §6.4.4)', () => {
     assert.equal(d.calls.length, 0);
   });
 
+  it('지휘자에게 물으면 배정을 거절로 남기고 같은 메시지에 직접 답한다 — 새 턴을 만들지 않는다 (D-038)', async () => {
+    const c = conductSpy();
+    const d = delegateSpy();
+    const { session } = make(c.exec, undefined, d.exec);
+    const sent = await session.send('방금 리팩터링한 부분 설명해');
+    assert.equal(sent[1]?.kind, 'plan');
+    const out = await session.askConductor();
+    assert.deepEqual(out.map((r) => r.kind), ['approval', 'direct']);
+    assert.ok(out[0]?.kind === 'approval' && out[0].approved === false);
+    assert.deepEqual(out.map((r) => r.turn), [1, 1]);
+    assert.match(c.prompts.at(-1) ?? '', /\[이번 메시지\]\n방금 리팩터링한 부분 설명해$/);
+    assert.equal(d.calls.length, 0);
+    assert.equal(session.state, 'waiting_input');
+  });
+
+  it('승인 대기가 아니면 지휘자에게 묻지 않는다 (D-038)', async () => {
+    const c = conductSpy();
+    const { session } = make(c.exec);
+    await assert.rejects(session.askConductor(), SessionStateError);
+    assert.equal(c.prompts.length, 0);
+  });
+
   it('스크래치 세션은 쓰기 승인을 거절하고 승인 대기에 남는다', async () => {
     const budget = new Budget(20, 2_000_000);
     const session = new ConversationSession({
