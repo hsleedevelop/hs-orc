@@ -301,7 +301,7 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
   // D-040: 첫 실행에서만 실패하는 검증 명령. PATH 가 fakeDir 뿐이라 셸 내장만 쓴다.
   const flakyVerify = `if [ -f '${mark}' ]; then echo GREEN; else : > '${mark}'; echo RED_OMEGA; exit 1; fi`;
 
-  it('--write 면 Core 가 검증 명령을 돌려 reviewer 에 싣고, 실패하면 reviewer PASS 여도 FAIL 로 재시도한다 (D-040)', () => {
+  it('--write 면 Core 가 검증 명령을 돌려 reviewer 에 싣고, 실패하면 reviewer 없이 FAIL 로 재시도한다 (D-040·D-041)', () => {
     reset();
     const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', flakyVerify], {
       PATH: fakeDir,
@@ -309,9 +309,12 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     });
     assert.equal(r.code, 0, r.err);
     assert.match(r.err, /중단 {3}goal-reached · 2회/);
-    assert.match(r.err, /exit=1/);
-    const reviews = readFileSync(codexArgs, 'utf8').split('<<END>>');
-    assert.match(reviews[0] ?? '', /검증 명령 \(Core 실행\)[\s\S]*exit=1[\s\S]*RED_OMEGA/, 'reviewer 가 명령 결과를 받지 못했다.');
+    assert.match(r.err, /reviewer Astra 생략 — 검증 명령 실패 · 검증 명령 .* exit=1/);
+    // 1사이클은 명령 실패로 FAIL 이 정해져 reviewer 가 돌지 않는다 — 2사이클 한 번만 돈다.
+    const reviews = readFileSync(codexArgs, 'utf8').split('<<END>>').filter((p) => p.trim());
+    assert.equal(reviews.length, 1, 'FAIL 이 이미 정해진 사이클에 reviewer 를 태웠다.');
+    assert.match(reviews[0] ?? '', /검증 명령 \(Core 실행\)[\s\S]*exit=0[\s\S]*GREEN/, 'reviewer 가 명령 결과를 받지 못했다.');
+    assert.doesNotMatch(r.err, /토큰 미보고/, '돌지 않은 reviewer 를 미보고 실행으로 셌다.');
     const prompts = readFileSync(claudeArgs, 'utf8').split('<<END>>');
     assert.match(prompts[1] ?? '', /검증 명령이 실패했다[\s\S]*RED_OMEGA/, '2사이클 프롬프트에 명령 실패가 없다.');
   });

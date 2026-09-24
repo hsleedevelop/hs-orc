@@ -298,13 +298,23 @@ async function main(): Promise<void> {
               : verifyCmds.length > 0
                 ? `primary 의 변경은 작업 트리에 적용되지 않았고 검증 명령(${verifyList})도 실행되지 않았다. 테스트가 통과한다고 가정하지 마라.`
                 : undefined;
+          // 명령 실패로 FAIL 이 이미 정해졌으면 reviewer 를 돌리지 않는다 — 사이클당 약 24만 토큰(D-036 실측)을 아낀다 (D-041).
+          // 다음 사이클 지적은 명령 출력만으로 충분하다: 무엇이 깨졌는지가 기계적으로 나와 있다.
+          if (failed.length > 0) {
+            const failedBlock = failed.map((c) => `$ ${c.cmd} → exit ${c.exitCode}\n${c.output.slice(-1500)}`).join('\n\n');
+            return {
+              passed: false,
+              verification:
+                `reviewer ${plan.slots.reviewer.label} 생략 — 검증 명령 실패` +
+                ` · 검증 명령 ${ran.map((c) => `\`${c.cmd}\` exit=${c.exitCode}`).join(', ')}`,
+              reason: `Core 가 실행한 검증 명령이 실패했다:\n${failedBlock}`.slice(0, 4000),
+              reviewerSkipped: true,
+            };
+          }
           const check = await execute(plan.slots.reviewer, reviewPrompt(plan, args.task, output, checks));
           if (!check.ok) reviewerBroken = true;
           const verdict = check.ok ? parseVerdict(check.text) : 'unknown';
-          // 검증 명령이 실패하면 reviewer 가 PASS 라도 통과가 아니다 — 판정은 기계적이다 (SPEC §6.2).
-          const passed = verdict === 'pass' && failed.length === 0;
-          // 명령 실패를 앞에 둔다 — 4000자로 자를 때 먼저 잘리지 않게.
-          const failedBlock = failed.map((c) => `$ ${c.cmd} → exit ${c.exitCode}\n${c.output.slice(-1500)}`).join('\n\n');
+          const passed = verdict === 'pass';
           return {
             passed,
             verification:
@@ -315,11 +325,7 @@ async function main(): Promise<void> {
                 : verifyCmds.length > 0
                   ? ' · 테스트 미실행(읽기 전용)'
                   : ''),
-            ...(passed || !check.ok
-              ? {}
-              : {
-                  reason: `${failedBlock ? `Core 가 실행한 검증 명령이 실패했다:\n${failedBlock}\n\n` : ''}${check.text}`.slice(0, 4000),
-                }),
+            ...(passed || !check.ok ? {} : { reason: check.text.slice(0, 4000) }),
             cost: check,
           };
         },
