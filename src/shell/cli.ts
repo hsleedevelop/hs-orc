@@ -277,7 +277,10 @@ async function main(): Promise<void> {
     if (verifyCmds.length > 0) {
       process.stderr.write(
         args.write
-          ? `검증   매 사이클 primary 뒤에 Core 가 실행한다: ${verifyList} — phase 없는 명령이 실패하면 reviewer 판정과 무관하게 FAIL\n`
+          ? `검증   매 사이클 primary 뒤에 Core 가 실행한다: ${verifyList} — ` +
+            (gateCmds.length > 0
+              ? 'phase 없는 명령이 실패하면 reviewer 판정과 무관하게 FAIL\n'
+              : 'phase 명령뿐이라 게이트는 없다 — 결과만 reviewer 에 싣는다\n')
           : `검증   읽기 전용이라 검증 명령(${verifyList})을 실행하지 않는다 — PASS 는 테스트 미검증이다. 실행하려면 --write.\n`,
       );
     }

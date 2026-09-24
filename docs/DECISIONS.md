@@ -1037,6 +1037,14 @@ D-041 실측에서 사용자는 "타입 오류**만**" 을 요청했지만 R01 �
 **영향**
 기준선 실행만큼(명령당 최대 300초) 시작이 늦어진다. 원래 빨간 저장소는 매번 `--fix-red-baseline` 이 필요하다. exit 수준이라 "기존 실패 1건 + 새 실패 1건" 은 기준선 실패로만 보인다 — 테스트 이름 비교는 도구마다 형식이 달라 열지 않는다. D-041 실측 조건이라면 엔진 토큰 0 에서 멈췄을 것이다(추론 — 이 변경 뒤 실제 엔진으로 재실행하지 않았다). once 의 outcome 이 실패한 명령을 증거로 인정해 `ok` 로 남을 수 있는 문제는 별개다(미결).
 
+**실행 확인** (2026-09-24, 실제 CLI · 엔진 호출 0회): D-041 실측과 같은 스크래치 저장소에서 `--task R01 --mode loop --run --write --max-iterations 1`. PATH 를 `trap/`(claude·codex·cursor-cli·cursor-agent — 표식을 남기고 exit 99) · `nodeonly/`(node·npm·npx) · `/usr/bin:/bin` 으로만 두고, 실행 전 `command -v` 로 엔진 넷이 전부 trap 인지 확인했다(엔진은 PATH 로만 해석된다 — `resolve.ts`).
+- green(`npm test` 통과): `기준선 \`npm test\` exit=0` → 게이트 통과 → trap codex 1회 → primary 실패 → `escalated · 1회`(D-039).
+- **red**(원본, swap 테스트 실패): `기준선 … exit=1` → `중단 기준선 실패 — 엔진을 띄우지 않았다` + 실패 출력(`0 !== 10`) + `--fix-red-baseline` 안내, exit 1, **trap 0회**.
+- red + `--fix-red-baseline`: 범위 안내 → 게이트 통과 → trap codex 1회 → `escalated`.
+- red + 빈 `HS_ORC_VERIFY_CONFIG` + `--verify "before:npm test"`: `기준선` 줄 없음 → 게이트 통과 → trap codex 1회. 안내 줄이 게이트가 없는데 "phase 없는 명령이 실패하면 FAIL" 이라고 찍혀, "phase 명령뿐이라 게이트는 없다" 로 고쳤다.
+- 격리 설정 실수 두 번(PATH 에 `/bin` 이 없어 exit 127, npm 심볼릭 링크로 `MODULE_NOT_FOUND`)도 기준선에서 멈추고 엔진을 띄우지 않았다 — 환경 오류도 fail-closed 다. 다만 문구가 테스트 실패와 같아 원인은 출력 꼬리를 읽어야 안다.
+- 엔진이 실제로 돌 때의 회귀 → 강제 FAIL → 재시도는 이 확인 범위 밖이다 — 단위 테스트와 D-041 실측이 대신한다.
+
 **상태** 확정 — 2026-09-24 사용자 결정 (B1 + phase 결함 동반 수정, 플래그 `--fix-red-baseline`).
 
 ---

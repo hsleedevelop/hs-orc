@@ -361,6 +361,7 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     assert.equal(r.code, 0, r.err);
     assert.match(r.err, /중단 {3}goal-reached · 1회/);
     assert.doesNotMatch(r.err, /기준선/);
+    assert.match(r.err, /phase 명령뿐이라 게이트는 없다/, '게이트가 없는데 "실패하면 FAIL" 이라고 안내했다.');
     assert.match(r.err, /`before:echo RED_BEFORE; exit 1` exit=1/);
     assert.match(readFileSync(codexArgs, 'utf8'), /before:echo RED_BEFORE[\s\S]*exit=1/);
   });
