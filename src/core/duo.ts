@@ -29,7 +29,7 @@ export interface DuoResult {
  * reviewer 프롬프트. **산출물을 다시 만들라고 하지 않는다** — 반례를 먼저 내라고 한다.
  * 매트릭스의 `운영 기준`과 행별 지침을 그대로 판정 기준으로 준다 (D-010).
  */
-export function reviewPrompt(plan: AssignmentPlan, task: string, output: string): string {
+export function reviewPrompt(plan: AssignmentPlan, task: string, output: string, checks?: string): string {
   return [
     '너는 독립 검증자다. 이 작업을 다시 수행하지 말고 아래 산출물을 검증하라.',
     '',
@@ -41,6 +41,8 @@ export function reviewPrompt(plan: AssignmentPlan, task: string, output: string)
     output.slice(0, 8000),
     '--- 끝 ---',
     '',
+    // Core 가 실행한 검증 명령의 결과 (D-040). reviewer 는 읽기 전용이라 스스로 돌리지 못한다.
+    ...(checks ? ['--- 검증 명령 (Core 실행) ---', checks, '--- 끝 ---', ''] : []),
     '다음 순서로 답하라:',
     '1. 누락된 것 / 반례 / 실패 가능성을 먼저 적는다 (없으면 "없음").',
     '2. 마지막 줄에 운영 기준 충족 여부를 PASS 또는 FAIL 한 단어로만 적는다.',

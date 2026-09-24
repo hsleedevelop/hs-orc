@@ -244,6 +244,8 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
   const claudeArgs = path.join(fakeDir, 'claude-args');
   const reviewCount = path.join(fakeDir, 'review-count');
   const primaryCount = path.join(fakeDir, 'primary-count');
+  const codexArgs = path.join(fakeDir, 'codex-args');
+  const mark = path.join(fakeDir, 'verify-mark');
   const fakeClaude = path.join(fakeDir, 'claude');
   const fakeCodex = path.join(fakeDir, 'codex');
   const codexLine = (text: string) =>
@@ -267,8 +269,9 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
       '#!/bin/sh',
       'if [ -n "$REVIEWER_EXIT" ]; then exit "$REVIEWER_EXIT"; fi',
       // PATH 가 fakeDir 뿐이라 cat 같은 외부 명령이 없다 — 셸 내장만 쓴다.
+      `printf '%s\\n<<END>>\\n' "$*" >> '${codexArgs}'`,
       `n=0; [ -f '${reviewCount}' ] && read n < '${reviewCount}'; n=$((n+1)); echo "$n" > '${reviewCount}'`,
-      `if [ "$n" -eq 1 ]; then ${codexLine('반례 ZETA 가 빠졌다\\nFAIL')}; else ${codexLine('없음\\nPASS')}; fi`,
+      `if [ "$n" -eq 1 ] && [ -z "$REVIEWER_PASS" ]; then ${codexLine('반례 ZETA 가 빠졌다\\nFAIL')}; else ${codexLine('없음\\nPASS')}; fi`,
       `printf '%s\\n' '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":10}}'`,
       '',
     ].join('\n'),
@@ -276,7 +279,7 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
   );
   chmodSync(fakeCodex, 0o755);
   after(() => rmSync(fakeDir, { recursive: true, force: true }));
-  const reset = () => [claudeArgs, reviewCount, primaryCount].forEach((f) => rmSync(f, { force: true }));
+  const reset = () => [claudeArgs, reviewCount, primaryCount, codexArgs, mark].forEach((f) => rmSync(f, { force: true }));
 
   it('FAIL 이면 다음 사이클로 가고, 그 프롬프트에 reviewer 의 지적이 실린다', () => {
     reset();
@@ -293,6 +296,36 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run'], { PATH: fakeDir });
     assert.equal(r.code, 0, r.err);
     assert.equal(r.out, 'draft-2\n');
+  });
+
+  // D-040: 첫 실행에서만 실패하는 검증 명령. PATH 가 fakeDir 뿐이라 셸 내장만 쓴다.
+  const flakyVerify = `if [ -f '${mark}' ]; then echo GREEN; else : > '${mark}'; echo RED_OMEGA; exit 1; fi`;
+
+  it('--write 면 Core 가 검증 명령을 돌려 reviewer 에 싣고, 실패하면 reviewer PASS 여도 FAIL 로 재시도한다 (D-040)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', flakyVerify], {
+      PATH: fakeDir,
+      REVIEWER_PASS: '1',
+    });
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.err, /중단 {3}goal-reached · 2회/);
+    assert.match(r.err, /exit=1/);
+    const reviews = readFileSync(codexArgs, 'utf8').split('<<END>>');
+    assert.match(reviews[0] ?? '', /검증 명령 \(Core 실행\)[\s\S]*exit=1[\s\S]*RED_OMEGA/, 'reviewer 가 명령 결과를 받지 못했다.');
+    const prompts = readFileSync(claudeArgs, 'utf8').split('<<END>>');
+    assert.match(prompts[1] ?? '', /검증 명령이 실패했다[\s\S]*RED_OMEGA/, '2사이클 프롬프트에 명령 실패가 없다.');
+  });
+
+  it('읽기 전용이면 검증 명령을 돌리지 않고, 미실행이라고 reviewer 와 기록에 적는다 (D-040)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--verify', flakyVerify], {
+      PATH: fakeDir,
+      REVIEWER_PASS: '1',
+    });
+    assert.equal(r.code, 0, r.err);
+    assert.equal(existsSync(mark), false, '읽기 전용인데 검증 명령이 돌았다 — 원본을 검사한 결과가 증거처럼 쓰인다.');
+    assert.match(r.err, /테스트 미실행\(읽기 전용\)/);
+    assert.match(readFileSync(codexArgs, 'utf8'), /적용되지 않았고 검증 명령/);
   });
 
   it('reviewer 실행이 실패하면 재시도하지 않고 사람에게 올린다', () => {
