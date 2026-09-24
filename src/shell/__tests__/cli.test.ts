@@ -236,13 +236,14 @@ describe('D-035 — CLI 의 모든 진행 방식에 토큰 상한 (T1) + --token
 
 /**
  * D-036 — CLI loop 는 FAIL 이면 재시도하고, reviewer 의 지적을 다음 사이클 프롬프트에 싣는다.
- * 가짜 claude(primary Fable)는 받은 인자를 파일에 남기고, 가짜 codex(reviewer Astra)는
+ * 가짜 claude(primary Fable)는 받은 인자를 파일에 남기고 사이클마다 draft-N 을 내며, 가짜 codex(reviewer Astra)는
  * 호출 횟수에 따라 FAIL → PASS 를 낸다. `REVIEWER_EXIT` 가 있으면 그 코드로 죽는다.
  */
 describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)', () => {
   const fakeDir = mkdtempSync(path.join(os.tmpdir(), 'hs-orc-cli-fakebin-loop-'));
   const claudeArgs = path.join(fakeDir, 'claude-args');
   const reviewCount = path.join(fakeDir, 'review-count');
+  const primaryCount = path.join(fakeDir, 'primary-count');
   const fakeClaude = path.join(fakeDir, 'claude');
   const fakeCodex = path.join(fakeDir, 'codex');
   const codexLine = (text: string) =>
@@ -253,7 +254,8 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
       '#!/bin/sh',
       'if [ -n "$PRIMARY_EXIT" ]; then exit "$PRIMARY_EXIT"; fi',
       `printf '%s\\n<<END>>\\n' "$*" >> '${claudeArgs}'`,
-      `printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"result":"draft","duration_ms":1,"total_cost_usd":0.01,"usage":{"input_tokens":10,"output_tokens":10,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}'`,
+      `n=0; [ -f '${primaryCount}' ] && read n < '${primaryCount}'; n=$((n+1)); echo "$n" > '${primaryCount}'`,
+      `printf '%s\\n' "{\\"type\\":\\"result\\",\\"subtype\\":\\"success\\",\\"is_error\\":false,\\"result\\":\\"draft-$n\\",\\"duration_ms\\":1,\\"total_cost_usd\\":0.01,\\"usage\\":{\\"input_tokens\\":10,\\"output_tokens\\":10,\\"cache_read_input_tokens\\":0,\\"cache_creation_input_tokens\\":0}}"`,
       '',
     ].join('\n'),
     'utf8',
@@ -274,7 +276,7 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
   );
   chmodSync(fakeCodex, 0o755);
   after(() => rmSync(fakeDir, { recursive: true, force: true }));
-  const reset = () => [claudeArgs, reviewCount].forEach((f) => rmSync(f, { force: true }));
+  const reset = () => [claudeArgs, reviewCount, primaryCount].forEach((f) => rmSync(f, { force: true }));
 
   it('FAIL 이면 다음 사이클로 가고, 그 프롬프트에 reviewer 의 지적이 실린다', () => {
     reset();
@@ -284,6 +286,13 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     const prompts = readFileSync(claudeArgs, 'utf8').split('<<END>>');
     assert.doesNotMatch(prompts[0] ?? '', /ZETA/);
     assert.match(prompts[1] ?? '', /반례 ZETA 가 빠졌다/, '2사이클 프롬프트에 FAIL 사유가 없다 — 눈먼 재시도다.');
+  });
+
+  it('마지막 사이클 primary 의 산출물 전문을 stdout 에 낸다 — journal 의 앞 200자만으로는 결과를 볼 수 없다', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run'], { PATH: fakeDir });
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out, 'draft-2\n');
   });
 
   it('reviewer 실행이 실패하면 재시도하지 않고 사람에게 올린다', () => {

@@ -294,6 +294,8 @@ async function main(): Promise<void> {
       // 분류 폴백이 이미 과금한 같은 budget 을 넘긴다 — 합산이다 (D-034).
       { goal: args.task, maxIterations, budgetUsd, budget },
     );
+    // once·pingpong 처럼 산출물은 stdout 이다 — journal(stderr)은 앞 200자만 남긴다.
+    if (result.lastOutput !== undefined) process.stdout.write(`${result.lastOutput}\n`);
     process.stderr.write(
       `\n${result.journal.render()}\n중단   ${result.stopReason} · ${result.iterations}회\n누적   ${result.budget.summary()}\n`,
     );
