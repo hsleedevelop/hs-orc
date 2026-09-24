@@ -2,7 +2,7 @@
  * 의존성이 설치돼 있는가 (D-028 후속). **세 셸이 같이 쓴다** — GUI 만 알면 반쪽이다.
  * 첫 실사용은 CLI 였고, 거기서 primary 가 막혔다.
  */
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 function isDir(dir: string): boolean {
@@ -10,6 +10,24 @@ function isDir(dir: string): boolean {
     return statSync(dir).isDirectory();
   } catch {
     return false;
+  }
+}
+
+/**
+ * 설치할 것이 있는가. 의존성 필드가 모두 비었고 workspaces 도 없으면 `node_modules` 가 없어도 정상이다 —
+ * 그 상태에 "npm install" 을 권하면 오탐이다 (2026-09-24 R01 실측, 의존성 0개 스크래치 저장소).
+ * 못 읽으면 있다고 본다 — 확인 못 한 것을 "설치할 것 없음" 으로 넘기지 않는다.
+ */
+function declaresDeps(manifest: string): boolean {
+  try {
+    const pkg = JSON.parse(readFileSync(manifest, 'utf8')) as Record<string, unknown>;
+    if (pkg['workspaces'] !== undefined) return true;
+    return ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'].some((field) => {
+      const deps = pkg[field];
+      return typeof deps === 'object' && deps !== null && Object.keys(deps).length > 0;
+    });
+  } catch {
+    return true;
   }
 }
 
@@ -33,7 +51,7 @@ export type DepStatus =
 export function depStatus(dir: string): DepStatus {
   const manifest = path.join(dir, 'package.json');
   if (!existsSync(manifest)) return { kind: 'unknown' };
-  if (isDir(path.join(dir, 'node_modules'))) return { kind: 'ready', manifest: 'package.json' };
+  if (isDir(path.join(dir, 'node_modules')) || !declaresDeps(manifest)) return { kind: 'ready', manifest: 'package.json' };
   // lock 파일이 있으면 `ci` 가 맞다 — 워크트리에서 의존성 버전이 본체와 갈리면 검증이 거짓이 된다.
   const install = existsSync(path.join(dir, 'package-lock.json')) ? 'npm ci' : 'npm install';
   return { kind: 'missing', manifest: 'package.json', install };
