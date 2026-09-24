@@ -298,12 +298,14 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     assert.equal(r.out, 'draft-2\n');
   });
 
-  // D-040: 첫 실행에서만 실패하는 검증 명령. PATH 가 fakeDir 뿐이라 셸 내장만 쓴다.
-  const flakyVerify = `if [ -f '${mark}' ]; then echo GREEN; else : > '${mark}'; echo RED_OMEGA; exit 1; fi`;
+  // 주어진 회차에서만 실패하는 검증 명령. --write 면 1회차가 기준선이다 (D-042). PATH 가 fakeDir 뿐이라 셸 내장만 쓴다.
+  const verifyFailingOn = (...fails: number[]) =>
+    `n=0; [ -f '${mark}' ] && read n < '${mark}'; n=$((n+1)); echo "$n" > '${mark}'; ` +
+    `case "$n" in ${fails.join('|')}) echo RED_OMEGA; exit 1;; esac; echo GREEN`;
 
-  it('--write 면 Core 가 검증 명령을 돌려 reviewer 에 싣고, 실패하면 reviewer 없이 FAIL 로 재시도한다 (D-040·D-041)', () => {
+  it('--write 면 Core 가 검증 명령을 돌려 reviewer 에 싣고, 회귀하면 reviewer 없이 FAIL 로 재시도한다 (D-040·D-041)', () => {
     reset();
-    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', flakyVerify], {
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', verifyFailingOn(2)], {
       PATH: fakeDir,
       REVIEWER_PASS: '1',
     });
@@ -321,7 +323,7 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
 
   it('읽기 전용이면 검증 명령을 돌리지 않고, 미실행이라고 reviewer 와 기록에 적는다 (D-040)', () => {
     reset();
-    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--verify', flakyVerify], {
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--verify', verifyFailingOn(2)], {
       PATH: fakeDir,
       REVIEWER_PASS: '1',
     });
@@ -329,6 +331,44 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     assert.equal(existsSync(mark), false, '읽기 전용인데 검증 명령이 돌았다 — 원본을 검사한 결과가 증거처럼 쓰인다.');
     assert.match(r.err, /테스트 미실행\(읽기 전용\)/);
     assert.match(readFileSync(codexArgs, 'utf8'), /적용되지 않았고 검증 명령/);
+  });
+
+  it('작업 전부터 검증 명령이 실패하면 엔진을 띄우지 않고 사람에게 올린다 (D-042)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', verifyFailingOn(1)], { PATH: fakeDir });
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /중단 {3}기준선 실패[\s\S]*RED_OMEGA[\s\S]*--fix-red-baseline/);
+    assert.equal(existsSync(claudeArgs), false, '기준선이 빨간데 primary 를 띄웠다 — 사용자 범위를 조용히 넓힌다.');
+    assert.equal(existsSync(codexArgs), false);
+  });
+
+  it('--fix-red-baseline 이면 기준선 실패를 범위에 넣고 그대로 돈다 (D-042)', () => {
+    reset();
+    const r = cli(
+      ['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--fix-red-baseline', '--verify', verifyFailingOn(1)],
+      { PATH: fakeDir, REVIEWER_PASS: '1' },
+    );
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.err, /중단 {3}goal-reached · 1회/);
+  });
+
+  it('phase 명령은 실패가 정상인 단계라 게이트(기준선·강제 FAIL)에서 빠지고 결과만 싣는다 (D-042)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', 'before:echo RED_BEFORE; exit 1'], {
+      PATH: fakeDir,
+      REVIEWER_PASS: '1',
+    });
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.err, /중단 {3}goal-reached · 1회/);
+    assert.doesNotMatch(r.err, /기준선/);
+    assert.match(r.err, /`before:echo RED_BEFORE; exit 1` exit=1/);
+    assert.match(readFileSync(codexArgs, 'utf8'), /before:echo RED_BEFORE[\s\S]*exit=1/);
+  });
+
+  it('--fix-red-baseline 은 --mode loop --write 밖에서 조용히 무시되지 않고 던진다 (D-042)', () => {
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--fix-red-baseline'], NO_PATH);
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /--fix-red-baseline 은 --mode loop --write 에서만/);
   });
 
   it('reviewer 실행이 실패하면 재시도하지 않고 사람에게 올린다', () => {

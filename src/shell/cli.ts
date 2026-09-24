@@ -51,6 +51,8 @@ interface Parsed {
   classifyLlm: boolean;
   run: boolean;
   write: boolean;
+  /** 작업 전부터 실패하는 검증 명령까지 고치는 것을 범위에 넣는다 (D-042). 없으면 기준선 실패는 사람에게 올린다. */
+  fixRedBaseline: boolean;
   raw: boolean;
   timeoutMs: number;
 }
@@ -60,11 +62,11 @@ const USAGE = `사용법: hs-orc "<작업>" [--task R01] [--effort high] [--revi
        [--mode once|pingpong|loop|graph] [--max-iterations N] [--budget 20] [--token-budget N] [--graph <nodes.json>]
        (그래프 스펙 예제: examples/graph-nodes.json · --token-budget 0 = 토큰 상한 없음, D-035)
        [--verify "[phase:]<명령>"]... [--evidence <file.json>] [--crash-test]
-       [--no-reviewer] [--side primary|reviewer]`;
+       [--no-reviewer] [--side primary|reviewer] [--fix-red-baseline]`;
 
 function parseArgs(argv: readonly string[]): Parsed {
   const positional: string[] = [];
-  const parsed: Parsed = { task: '', mode: 'once', gate: {}, verify: [], crashTest: false, skipReviewer: false, side: 'primary', classifyLlm: true, run: false, write: false, raw: false, timeoutMs: 900_000 };
+  const parsed: Parsed = { task: '', mode: 'once', gate: {}, verify: [], crashTest: false, skipReviewer: false, side: 'primary', classifyLlm: true, run: false, write: false, fixRedBaseline: false, raw: false, timeoutMs: 900_000 };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -117,6 +119,7 @@ function parseArgs(argv: readonly string[]): Parsed {
       case '--no-classify-llm': parsed.classifyLlm = false; break;
       case '--run': parsed.run = true; break;
       case '--write': parsed.write = true; break;
+      case '--fix-red-baseline': parsed.fixRedBaseline = true; break;
       case '--raw': parsed.raw = true; break;
       case '--timeout': parsed.timeoutMs = Number(value()) * 1000; break;
       default:
@@ -129,6 +132,10 @@ function parseArgs(argv: readonly string[]): Parsed {
 
   parsed.task = positional.join(' ').trim();
   if (!parsed.task) throw new Error(`작업 문자열이 없다.\n  ${USAGE}`);
+  // 기준선은 --write loop 에서만 돈다 — 다른 자리에서 조용히 무시되는 플래그는 두지 않는다.
+  if (parsed.fixRedBaseline && !(parsed.mode === 'loop' && parsed.write)) {
+    throw new Error('--fix-red-baseline 은 --mode loop --write 에서만 의미가 있다.');
+  }
   return parsed;
 }
 
@@ -263,13 +270,36 @@ async function main(): Promise<void> {
     // D-040: reviewer 는 읽기 전용이라 테스트를 못 돌린다 — 선언된 검증 명령은 Core 가 돌린다(once 와 같은 선언).
     // 읽기 전용이면 primary 의 diff 가 적용되지 않아 원본을 검사하게 되므로 돌리지 않고, 그렇다고 적는다.
     const verifyCmds = [...defaultVerify(plan.assignment.id), ...args.verify];
-    const verifyList = verifyCmds.map((v) => v.cmd).join(' · ');
+    const cmdLabel = (v: { cmd: string; phase?: string }): string => (v.phase ? `${v.phase}:${v.cmd}` : v.cmd);
+    const verifyList = verifyCmds.map(cmdLabel).join(' · ');
+    // D-042: phase 명령(before·reproduce 등)은 실패가 정상인 단계다 — 게이트(강제 FAIL·기준선)에서 뺀다.
+    const gateCmds = verifyCmds.filter((v) => v.phase === undefined);
     if (verifyCmds.length > 0) {
       process.stderr.write(
         args.write
-          ? `검증   매 사이클 primary 뒤에 Core 가 실행한다: ${verifyList} — 실패하면 reviewer 판정과 무관하게 FAIL\n`
+          ? `검증   매 사이클 primary 뒤에 Core 가 실행한다: ${verifyList} — phase 없는 명령이 실패하면 reviewer 판정과 무관하게 FAIL\n`
           : `검증   읽기 전용이라 검증 명령(${verifyList})을 실행하지 않는다 — PASS 는 테스트 미검증이다. 실행하려면 --write.\n`,
       );
+    }
+    // D-042: 게이트 명령을 작업 **전에** 한 번 돌린다. 이미 실패하면 그 실패를 고치는 것이 작업 범위인지
+    // 제품은 판단할 수 없다 — 엔진을 띄우기 전에 사람에게 올린다. 범위에 넣으려면 --fix-red-baseline.
+    if (args.write && gateCmds.length > 0) {
+      const baseline = gateCmds.map((v) => runCommand(v.cmd, process.cwd())).flatMap((e) => (e.kind === 'command' ? [e] : []));
+      const red = baseline.filter((c) => c.exitCode !== 0);
+      process.stderr.write(`기준선 ${baseline.map((c) => `\`${c.cmd}\` exit=${c.exitCode}`).join(', ')}\n`);
+      if (red.length > 0 && !args.fixRedBaseline) {
+        process.stderr.write(
+          [
+            `중단   기준선 실패 — 작업 전부터 검증 명령이 실패한다. 엔진을 띄우지 않았다.`,
+            ...red.map((c) => `$ ${c.cmd} → exit ${c.exitCode}\n${c.output.slice(-1500)}`),
+            `안내   이 실패를 고치는 것까지 작업 범위면 --fix-red-baseline. 아니면 먼저 고치거나 검증 명령을 바꾼다.`,
+            '',
+          ].join('\n'),
+        );
+        process.exitCode = 1;
+        return;
+      }
+      if (red.length > 0) process.stderr.write('       --fix-red-baseline — 기존 실패까지 고치는 것을 작업 범위로 둔다.\n');
     }
     process.stderr.write('\n');
     // reviewer 가 죽으면 망가진 엔진에 primary 를 반복해 태우지 않고 사람에게 올린다 (D-036).
@@ -291,10 +321,10 @@ async function main(): Promise<void> {
           const ran = args.write
             ? verifyCmds.map((v) => runCommand(v.cmd, process.cwd(), v.phase)).flatMap((e) => (e.kind === 'command' ? [e] : []))
             : [];
-          const failed = ran.filter((c) => c.exitCode !== 0);
+          const failed = ran.filter((c) => c.phase === undefined && c.exitCode !== 0);
           const checks =
             ran.length > 0
-              ? ran.map((c) => `$ ${c.cmd}\nexit=${c.exitCode}\n${c.output.slice(-1500)}`).join('\n\n')
+              ? ran.map((c) => `$ ${cmdLabel(c)}\nexit=${c.exitCode}\n${c.output.slice(-1500)}`).join('\n\n')
               : verifyCmds.length > 0
                 ? `primary 의 변경은 작업 트리에 적용되지 않았고 검증 명령(${verifyList})도 실행되지 않았다. 테스트가 통과한다고 가정하지 마라.`
                 : undefined;
@@ -306,7 +336,7 @@ async function main(): Promise<void> {
               passed: false,
               verification:
                 `reviewer ${plan.slots.reviewer.label} 생략 — 검증 명령 실패` +
-                ` · 검증 명령 ${ran.map((c) => `\`${c.cmd}\` exit=${c.exitCode}`).join(', ')}`,
+                ` · 검증 명령 ${ran.map((c) => `\`${cmdLabel(c)}\` exit=${c.exitCode}`).join(', ')}`,
               reason: `Core 가 실행한 검증 명령이 실패했다:\n${failedBlock}`.slice(0, 4000),
               reviewerSkipped: true,
             };
@@ -321,7 +351,7 @@ async function main(): Promise<void> {
               `reviewer ${plan.slots.reviewer.label} → ${verdict.toUpperCase()}` +
               (check.ok ? '' : ` (실행 실패: ${check.text.slice(0, 80)})`) +
               (ran.length > 0
-                ? ` · 검증 명령 ${ran.map((c) => `\`${c.cmd}\` exit=${c.exitCode}`).join(', ')}`
+                ? ` · 검증 명령 ${ran.map((c) => `\`${cmdLabel(c)}\` exit=${c.exitCode}`).join(', ')}`
                 : verifyCmds.length > 0
                   ? ' · 테스트 미실행(읽기 전용)'
                   : ''),
