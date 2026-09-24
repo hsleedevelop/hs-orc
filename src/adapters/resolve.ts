@@ -92,6 +92,10 @@ export function buildInvocation(
     typeof engineOrOptions === 'string' ? { engine: engineOrOptions } : (engineOrOptions ?? {});
   const engine = options.engine;
   assertEffort(effort);
+  // 스크래치(git 밖)에는 쓰기를 주지 않는다 (SPEC §6.4.1). 셸·세션의 검사만 믿지 않고 argv 를 만드는 곳에서도 막는다.
+  if (options.write === true && options.nonGit === true) {
+    throw new EngineError('git 밖(스크래치) 실행에는 쓰기를 줄 수 없다 (SPEC §6.4.1).');
+  }
 
   const modelSpec = catalog.models[model];
   const target = engine ?? modelSpec.defaultEngine;

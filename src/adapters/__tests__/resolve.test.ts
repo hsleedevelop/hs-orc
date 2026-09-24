@@ -131,6 +131,12 @@ describe('git 밖 실행 (스크래치, SPEC §6.4.1)', () => {
     const { argv } = buildInvocation(catalog, 'luna', 'low', 'hi', { engine: 'codex' });
     assert.ok(!argv.includes('--skip-git-repo-check'));
   });
+  it('쓰기와 git 밖 실행을 함께 받지 않는다 — 스크래치 쓰기 금지를 셸에만 맡기지 않는다', () => {
+    assert.throws(
+      () => buildInvocation(catalog, 'luna', 'low', 'hi', { engine: 'codex', write: true, nonGit: true }),
+      EngineError,
+    );
+  });
   it('선언이 없는 엔진은 nonGit 이어도 아무것도 붙이지 않는다', () => {
     const plain = buildInvocation(catalog, 'haiku', 'low', 'hi', { engine: 'claude' }).argv;
     const nonGit = buildInvocation(catalog, 'haiku', 'low', 'hi', { engine: 'claude', nonGit: true }).argv;
