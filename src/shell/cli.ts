@@ -18,7 +18,7 @@ import { appendDecision, decisionLogPath } from '../core/decision-log.ts';
 import { firstLine, secondLine } from '../core/decide.ts';
 import { storeRun } from '../core/run-store.ts';
 import { reportError, reportNotice } from '../core/report.ts';
-import { collect, outcomeOf, type Evidence } from '../core/evidence.ts';
+import { FAILING_PHASES, collect, contradiction, outcomeOf, type Evidence } from '../core/evidence.ts';
 import { readUnclassified, recordUnclassified, suggestRows } from '../core/unclassified.ts';
 import { defaultVerify } from '../data/verify.ts';
 import { depStatus } from './deps.ts';
@@ -272,24 +272,53 @@ async function main(): Promise<void> {
     const verifyCmds = [...defaultVerify(plan.assignment.id), ...args.verify];
     const cmdLabel = (v: { cmd: string; phase?: string }): string => (v.phase ? `${v.phase}:${v.cmd}` : v.cmd);
     const verifyList = verifyCmds.map(cmdLabel).join(' · ');
-    // D-042: phase 명령(before·reproduce 등)은 실패가 정상인 단계다 — 게이트(강제 FAIL·기준선)에서 뺀다.
-    const gateCmds = verifyCmds.filter((v) => v.phase === undefined);
+    // D-045: phase 는 **언제** 돌리는가다. before·reproduce 는 변경 전의 사실이라 기준선에서 한 번(실패 기대),
+    // 나머지(phase 없음·after·fix·regress…)는 변경 후의 사실이라 매 사이클 게이트(통과 기대)다.
+    // 기대 exit 판단은 once 와 같은 contradiction() 이다 (D-043) — 표를 어느 시점에 대는지만 loop 가 정한다.
+    const isPre = (v: { phase?: string }): boolean => v.phase !== undefined && FAILING_PHASES.has(v.phase);
+    const preCmds = verifyCmds.filter(isPre);
+    const postCmds = verifyCmds.filter((v) => !isPre(v));
     if (verifyCmds.length > 0) {
       process.stderr.write(
         args.write
-          ? `검증   매 사이클 primary 뒤에 Core 가 실행한다: ${verifyList} — ` +
-            (gateCmds.length > 0
-              ? 'phase 없는 명령이 실패하면 reviewer 판정과 무관하게 FAIL\n'
-              : 'phase 명령뿐이라 게이트는 없다 — 결과만 reviewer 에 싣는다\n')
+          ? [
+              ...(preCmds.length > 0 ? [`검증   변경 전(기준선) 1회: ${preCmds.map(cmdLabel).join(' · ')} — 실패해야 한다(재현)\n`] : []),
+              ...(postCmds.length > 0
+                ? [`검증   매 사이클 primary 뒤: ${postCmds.map(cmdLabel).join(' · ')} — 실패하면 reviewer 판정과 무관하게 FAIL\n`]
+                : []),
+            ].join('')
           : `검증   읽기 전용이라 검증 명령(${verifyList})을 실행하지 않는다 — PASS 는 테스트 미검증이다. 실행하려면 --write.\n`,
       );
     }
-    // D-042: 게이트 명령을 작업 **전에** 한 번 돌린다. 이미 실패하면 그 실패를 고치는 것이 작업 범위인지
+    // D-042: phase 없는 명령을 작업 **전에** 한 번 돌린다. 이미 실패하면 그 실패를 고치는 것이 작업 범위인지
     // 제품은 판단할 수 없다 — 엔진을 띄우기 전에 사람에게 올린다. 범위에 넣으려면 --fix-red-baseline.
-    if (args.write && gateCmds.length > 0) {
-      const baseline = gateCmds.map((v) => runCommand(v.cmd, process.cwd())).flatMap((e) => (e.kind === 'command' ? [e] : []));
-      const red = baseline.filter((c) => c.exitCode !== 0);
-      process.stderr.write(`기준선 ${baseline.map((c) => `\`${c.cmd}\` exit=${c.exitCode}`).join(', ')}\n`);
+    // after·fix·regress 는 변경 전에 실패하는 것이 정상이라 여기서 보지 않는다 (D-045).
+    const plainCmds = postCmds.filter((v) => v.phase === undefined);
+    let reproduced = '';
+    if (args.write && plainCmds.length + preCmds.length > 0) {
+      const baseline = [...plainCmds, ...preCmds]
+        .map((v) => runCommand(v.cmd, process.cwd(), v.phase))
+        .flatMap((e) => (e.kind === 'command' ? [e] : []));
+      process.stderr.write(`기준선 ${baseline.map((c) => `\`${cmdLabel(c)}\` exit=${c.exitCode}`).join(', ')}\n`);
+      // D-045: 재현되지 않는 버그를 고치라고 시키는 것은 추측이다 — 우회 플래그 없이 사람에게 올린다.
+      const notReproduced = baseline.filter((c) => c.phase !== undefined && contradiction(c) !== null);
+      if (notReproduced.length > 0) {
+        process.stderr.write(
+          [
+            `중단   재현되지 않는다 — 변경 전에 실패해야 하는 단계가 통과했다. 엔진을 띄우지 않았다.`,
+            ...notReproduced.map((c) => `$ ${cmdLabel(c)} → exit ${c.exitCode}\n${c.output.slice(-1500)}`),
+            `안내   재현 명령을 고친다 — 재현되지 않는 버그는 고칠 대상을 알 수 없다.`,
+            '',
+          ].join('\n'),
+        );
+        process.exitCode = 1;
+        return;
+      }
+      reproduced = baseline
+        .filter((c) => c.phase !== undefined)
+        .map((c) => `$ ${cmdLabel(c)} (기준선 — 변경 전)\nexit=${c.exitCode}\n${c.output.slice(-1500)}`)
+        .join('\n\n');
+      const red = baseline.filter((c) => c.phase === undefined && c.exitCode !== 0);
       if (red.length > 0 && !args.fixRedBaseline) {
         process.stderr.write(
           [
@@ -322,19 +351,20 @@ async function main(): Promise<void> {
         // 마지막 줄 PASS/FAIL, 못 읽으면 unknown 이고 통과로 봐주지 않는다.
         evaluate: async (_ctx, output) => {
           const ran = args.write
-            ? verifyCmds.map((v) => runCommand(v.cmd, process.cwd(), v.phase)).flatMap((e) => (e.kind === 'command' ? [e] : []))
+            ? postCmds.map((v) => runCommand(v.cmd, process.cwd(), v.phase)).flatMap((e) => (e.kind === 'command' ? [e] : []))
             : [];
-          const failed = ran.filter((c) => c.phase === undefined && c.exitCode !== 0);
-          const checks =
-            ran.length > 0
-              ? ran.map((c) => `$ ${cmdLabel(c)}\nexit=${c.exitCode}\n${c.output.slice(-1500)}`).join('\n\n')
-              : verifyCmds.length > 0
-                ? `primary 의 변경은 작업 트리에 적용되지 않았고 검증 명령(${verifyList})도 실행되지 않았다. 테스트가 통과한다고 가정하지 마라.`
-                : undefined;
+          const failed = ran.filter((c) => contradiction(c) !== null);
+          const checks = args.write
+            ? [ran.map((c) => `$ ${cmdLabel(c)}\nexit=${c.exitCode}\n${c.output.slice(-1500)}`).join('\n\n'), reproduced]
+                .filter(Boolean)
+                .join('\n\n') || undefined
+            : verifyCmds.length > 0
+              ? `primary 의 변경은 작업 트리에 적용되지 않았고 검증 명령(${verifyList})도 실행되지 않았다. 테스트가 통과한다고 가정하지 마라.`
+              : undefined;
           // 명령 실패로 FAIL 이 이미 정해졌으면 reviewer 를 돌리지 않는다 — 사이클당 약 24만 토큰(D-036 실측)을 아낀다 (D-041).
           // 다음 사이클 지적은 명령 출력만으로 충분하다: 무엇이 깨졌는지가 기계적으로 나와 있다.
           if (failed.length > 0) {
-            const failedBlock = failed.map((c) => `$ ${c.cmd} → exit ${c.exitCode}\n${c.output.slice(-1500)}`).join('\n\n');
+            const failedBlock = failed.map((c) => `$ ${cmdLabel(c)} → exit ${c.exitCode}\n${c.output.slice(-1500)}`).join('\n\n');
             return {
               passed: false,
               verification:
@@ -355,7 +385,7 @@ async function main(): Promise<void> {
               (check.ok ? '' : ` (실행 실패: ${check.text.slice(0, 80)})`) +
               (ran.length > 0
                 ? ` · 검증 명령 ${ran.map((c) => `\`${cmdLabel(c)}\` exit=${c.exitCode}`).join(', ')}`
-                : verifyCmds.length > 0
+                : !args.write && verifyCmds.length > 0
                   ? ' · 테스트 미실행(읽기 전용)'
                   : ''),
             ...(passed || !check.ok ? {} : { reason: check.text.slice(0, 4000) }),
