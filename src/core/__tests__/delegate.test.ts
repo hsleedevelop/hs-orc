@@ -43,4 +43,21 @@ describe('위임 1건 (SPEC §4 5~7단계)', () => {
     assert.equal(d.outcome, 'unverified');
     assert.equal(d.verdict, 'pass');
   });
+
+  it('검증 명령이 실패하면 결정 로그 2차 outcome 은 ok 가 아니라 rework 다 (D-043)', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-delegate-'));
+    const log = path.join(dir, 'log.jsonl');
+    process.env['HS_ORC_DECISION_LOG'] = log;
+    process.env['HS_ORC_RUN_STORE'] = path.join(dir, 'runs');
+    const execute: SlotExecutor = (slot) =>
+      Promise.resolve({ ok: true, text: slot.label === 'Haiku' ? 'PASS' : 'ran', rawStdout: '', rawStderr: '', durationMs: 1 });
+
+    const d = await delegate({
+      matrix, plan: assign(matrix, catalog, row('R01')), reason: '수동 지정 R01', title: '타입 고쳐줘', prompt: '타입 고쳐줘',
+      verify: ['exit 1'], cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
+    });
+
+    assert.equal(d.outcome, 'rework');
+    assert.equal(readDecisions(log).filter((r) => r.id === d.decisionId).at(-1)?.outcome, 'rework');
+  });
 });

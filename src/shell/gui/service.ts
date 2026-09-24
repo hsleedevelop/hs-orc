@@ -12,7 +12,7 @@ import { createExecutor, type SlotExecutor } from '../../core/executor.ts';
 import { Budget } from '../../core/budget.ts';
 import { Journal } from '../../core/journal.ts';
 import { delegate } from '../../core/delegate.ts';
-import type { EvidenceReport } from '../../core/evidence.ts';
+import type { EvidenceReport, SettledOutcome } from '../../core/evidence.ts';
 import { reportError } from '../../core/report.ts';
 import { dashboardView, runView, titleInfo, type RunView } from '../tui/model.ts';
 import { ConversationSession } from '../../core/session.ts';
@@ -65,7 +65,7 @@ export interface RunPayload extends PlanOptions {
 export interface RunOutcome {
   readonly ok: boolean;
   readonly text: string;
-  readonly outcome?: 'ok' | 'unverified' | 'wrong';
+  readonly outcome?: SettledOutcome;
   readonly report?: EvidenceReport;
   readonly verdict?: 'pass' | 'fail' | 'unknown';
   readonly review?: string;

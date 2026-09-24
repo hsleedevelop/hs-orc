@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadMatrix } from '../../data/matrix.ts';
-import { REQUIREMENTS, collect, validate, type Evidence } from '../evidence.ts';
+import { REQUIREMENTS, collect, outcomeOf, validate, type Evidence } from '../evidence.ts';
 import { changedFiles, runCommand } from '../evidence-gather.ts';
 
 const matrix = loadMatrix();
@@ -97,6 +97,37 @@ describe('행별 충족 판정', () => {
     });
     assert.equal(collect(row('R03'), [order('2026-09-20T01:00:00Z', '2026-09-20T02:00:00Z')]).satisfied, true);
     assert.equal(collect(row('R03'), [order('2026-09-20T03:00:00Z', '2026-09-20T02:00:00Z')]).satisfied, false);
+  });
+});
+
+describe('나쁜 결과의 증거는 완료가 아니다 (D-043)', () => {
+  const review = (verdict: 'pass' | 'fail'): Evidence => ({ kind: 'review', reviewer: 'Haiku·low', verdict, text: 't' });
+
+  it('phase 없는 명령이 실패하면 rework 다 — "실행했다" 는 "통과했다" 가 아니다', () => {
+    const red = collect(row('R01'), [cmd('npm test', 1)]);
+    assert.equal(red.satisfied, true, '모양은 맞는 증거다 — 거절하지 않는다.');
+    assert.deepEqual(red.contradictions, ['`npm test` exit=1']);
+    assert.equal(outcomeOf(true, red), 'rework');
+    assert.equal(outcomeOf(true, collect(row('R01'), [cmd('npm test', 0)])), 'ok');
+  });
+
+  it('before·reproduce 는 실패가 정상이고, 통과하면 오히려 rework 다', () => {
+    assert.equal(outcomeOf(true, collect(row('R05'), [cmd('t', 1, 'before'), cmd('t', 0, 'after')])), 'ok');
+    const noRepro = collect(row('R05'), [cmd('t', 0, 'before'), cmd('t', 0, 'after')]);
+    assert.deepEqual(noRepro.contradictions, ['`before:t` 는 실패해야 하는 단계인데 exit 0']);
+    assert.equal(outcomeOf(true, collect(row('R06'), [cmd('t', 1, 'reproduce'), cmd('t', 0, 'fix'), cmd('t', 1, 'regress')])), 'rework');
+  });
+
+  it('reviewer FAIL 은 증거가 모였어도 rework 다 — PASS 는 판정을 바꾸지 않는다', () => {
+    assert.equal(outcomeOf(true, collect(row('R01'), [cmd('npm test', 0), review('fail')])), 'rework');
+    assert.equal(outcomeOf(true, collect(row('R01'), [cmd('npm test', 0), review('pass')])), 'ok');
+    assert.equal(outcomeOf(true, collect(row('R11'), [review('fail'), cmd('npm test', 0)])), 'rework');
+  });
+
+  it('순서: 실행 실패 → 나쁜 결과 → 증거 충족 — 증거가 없으면 unverified', () => {
+    assert.equal(outcomeOf(false, collect(row('R01'), [cmd('npm test', 1)])), 'wrong');
+    assert.equal(outcomeOf(true, collect(row('R01'), [])), 'unverified');
+    assert.equal(outcomeOf(true, collect(row('R10'), [review('fail')])), 'rework', '요구가 덜 모였어도 나쁜 결과가 먼저다.');
   });
 });
 
