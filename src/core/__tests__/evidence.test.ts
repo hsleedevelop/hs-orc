@@ -2,7 +2,10 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadMatrix } from '../../data/matrix.ts';
 import { REQUIREMENTS, collect, outcomeOf, validate, type Evidence } from '../evidence.ts';
-import { changedFiles, runCommand } from '../evidence-gather.ts';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { changedFiles, runCommand, snapshotTests, testChanges } from '../evidence-gather.ts';
 
 const matrix = loadMatrix();
 const row = (id: string) => matrix.assignments.find((a) => a.id === id)!;
@@ -137,6 +140,29 @@ describe('돌지 못한 명령 (D-046)', () => {
     assert.match(missing.contradictions[0] ?? '', /`before:no_such_cmd` 가 실행되지 못했다 \(exit 127/);
     assert.equal(outcomeOf(true, missing), 'rework');
     assert.match(collect(row('R01'), [cmd('slow', -1)]).contradictions[0] ?? '', /시그널·시간 초과/);
+  });
+});
+
+describe('기존 테스트 약화 (D-047)', () => {
+  it('줄 추가·새 파일은 허용, 줄 변경·삭제·파일 삭제는 약화다 — 약화면 rework', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-tests-'));
+    mkdirSync(path.join(dir, 't'));
+    const put = (f: string, s: string) => writeFileSync(path.join(dir, 't', f), s, 'utf8');
+    put('keep.test.ts', 'a\nb\n');
+    put('grow.test.ts', 'a\nb\n');
+    put('edit.test.ts', 'a\nb\n');
+    put('gone.test.ts', 'a\n');
+    const globs = ['t/*.test.ts'];
+    const before = snapshotTests(globs, dir);
+    put('grow.test.ts', 'a\nx\nb\ny\n');
+    put('edit.test.ts', 'a\nB\n');
+    rmSync(path.join(dir, 't', 'gone.test.ts'));
+    put('new.test.ts', 'z\n');
+    const e = testChanges(before, globs, dir);
+    assert.deepEqual(e.added, ['`t/grow.test.ts` +2줄', '`t/new.test.ts` 새 파일']);
+    assert.deepEqual(e.weakened, ['`t/edit.test.ts` 기존 줄이 바뀌거나 지워졌다', '`t/gone.test.ts` 가 지워졌다']);
+    assert.equal(outcomeOf(true, collect(row('R01'), [cmd('npm test', 0), e])), 'rework');
+    assert.equal(outcomeOf(true, collect(row('R01'), [cmd('npm test', 0), { ...e, weakened: [] }])), 'ok', '추가만이면 완료를 막지 않는다.');
   });
 });
 

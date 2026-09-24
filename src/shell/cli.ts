@@ -20,11 +20,11 @@ import { storeRun } from '../core/run-store.ts';
 import { reportError, reportNotice } from '../core/report.ts';
 import { FAILING_PHASES, collect, contradiction, notRun, outcomeOf, type Evidence } from '../core/evidence.ts';
 import { readUnclassified, recordUnclassified, suggestRows } from '../core/unclassified.ts';
-import { defaultVerify } from '../data/verify.ts';
+import { declaredTests, defaultVerify } from '../data/verify.ts';
 import { depStatus } from './deps.ts';
 import { parseVerdict, reviewPrompt, runDuo } from '../core/duo.ts';
 import { Budget } from '../core/budget.ts';
-import { changedFiles, loadEvidenceFile, runCommand } from '../core/evidence-gather.ts';
+import { changedFiles, loadEvidenceFile, runCommand, snapshotTests, testChanges, type TestSnapshot } from '../core/evidence-gather.ts';
 import { GATE_CHECKS, parseGateCheck, type GateSignals } from '../core/gatekeeper.ts';
 import { routeWithFallback } from '../core/pipeline.ts';
 import type { Effort } from '../data/matrix.ts';
@@ -347,6 +347,17 @@ async function main(): Promise<void> {
       }
       if (red.length > 0) process.stderr.write('       --fix-red-baseline — 기존 실패까지 고치는 것을 작업 범위로 둔다.\n');
     }
+    // D-047: 선언된 기존 테스트는 줄 추가만 허용한다 — 게이트를 통과시키려는 약화를 막는다.
+    const loopTestGlobs = declaredTests();
+    let loopTestsBefore: TestSnapshot | undefined;
+    if (args.write) {
+      if (loopTestGlobs.length > 0) {
+        loopTestsBefore = snapshotTests(loopTestGlobs);
+        process.stderr.write(`검증   기존 테스트(${loopTestGlobs.join(' · ')})는 줄 추가만 허용 — 바뀌거나 지워지면 FAIL\n`);
+      } else {
+        process.stderr.write('검증   테스트 경로 선언이 없다(verify.json tests) — 기존 테스트 약화를 막지 않는다\n');
+      }
+    }
     process.stderr.write('\n');
     // reviewer 가 죽으면 망가진 엔진에 primary 를 반복해 태우지 않고 사람에게 올린다 (D-036).
     // primary 가 죽은 경우는 Core 가 채점 없이 올린다 (D-039).
@@ -389,16 +400,27 @@ async function main(): Promise<void> {
               reviewerSkipped: true,
             };
           }
+          const tests = loopTestsBefore ? testChanges(loopTestsBefore, loopTestGlobs) : undefined;
+          const weakened = tests?.weakened ?? [];
+          const addedNote = tests && tests.added.length > 0 ? ` · 테스트 추가(허용): ${tests.added.join(', ')}` : '';
           // 명령 실패로 FAIL 이 이미 정해졌으면 reviewer 를 돌리지 않는다 — 사이클당 약 24만 토큰(D-036 실측)을 아낀다 (D-041).
           // 다음 사이클 지적은 명령 출력만으로 충분하다: 무엇이 깨졌는지가 기계적으로 나와 있다.
-          if (failed.length > 0) {
+          if (failed.length > 0 || weakened.length > 0) {
             const failedBlock = failed.map((c) => `$ ${cmdLabel(c)} → exit ${c.exitCode}\n${c.output.slice(-1500)}`).join('\n\n');
+            // 약화를 앞에 둔다 — 4000자 자르기에 먼저 잘리지 않게, 그리고 "테스트를 고쳐 통과" 가 답이 아님을 먼저 말한다.
+            const weakBlock = weakened.length > 0
+              ? `기존 테스트를 약하게 만들지 말고 코드를 고쳐라 (줄 추가만 허용):\n${weakened.map((w) => `- ${w}`).join('\n')}\n\n`
+              : '';
             return {
               passed: false,
               verification:
-                `reviewer ${plan.slots.reviewer.label} 생략 — 검증 명령 실패` +
-                ` · 검증 명령 ${ran.map((c) => `\`${cmdLabel(c)}\` exit=${c.exitCode}`).join(', ')}`,
-              reason: `Core 가 실행한 검증 명령이 실패했다:\n${failedBlock}`.slice(0, 4000),
+                `reviewer ${plan.slots.reviewer.label} 생략 — ` +
+                [weakened.length > 0 ? `기존 테스트 약화: ${weakened.join(', ')}` : '', failed.length > 0 ? '검증 명령 실패' : '']
+                  .filter(Boolean)
+                  .join(' · ') +
+                (ran.length > 0 ? ` · 검증 명령 ${ran.map((c) => `\`${cmdLabel(c)}\` exit=${c.exitCode}`).join(', ')}` : '') +
+                addedNote,
+              reason: `${weakBlock}${failedBlock ? `Core 가 실행한 검증 명령이 실패했다:\n${failedBlock}` : ''}`.slice(0, 4000),
               reviewerSkipped: true,
             };
           }
@@ -415,7 +437,8 @@ async function main(): Promise<void> {
                 ? ` · 검증 명령 ${ran.map((c) => `\`${cmdLabel(c)}\` exit=${c.exitCode}`).join(', ')}`
                 : !args.write && verifyCmds.length > 0
                   ? ' · 테스트 미실행(읽기 전용)'
-                  : ''),
+                  : '') +
+              addedNote,
             ...(passed || !check.ok ? {} : { reason: check.text.slice(0, 4000) }),
             cost: check,
           };
@@ -474,6 +497,9 @@ async function main(): Promise<void> {
 
   // **두 슬롯을 실제로 돌린다** (D-009). primary 만 돌리면 이 제품은 단일 엔진 선택기다.
   // 분류 폴백이 이미 과금한 같은 budget 을 그대로 쓴다 — 합산이다 (D-034).
+  // 기존 테스트의 작업 전 내용 — 쓰기일 때만 바뀔 수 있다 (D-047).
+  const testGlobs = declaredTests();
+  const testsBefore = args.write && testGlobs.length > 0 ? snapshotTests(testGlobs) : undefined;
   const duo = await runDuo(matrix, plan, execute, args.task, budget, { skipReviewer: args.skipReviewer });
   const run = {
     outcome: duo.primary.ok ? ('ok' as const) : ('error' as const),
@@ -531,6 +557,8 @@ async function main(): Promise<void> {
   const evidence: Evidence[] = [...duo.evidence];
   for (const v of verify) evidence.push(runCommand(v.cmd, process.cwd(), v.phase));
   if (verify.length > 0) evidence.push(changedFiles());
+  const tests = testsBefore ? testChanges(testsBefore, testGlobs) : undefined;
+  if (tests) evidence.push(tests);
   if (args.evidenceFile) {
     try {
       evidence.push(...loadEvidenceFile(args.evidenceFile));
@@ -548,6 +576,7 @@ async function main(): Promise<void> {
       ...report.missing.map((m) => `       - 없음: ${m}`),
       ...report.rejected.map((r) => `       ! 거절(${r.evidence.kind}): ${r.why}`),
       ...report.contradictions.map((c) => `       ✗ 불일치: ${c}`),
+      ...(tests && tests.added.length > 0 ? [`       + 테스트 추가(허용): ${tests.added.join(' · ')}`] : []),
     ].join('\n') + '\n',
   );
 

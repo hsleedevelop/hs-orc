@@ -344,7 +344,7 @@ R06 `reproduce`/`fix`/`regress` 단계 표기 지원), 변경 파일은 git 에�
 증거가 모였을 때만 결정 로그 2차 줄의 `outcome` 이 `ok` 가 된다. 아니면 `unverified` 다.
 단, 모양이 맞아도 **나쁜 결과를 말하는 증거**가 하나라도 있으면 `rework` 다 (D-043) — phase 없는 명령과
 `after`·`fix`·`regress` 는 exit 0 을, `before`·`reproduce` 는 exit ≠ 0 을 기대하고(위 표 5·6행의 "실패"·"통과"),
-reviewer 판정 `FAIL` 도 여기에 든다. 판정 순서는 실행 실패(`wrong`) → 나쁜 결과(`rework`) → 증거 충족(`ok`) → 그 밖(`unverified`).
+reviewer 판정 `FAIL` 도, `verify.json` 의 `tests` 로 선언된 **기존 테스트가 약해진 것**(줄이 바뀌거나 지워짐·파일 삭제 — 줄 추가는 허용, D-047)도 여기에 든다. 판정 순서는 실행 실패(`wrong`) → 나쁜 결과(`rework`) → 증거 충족(`ok`) → 그 밖(`unverified`).
 
 행별 **기본 검증 명령**은 `data/verify.json`(수기)에 프로젝트가 선언한다 — 제품은 추론하지 않는다.
 `default` 와 행 id 선언을 합치고 `--verify` 와 다시 합친다. **선언이 없으면 빈 배열이다**:

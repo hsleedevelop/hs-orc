@@ -4,6 +4,10 @@
   "$example": { "default": ["npm run lint"], "R01": ["npm test"], "R05": ["before:npm test", "after:npm test"] },
   "$declared": "아래 값은 이 저장소(hs-orchestrator)의 선언이다. 다른 프로젝트에 설치하면 그 프로젝트가 자기 명령을 적는다.",
   "$empty": "기본값을 비워 두는 것이 기본값이다. 선언하지 않은 행은 --verify 로만 증거가 들어오고, 증거가 없으면 outcome 은 unverified 로 남는다.",
+  "$tests": "기존 테스트로 지킬 경로(glob, cwd 기준). 선언된 파일은 줄 추가만 허용하고 바뀌거나 지워지면 완료가 아니다(D-047). 비우면 보지 않는다.",
+  "tests": [
+    "src/**/__tests__/**/*.ts"
+  ],
   "default": [],
   "R01": [
     "npm test"
