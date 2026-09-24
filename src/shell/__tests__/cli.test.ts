@@ -352,7 +352,7 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     assert.match(r.err, /중단 {3}goal-reached · 1회/);
   });
 
-  it('phase 명령은 실패가 정상인 단계라 게이트(기준선·강제 FAIL)에서 빠지고 결과만 싣는다 (D-042)', () => {
+  it('before·reproduce 는 기준선(변경 전)에서 한 번 돌고, 재현되면 그 결과를 reviewer 에 싣는다 (D-045)', () => {
     reset();
     const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', 'before:echo RED_BEFORE; exit 1'], {
       PATH: fakeDir,
@@ -360,10 +360,32 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     });
     assert.equal(r.code, 0, r.err);
     assert.match(r.err, /중단 {3}goal-reached · 1회/);
-    assert.doesNotMatch(r.err, /기준선/);
-    assert.match(r.err, /phase 명령뿐이라 게이트는 없다/, '게이트가 없는데 "실패하면 FAIL" 이라고 안내했다.');
-    assert.match(r.err, /`before:echo RED_BEFORE; exit 1` exit=1/);
-    assert.match(readFileSync(codexArgs, 'utf8'), /before:echo RED_BEFORE[\s\S]*exit=1/);
+    assert.match(r.err, /변경 전\(기준선\) 1회: before:echo RED_BEFORE; exit 1 — 실패해야 한다/);
+    assert.match(r.err, /기준선 `before:echo RED_BEFORE; exit 1` exit=1/);
+    assert.match(readFileSync(codexArgs, 'utf8'), /before:echo RED_BEFORE; exit 1 \(기준선 — 변경 전\)[\s\S]*exit=1[\s\S]*RED_BEFORE/);
+  });
+
+  it('before 가 변경 전에 통과하면 재현되지 않은 것이다 — --fix-red-baseline 으로도 넘기지 않고 엔진 없이 올린다 (D-045)', () => {
+    reset();
+    const r = cli(
+      ['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--fix-red-baseline', '--verify', 'before:echo NOT_RED'],
+      { PATH: fakeDir },
+    );
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /중단 {3}재현되지 않는다[\s\S]*NOT_RED/);
+    assert.equal(existsSync(claudeArgs), false, '재현되지 않는 버그에 primary 를 태웠다.');
+  });
+
+  it('after 는 매 사이클 게이트다 — 실패하면 reviewer 없이 FAIL 로 재시도하고, 기준선에서는 보지 않는다 (D-045)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', `after:${verifyFailingOn(1)}`], {
+      PATH: fakeDir,
+      REVIEWER_PASS: '1',
+    });
+    assert.equal(r.code, 0, r.err);
+    assert.doesNotMatch(r.err, /^기준선/m, 'after 는 변경 전에 실패하는 것이 정상이다 — 기준선에서 돌리면 안 된다.');
+    assert.match(r.err, /reviewer Astra 생략 — 검증 명령 실패 · 검증 명령 `after:.*` exit=1/);
+    assert.match(r.err, /중단 {3}goal-reached · 2회/);
   });
 
   it('--fix-red-baseline 은 --mode loop --write 밖에서 조용히 무시되지 않고 던진다 (D-042)', () => {
