@@ -388,6 +388,38 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     assert.match(r.err, /중단 {3}goal-reached · 2회/);
   });
 
+  it('기준선 명령이 돌지 못하면(127) 테스트 실패가 아니라 환경 문제로 올린다 — --fix-red-baseline 으로도 못 넘긴다 (D-046)', () => {
+    reset();
+    const r = cli(
+      ['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--fix-red-baseline', '--verify', 'no_such_cmd_xyz'],
+      { PATH: fakeDir },
+    );
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /중단 {3}검증 명령을 실행할 수 없다 — 테스트 실패가 아니라 환경 문제다/);
+    assert.match(r.err, /exit 127 \(명령을 찾지 못했거나 실행할 수 없다\)/);
+    assert.equal(existsSync(claudeArgs), false);
+  });
+
+  it('before 가 127 이면 재현이 아니다 — 환경 문제로 올리고 엔진을 띄우지 않는다 (D-046)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', 'before:no_such_cmd_xyz'], { PATH: fakeDir });
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /중단 {3}검증 명령을 실행할 수 없다/);
+    assert.equal(existsSync(claudeArgs), false, '없는 명령의 127 을 "재현됨" 으로 읽고 primary 를 태웠다.');
+  });
+
+  it('사이클 중 검증 명령이 돌지 못하면 재시도하지 않고 사람에게 올린다 — primary 는 PATH 를 고칠 수 없다 (D-046)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', 'after:no_such_cmd_xyz'], {
+      PATH: fakeDir,
+      REVIEWER_PASS: '1',
+    });
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /reviewer Astra 생략 — 검증 명령을 실행할 수 없다\(환경\)/);
+    assert.match(r.err, /중단 {3}escalated · 1회/);
+    assert.equal(existsSync(codexArgs), false, '돌지 못한 검증에 reviewer 를 태웠다.');
+  });
+
   it('--fix-red-baseline 은 --mode loop --write 밖에서 조용히 무시되지 않고 던진다 (D-042)', () => {
     const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--fix-red-baseline'], NO_PATH);
     assert.notEqual(r.code, 0);
