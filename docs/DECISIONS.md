@@ -867,6 +867,13 @@ CLI 의 loop 는 `recover: () => 'abort'` 라 **1사이클짜리**였다 — PAS
 - 상한은 사이클 **시작 전**에만 본다: 40만 상한을 1사이클로 넘었다(450,679). 기본 200만이면 4사이클 뒤 180만 → 5사이클째가 시작돼 약 225만(≈12% 초과)에서 멈춘다. "약 5~6사이클" 은 **최대 5사이클**로 읽는다.
 - 1사이클에서 PASS(`goal-reached · 1회`) — 마지막 줄 판정은 파싱됐다. **FAIL → 지적 주입 → 2사이클의 효과는 측정하지 못했다.** reviewer 는 `-p` 권한 거절로 `tsc`·테스트를 돌리지 못한 채, 실패하는 테스트가 있는데도 "모든 테스트가 동작한다" 는 근거로 PASS 했다 — 읽기 전용 reviewer 가 "기존 test 실행" 기준을 검증하지 못한다.
 
+**critique 경로 실측** (2026-09-24, n=1, 통제 측정): 테스트는 통과하고 reviewer 가 FAIL 인 경로 — 지적(reviewer 본문)이 다음 사이클에 실리는 D-036 의 본래 경로다. 실제 reviewer 로는 유도가 어렵다(과제에 적으면 primary 가 1사이클에 해 버리고, Haiku 는 실패 테스트도 놓쳤다). 그래서 **1사이클 reviewer 만** PATH shim 이 고정 지적 + `FAIL` 을 돌려주고(엔진 0), primary(codex Luna·medium)는 두 사이클 모두, 2사이클 reviewer(Haiku·low)는 **진짜**다. 스크래치 저장소를 green(swap 정규화 적용)으로 두고 `"clamp.ts 의 JSDoc 주석을 정리하라." --task R01 --mode loop --run --write --max-iterations 2`. 합성 지적은 과제에 없는 요구다 — "value 가 NaN 이면 lo 를 반환해야 한다". shim 이 codex 호출마다 `git diff` 를 떠 사이클별로 비교했다.
+- 1사이클: codex **307,832** — "동작 코드는 건드리지 않고 JSDoc 만" 정리, diff 에 NaN 0건. `npm test` exit=0 이라 D-041 생략 없이 reviewer 경로 → 합성 FAIL.
+- 2사이클: codex 321,918 + Haiku 197,253(실측 $0.090) — 주입된 지적을 받고 `if (Number.isNaN(value)) return lo;` 와 JSDoc 문구를 추가 → `npm test` exit=0 → Haiku PASS(파싱됨) → `goal-reached · 2회`.
+- 합계 827,003 = CLI `누적` 줄(합성 호출은 usage 0·$0 로 보고해 "실측" 에 1회 섞였다). 1사이클 reviewer 가 진짜였다면 약 15만~24만 더 — 약 100만 안팎(추정).
+- **지적이 행동을 바꿨다**: 사용자 문구가 같고 주입된 지적만 달랐는데 2사이클이 과제 밖 요구를 구현했다. 사이클별 diff 스냅샷이 대조군 역할을 해 D-041 실측보다 근거가 강하다. 진짜 reviewer 가 그런 지적을 **만들어 내는지**는 측정하지 않았다.
+- **관찰 — 범위가 또 넓어졌다**: 2사이클 codex 가 `clamp.test.ts` 에 테스트를 1개 **추가**했다. R01 운영 기준은 "기존 test 만 실행" 인데 게이트도 reviewer(PASS)도 잡지 않았다. 테스트 파일 변경을 막을지는 미결이다.
+
 **기각**
 - *L1 abort 유지 + 문서화* — loop 가 pipeline(실행 + 리뷰 1회)과 사실상 같아진다.
 - *L2 단독* — 사유 없는 재시도는 같은 실수를 반복하며 토큰만 쓴다.
