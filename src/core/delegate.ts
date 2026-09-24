@@ -58,8 +58,15 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
   appendDecision(decision);
 
   // **두 슬롯을 실제로 돌린다** (D-009) — primary 만 돌리면 단일 엔진 선택기다.
-  const duo = await runDuo(matrix, plan, input.execute, input.prompt, budget,
-    input.resumePrimary !== undefined ? { resumePrimary: input.resumePrimary } : {});
+  let duo;
+  try {
+    duo = await runDuo(matrix, plan, input.execute, input.prompt, budget,
+      input.resumePrimary !== undefined ? { resumePrimary: input.resumePrimary } : {});
+  } catch (error) {
+    // 1차 줄을 pending 으로 버려두지 않는다 — 실행을 시작했고 끝나지 못했다.
+    appendDecision(secondLine(decision, 'wrong', `실행 중 예외: ${error instanceof Error ? error.message : String(error)}`));
+    throw error;
+  }
   const run = duo.primary;
   const charge = budget.charges.at(-1);
 

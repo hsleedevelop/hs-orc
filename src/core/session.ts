@@ -12,6 +12,8 @@ import type { AssignmentPlan } from './assign.ts';
 import type { Budget } from './budget.ts';
 import { buildSummaryPrompt, conductorSlot, directAnswer, nextSuggestion } from './conductor.ts';
 import { buildContext, type ContextLimits } from './context.ts';
+import { appendDecision } from './decision-log.ts';
+import { firstLine, unexecutedLine } from './decide.ts';
 import { delegate, type Delegated } from './delegate.ts';
 import { estimateUsd, type SlotExecutor } from './executor.ts';
 import type { Journal } from './journal.ts';
@@ -63,13 +65,16 @@ export class ConversationSession {
   private turn: number;
   private stateValue: SessionState = 'waiting_input';
   private pending: Pending | null = null;
+  /** 기록은 열 때 한 번 읽고 이후엔 append 와 함께 들고 있는다 — 메시지마다 JSONL 을 다시 읽지 않는다. */
+  private readonly log: TranscriptRecord[];
 
   constructor(deps: SessionDeps) {
     this.deps = deps;
     this.file = transcriptPath(deps.dir, deps.id);
     // 다시 열면 턴 번호를 이어 간다. 끝에 승인 안 된 배정이 남아 있어도 **되살리지 않는다** —
     // 그 사이 비용·폴더가 바뀌었을 수 있다. 화면은 그 카드를 보여주되 승인 버튼은 없다.
-    this.turn = readTranscript(this.file).records.reduce((max, r) => Math.max(max, r.turn), 0);
+    this.log = readTranscript(this.file).records;
+    this.turn = this.log.reduce((max, r) => Math.max(max, r.turn), 0);
   }
 
   get state(): SessionState {
@@ -90,7 +95,17 @@ export class ConversationSession {
   }
 
   records(): TranscriptRecord[] {
-    return readTranscript(this.file).records;
+    return [...this.log];
+  }
+
+  /**
+   * 위임 도중 앱이 끊겼다 — 승인 뒤에 결과도 오류도 없다. 화면은 "결과가 기록되지 않았다" 를 띄운다.
+   * 지금 돌고 있는 위임은 끊긴 것이 아니다.
+   */
+  get interrupted(): boolean {
+    if (this.stateValue === 'working') return false;
+    const last = this.log.at(-1);
+    return last?.kind === 'approval' && last.approved;
   }
 
   async send(message: string): Promise<TranscriptRecord[]> {
@@ -127,6 +142,7 @@ export class ConversationSession {
   private append(entry: TranscriptEntry): TranscriptRecord {
     const record = { ...entry, v: 1, at: (this.deps.now?.() ?? new Date()).toISOString(), turn: this.turn } as TranscriptRecord;
     appendRecord(this.file, record);
+    this.log.push(record);
     return record;
   }
 
@@ -221,6 +237,13 @@ export class ConversationSession {
     const { matrix, dir, budget, journal } = this.deps;
     const out = [this.append({ kind: 'approval', approved: true, write })];
     this.pending = null;
+    // answer()·summarize() 와 같은 규칙이다 — 멈출지 묻는 곳은 전부 limitReached() (D-030).
+    if (budget.limitReached()) {
+      this.stateValue = 'waiting_input';
+      out.push(this.append({ kind: 'error', text: `누적 상한에 닿아 위임을 시작하지 않는다 (${budget.summary()}).` }));
+      this.logUnexecuted(pending, 'blocked');
+      return out;
+    }
     this.stateValue = 'working';
     try {
       const ref = this.resumable(pending.plan, write);
@@ -290,9 +313,23 @@ export class ConversationSession {
 
   reject(): TranscriptRecord[] {
     this.require('blocked', '거절');
+    const pending = this.pending;
     this.pending = null;
     this.stateValue = 'waiting_input';
-    return [this.append({ kind: 'approval', approved: false, write: false })];
+    const out = [this.append({ kind: 'approval', approved: false, write: false })];
+    if (pending) this.logUnexecuted(pending, 'declined');
+    return out;
+  }
+
+  /**
+   * 제안했지만 실행되지 않은 배정도 결정 로그에 남긴다 (SPEC §8) — 1차 decided 와 2차 declined/blocked 를
+   * 같은 id 로. 1차 줄 모양은 위임과 같다 (`firstLine` + 세션 id).
+   */
+  private logUnexecuted(pending: Pending, status: 'declined' | 'blocked'): void {
+    const first = firstLine(this.deps.matrix, pending.plan, pending.title, pending.reason);
+    const decision = { ...first, note: `${first.note ?? ''} · session ${this.deps.id}` };
+    appendDecision(decision);
+    appendDecision(unexecutedLine(decision, status));
   }
 
   /**

@@ -63,6 +63,18 @@ export function firstLine(
   };
 }
 
+/**
+ * 실행되지 않은 결정의 2차 — 거절(`declined`)·차단(`blocked`). 실행 안 된 것에 결과가 있을 수 없으니
+ * `outcome` 은 `unverified`, `verified` 는 `-` 다 (라우터 `references/decision-log.md`).
+ */
+export function unexecutedLine(
+  first: DecisionRecord,
+  status: 'declined' | 'blocked',
+  now = new Date(),
+): DecisionRecord {
+  return { ...first, ts: now.toISOString(), status, outcome: 'unverified', verified: '-' };
+}
+
 /** 2차 — **같은 `id`** 로 append 한다. 갱신이 아니다. */
 export function secondLine(
   first: DecisionRecord,

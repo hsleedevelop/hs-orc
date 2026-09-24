@@ -226,6 +226,60 @@ describe('대화 세션 — 승인·결과 처리 (SPEC §6.4.4)', () => {
     assert.equal(d.calls.length, 0);
   });
 
+  it('거절하면 결정 로그에 decided·declined 두 줄을 같은 id 로 남긴다 (SPEC §8)', async () => {
+    const log = isolate();
+    const { session } = make(conductSpy().exec);
+    await session.send('이 타입 에러 고쳐줘');
+    session.reject();
+    const rows = readDecisions(log);
+    assert.deepEqual(rows.map((r) => r.status), ['decided', 'declined']);
+    assert.equal(rows[0]?.id, rows[1]?.id);
+    assert.equal(rows[1]?.outcome, 'unverified');
+    assert.match(rows[0]?.note ?? '', /session 0923-1200-aaa/);
+  });
+
+  it('누적 상한이면 승인해도 위임을 시작하지 않고 blocked 로 남긴다 (D-030)', async () => {
+    const log = isolate();
+    const d = delegateSpy();
+    const { session, budget } = make(conductSpy().exec, undefined, d.exec);
+    await session.send('이 타입 에러 고쳐줘');
+    budget.countTokens({ inputTokens: 2_000_000, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 });
+    const out = await session.approve();
+    assert.deepEqual(out.map((r) => r.kind), ['approval', 'error']);
+    assert.ok(out[1]?.kind === 'error' && /누적 상한/.test(out[1].text));
+    assert.equal(d.calls.length, 0);
+    assert.equal(session.state, 'waiting_input');
+    assert.deepEqual(readDecisions(log).map((r) => r.status), ['decided', 'blocked']);
+  });
+
+  it('위임이 던지면 에러를 남기고 1차 결정 줄을 pending 으로 버려두지 않는다', async () => {
+    const log = isolate();
+    const boom: SlotExecutor = () => Promise.reject(new Error('엔진 폭발'));
+    const { session } = make(conductSpy().exec, undefined, boom);
+    await session.send('이 타입 에러 고쳐줘');
+    const out = await session.approve();
+    const last = out.at(-1);
+    assert.ok(last?.kind === 'error' && /위임이 끝나지 못했다: 엔진 폭발/.test(last.text));
+    assert.equal(session.state, 'waiting_input');
+    const rows = readDecisions(log);
+    assert.deepEqual(rows.map((r) => [r.status, r.outcome]), [['decided', 'pending'], ['ran', 'wrong']]);
+    assert.equal(rows[0]?.id, rows[1]?.id);
+  });
+
+  it('위임 중 끊긴 기록을 다시 열면 결과가 기록되지 않았다고 알린다', async () => {
+    isolate();
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-'));
+    const hang: SlotExecutor = () => new Promise(() => {});
+    const { session } = make(conductSpy().exec, dir, hang);
+    await session.send('이 타입 에러 고쳐줘');
+    void session.approve();
+    assert.equal(session.interrupted, false, '돌고 있는 위임은 끊긴 것이 아니다');
+    const reopened = make(conductSpy().exec, dir).session;
+    assert.equal(reopened.interrupted, true);
+    await reopened.send('넌 누구니');
+    assert.equal(reopened.interrupted, false);
+  });
+
   it('지휘자에게 물으면 배정을 거절로 남기고 같은 메시지에 직접 답한다 — 새 턴을 만들지 않는다 (D-038)', async () => {
     const c = conductSpy();
     const d = delegateSpy();
