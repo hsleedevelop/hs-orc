@@ -258,8 +258,20 @@ async function main(): Promise<void> {
     const worst = Math.min(plan.cost.totalUsd * maxIterations, budgetUsd + plan.cost.totalUsd);
     process.stderr.write(
       `상한   최대 ${maxIterations}사이클 · 최악 $${worst.toFixed(2)}(추정, 상한 $${budgetUsd} 을 넘으면 다음 사이클을 시작하지 않는다)` +
-        ` · 토큰 ${tokenBudget} (0 = 없음)\n\n`,
+        ` · 토큰 ${tokenBudget} (0 = 없음)\n`,
     );
+    // D-040: reviewer 는 읽기 전용이라 테스트를 못 돌린다 — 선언된 검증 명령은 Core 가 돌린다(once 와 같은 선언).
+    // 읽기 전용이면 primary 의 diff 가 적용되지 않아 원본을 검사하게 되므로 돌리지 않고, 그렇다고 적는다.
+    const verifyCmds = [...defaultVerify(plan.assignment.id), ...args.verify];
+    const verifyList = verifyCmds.map((v) => v.cmd).join(' · ');
+    if (verifyCmds.length > 0) {
+      process.stderr.write(
+        args.write
+          ? `검증   매 사이클 primary 뒤에 Core 가 실행한다: ${verifyList} — 실패하면 reviewer 판정과 무관하게 FAIL\n`
+          : `검증   읽기 전용이라 검증 명령(${verifyList})을 실행하지 않는다 — PASS 는 테스트 미검증이다. 실행하려면 --write.\n`,
+      );
+    }
+    process.stderr.write('\n');
     // reviewer 가 죽으면 망가진 엔진에 primary 를 반복해 태우지 않고 사람에게 올린다 (D-036).
     // primary 가 죽은 경우는 Core 가 채점 없이 올린다 (D-039).
     let reviewerBroken = false;
@@ -276,15 +288,38 @@ async function main(): Promise<void> {
         // Evaluator 는 reviewer 슬롯이 돈다 (D-003). 형식·판정은 once 의 독립 리뷰와 같다 —
         // 마지막 줄 PASS/FAIL, 못 읽으면 unknown 이고 통과로 봐주지 않는다.
         evaluate: async (_ctx, output) => {
-          const check = await execute(plan.slots.reviewer, reviewPrompt(plan, args.task, output));
+          const ran = args.write
+            ? verifyCmds.map((v) => runCommand(v.cmd, process.cwd(), v.phase)).flatMap((e) => (e.kind === 'command' ? [e] : []))
+            : [];
+          const failed = ran.filter((c) => c.exitCode !== 0);
+          const checks =
+            ran.length > 0
+              ? ran.map((c) => `$ ${c.cmd}\nexit=${c.exitCode}\n${c.output.slice(-1500)}`).join('\n\n')
+              : verifyCmds.length > 0
+                ? `primary 의 변경은 작업 트리에 적용되지 않았고 검증 명령(${verifyList})도 실행되지 않았다. 테스트가 통과한다고 가정하지 마라.`
+                : undefined;
+          const check = await execute(plan.slots.reviewer, reviewPrompt(plan, args.task, output, checks));
           if (!check.ok) reviewerBroken = true;
           const verdict = check.ok ? parseVerdict(check.text) : 'unknown';
+          // 검증 명령이 실패하면 reviewer 가 PASS 라도 통과가 아니다 — 판정은 기계적이다 (SPEC §6.2).
+          const passed = verdict === 'pass' && failed.length === 0;
+          // 명령 실패를 앞에 둔다 — 4000자로 자를 때 먼저 잘리지 않게.
+          const failedBlock = failed.map((c) => `$ ${c.cmd} → exit ${c.exitCode}\n${c.output.slice(-1500)}`).join('\n\n');
           return {
-            passed: verdict === 'pass',
+            passed,
             verification:
               `reviewer ${plan.slots.reviewer.label} → ${verdict.toUpperCase()}` +
-              (check.ok ? '' : ` (실행 실패: ${check.text.slice(0, 80)})`),
-            ...(verdict === 'pass' || !check.ok ? {} : { reason: check.text.slice(0, 4000) }),
+              (check.ok ? '' : ` (실행 실패: ${check.text.slice(0, 80)})`) +
+              (ran.length > 0
+                ? ` · 검증 명령 ${ran.map((c) => `\`${c.cmd}\` exit=${c.exitCode}`).join(', ')}`
+                : verifyCmds.length > 0
+                  ? ' · 테스트 미실행(읽기 전용)'
+                  : ''),
+            ...(passed || !check.ok
+              ? {}
+              : {
+                  reason: `${failedBlock ? `Core 가 실행한 검증 명령이 실패했다:\n${failedBlock}\n\n` : ''}${check.text}`.slice(0, 4000),
+                }),
             cost: check,
           };
         },
