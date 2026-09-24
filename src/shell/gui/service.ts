@@ -91,6 +91,8 @@ export interface SessionView {
   readonly budget: string;
   /** 앱 전체 누적 — **표시만 한다, 상한 판정에 쓰지 않는다** (D-032 A2). 상한은 `budget`(세션 단위)이 건다. */
   readonly appBudget: string;
+  /** 위임 도중 끊긴 기록이다 — 승인 뒤 결과가 없다. 화면이 배너로 알린다. */
+  readonly interrupted: boolean;
 }
 
 export interface WorktreeState {
@@ -330,6 +332,7 @@ export class GuiService {
       broken: readTranscript(s.file).broken,
       budget: this.sessionBudget(s.dir, s.id).summary(),
       appBudget: this.appBudgetSummary(),
+      interrupted: s.interrupted,
     };
   }
 

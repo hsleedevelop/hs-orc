@@ -35,7 +35,7 @@ type Rec =
   | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string }
   | { kind: 'summary'; turn: number; text: string; next: string }
   | { kind: 'error'; turn: number; text: string };
-interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string }
+interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean }
 interface SessionSummary { id: string; dir: string; kind: SessionKind; lastAt: string; preview: string }
 
 interface Bridge {
@@ -288,7 +288,11 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
   const act = (p: Promise<SessionView>) => {
     setBusy(true);
     setError('');
-    p.then(onChange, (e: unknown) => setError(why(e))).finally(() => { setBusy(false); setSending(''); });
+    // 거절돼도 서비스 쪽 상태는 바뀌었을 수 있다 — 낡은 뷰(예: blocked 카드)를 남기지 않게 다시 받는다.
+    p.then(onChange, (e: unknown) => {
+      setError(why(e));
+      orc.convView().then(onChange, (e2: unknown) => setError(`${why(e)} · 다시 불러오지 못했다: ${why(e2)}`));
+    }).finally(() => { setBusy(false); setSending(''); });
   };
   const send = () => {
     const t = draft.trim();
@@ -388,6 +392,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       h('span', { className: 'dim mono' }, view.appBudget),
       h('button', { className: 'btn', onClick: props.onClose }, '세션 목록')),
     view.broken > 0 ? h('div', { className: 'banner error' }, `기록에 깨진 줄 ${view.broken}개 — 건너뛰고 보여준다`) : null,
+    view.interrupted ? h('div', { className: 'banner error' }, '승인한 위임의 결과가 기록되지 않았다 — 실행 중 앱이 끊겼다. 결정 로그 1차 줄만 남아 있을 수 있다.') : null,
     ...view.records.map(record),
     sending ? h('div', { className: 'bubble user dim' }, sending) : null,
     busy ? text(view.state === 'blocked' || last?.kind === 'plan' ? '실행 중…' : '생각 중…', 'dim') : null,
@@ -497,6 +502,8 @@ function App(): ReactElement {
           onClose: () => { orc.convClose().then(() => setConv(null), (e: unknown) => setError(why(e))); },
         })
       : h(SessionList, {
+          // 폴더가 바뀌면 목록을 새로 만든다 — 옛 폴더의 세션을 열면 폴더가 되돌아간다.
+          key: projects?.current.dir ?? '',
           // project 세션을 열면 서비스가 그 폴더로 옮긴다 (Task 8) — 프로젝트 바도 따라가야 폴더가 거짓말하지 않는다.
           onOpen: (v: SessionView) => { setConv(v); orc.projects().then(setProjects, (e: unknown) => setError(why(e))); },
           onError: setError,

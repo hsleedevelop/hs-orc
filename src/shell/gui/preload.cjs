@@ -2,8 +2,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('orc', {
-  plan: (payload) => ipcRenderer.invoke('plan', payload),
-  run: (payload) => ipcRenderer.invoke('run', payload),
   tasks: () => ipcRenderer.invoke('tasks'),
   projects: () => ipcRenderer.invoke('projects'),
   pickProject: () => ipcRenderer.invoke('project-pick'),

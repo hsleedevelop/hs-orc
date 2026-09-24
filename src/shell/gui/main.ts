@@ -11,7 +11,7 @@ import path from 'node:path';
 import { BrowserWindow, app, dialog, ipcMain } from 'electron';
 import { titleInfo } from '../tui/model.ts';
 import { claudeSessions, codexSessions, reviews } from '../integrations.ts';
-import { GuiService, type RunPayload } from './service.ts';
+import { GuiService } from './service.ts';
 import type { SessionKind } from '../../core/transcript.ts';
 
 const service = new GuiService();
@@ -37,11 +37,7 @@ function createWindow(): void {
   void window.loadFile(path.resolve(import.meta.dirname, 'renderer', 'index.html'));
 }
 
-ipcMain.handle('plan', (_e, payload: { task: string; write?: boolean; taskId?: string }) =>
-  service.plan(payload.task, { write: payload.write === true, ...(payload.taskId ? { taskId: payload.taskId } : {}) }),
-);
 ipcMain.handle('tasks', () => service.tasks());
-ipcMain.handle('run', (_e, payload: RunPayload) => service.run(payload));
 ipcMain.handle('projects', () => service.projects());
 ipcMain.handle('project-use', (_e, dir: string) => service.useProject(dir));
 /**
