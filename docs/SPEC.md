@@ -342,6 +342,9 @@ cursor  -p "<prompt>" --model gpt-5.6-sol-xhigh --output-format stream-json
 `--verify "[phase:]<명령>"` 은 명령을 실제로 돌려 exit code 를 받고(R05 `before`/`after`,
 R06 `reproduce`/`fix`/`regress` 단계 표기 지원), 변경 파일은 git 에서 읽는다 — 모델이 말한 목록을 믿지 않는다.
 증거가 모였을 때만 결정 로그 2차 줄의 `outcome` 이 `ok` 가 된다. 아니면 `unverified` 다.
+단, 모양이 맞아도 **나쁜 결과를 말하는 증거**가 하나라도 있으면 `rework` 다 (D-043) — phase 없는 명령과
+`after`·`fix`·`regress` 는 exit 0 을, `before`·`reproduce` 는 exit ≠ 0 을 기대하고(위 표 5·6행의 "실패"·"통과"),
+reviewer 판정 `FAIL` 도 여기에 든다. 판정 순서는 실행 실패(`wrong`) → 나쁜 결과(`rework`) → 증거 충족(`ok`) → 그 밖(`unverified`).
 
 행별 **기본 검증 명령**은 `data/verify.json`(수기)에 프로젝트가 선언한다 — 제품은 추론하지 않는다.
 `default` 와 행 id 선언을 합치고 `--verify` 와 다시 합친다. **선언이 없으면 빈 배열이다**:
@@ -439,7 +442,7 @@ user 메시지 append
 
 - 위임이 끝나면 `result` 를 append 한다 (결정 로그 2차와 같은 시점).
 - 지휘자(Haiku·low)가 요청·primary 출력(앞부분)·reviewer 판정·증거 요약을 받아 **3줄 이내 요약**을 낸다 → `summary` append.
-- **다음 제안은 코드가 계산한다.** outcome 이 `wrong`·`unverified` 이거나 판정이 `fail` 이면 사다리(`core/ladder.ts`)의 다음 단계를 제안에 넣는다 — 상향 판단을 모델에 넘기지 않는다(G1). 모델은 요약만 한다.
+- **다음 제안은 코드가 계산한다.** outcome 이 `wrong`·`rework`·`unverified` 이거나 판정이 `fail` 이면 사다리(`core/ladder.ts`)의 다음 단계를 제안에 넣는다 — 상향 판단을 모델에 넘기지 않는다(G1). 모델은 요약만 한다.
 - 다음 위임은 사용자가 승인해야 시작한다 (D-015).
 
 ## 7. TUI (v1)
@@ -492,6 +495,7 @@ v2 의 Run 폼은 세션 화면으로 대체한다. 탭을 옮겨도 세션 화�
 - 기본 경로는 라우터와 같은 `~/.claude/logs/delegation-router.jsonl`이고 `HS_ORC_DECISION_LOG`로 덮어쓴다. `note`에 `hs-orchestrator`를 넣어 사람이 쓴 줄과 구분한다.
 - `downshifted`/`branch`는 **AA 측정치로 판정한다**(§2.3). 매트릭스 모델은 벤더가 갈려 계층 이름만으로는 비교할 수 없다. 기준 세션 모델은 `HS_ORC_SESSION_MODEL`(기본 `fable`)이다.
 - 자동 증거 수집이 붙기 전까지 2차 줄의 `outcome`은 성공해도 **`unverified`다.** "성공했습니다"는 증거가 아니다(§5).
+- 2차 줄의 `rework` 는 "실행은 됐고, 증거가 완료가 아니라고 말한다" 다 — 기대와 다른 exit 또는 reviewer `FAIL` (§5, D-043). `unverified`(검증 안 함)·`wrong`(실행 실패)과 다르다.
 - 남기는 경우: 위임했을 때 / 티어를 내렸을 때 / 조건에 걸렸는데 일부러 안 내렸을 때 / 제안했지만 실행되지 않았을 때(거절·차단·무응답)
 - 남기지 않는 경우: 그냥 "직접"으로 간 기본 경로 — v2.1 의 **직접 답·지휘자 요약**이 여기다. 그 기록은 세션 jsonl 에만 있다 (§6.4.1).
 - v2.1: 1차 줄의 `note` 에 세션 id 를 넣어 결정 로그 ↔ 대화 기록을 잇는다.

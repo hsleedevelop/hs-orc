@@ -101,12 +101,42 @@ export function validate(evidence: Evidence): string | null {
 }
 
 export interface EvidenceReport {
-  /** 이것이 true 일 때만 완료다 (PRD G4). */
+  /** 요구 증거가 모였는가 (PRD G4). 완료는 `contradictions` 도 비어야 한다 — `outcomeOf` (D-043). */
   readonly satisfied: boolean;
+  /** 모양은 맞지만 **나쁜 결과**를 말하는 증거 — 기대와 다른 exit, reviewer FAIL (D-043). */
+  readonly contradictions: readonly string[];
   readonly missing: readonly string[];
   readonly rejected: readonly Rejection[];
   readonly accepted: readonly Evidence[];
   readonly summary: string;
+}
+
+/** 실패가 **정상**인 phase (SPEC §5: R05 "수정 전 실패 로그", R06 "실패 재현"). 나머지와 phase 없는 명령은 exit 0 을 기대한다. */
+export const FAILING_PHASES: ReadonlySet<string> = new Set(['before', 'reproduce']);
+
+/**
+ * 증거가 완료가 아니라고 **말하는가** (D-043). 모양 검사(`validate`)와 별개다 — 실패한 테스트도
+ * 모양이 맞는 증거이고, R05 `before` 처럼 실패해야 하는 단계도 있다. reviewer `unknown` 은 증거가
+ * 아예 생기지 않으므로 여기 오지 않는다 (pass 로도 fail 로도 치지 않는다).
+ */
+export function contradiction(evidence: Evidence): string | null {
+  if (evidence.kind === 'command') {
+    const expectFail = evidence.phase !== undefined && FAILING_PHASES.has(evidence.phase);
+    if ((evidence.exitCode !== 0) === expectFail) return null;
+    const label = evidence.phase ? `${evidence.phase}:${evidence.cmd}` : evidence.cmd;
+    return expectFail ? `\`${label}\` 는 실패해야 하는 단계인데 exit 0` : `\`${label}\` exit=${evidence.exitCode}`;
+  }
+  if (evidence.kind === 'review' && evidence.verdict === 'fail') return `reviewer ${evidence.reviewer} FAIL`;
+  return null;
+}
+
+/** 실행이 끝난 결정의 outcome. 순서가 판정이다: 실행 실패 → 나쁜 결과의 증거 → 증거 충족 (D-043). */
+export type SettledOutcome = 'ok' | 'rework' | 'unverified' | 'wrong';
+
+export function outcomeOf(runOk: boolean, report: EvidenceReport): SettledOutcome {
+  if (!runOk) return 'wrong';
+  if (report.contradictions.length > 0) return 'rework';
+  return report.satisfied ? 'ok' : 'unverified';
 }
 
 export function collect(assignment: Assignment, items: readonly Evidence[]): EvidenceReport {
@@ -140,13 +170,17 @@ export function collect(assignment: Assignment, items: readonly Evidence[]): Evi
   }
 
   const satisfied = missing.length === 0 && requirements.length > 0;
+  const contradictions = accepted.map(contradiction).filter((c): c is string => c !== null);
   return {
     satisfied,
+    contradictions,
     missing,
     rejected,
     accepted,
-    summary: satisfied
-      ? `증거 충족 — ${assignment.operatingCriterion}`
-      : `증거 미충족 (${missing.length}건)${rejected.length ? ` · 거절 ${rejected.length}건` : ''}`,
+    summary: contradictions.length > 0
+      ? `검증 결과 완료가 아니다 — ${contradictions.join(' · ')}`
+      : satisfied
+        ? `증거 충족 — ${assignment.operatingCriterion}`
+        : `증거 미충족 (${missing.length}건)${rejected.length ? ` · 거절 ${rejected.length}건` : ''}`,
   };
 }

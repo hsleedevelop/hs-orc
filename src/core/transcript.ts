@@ -9,6 +9,7 @@ import { appendFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { newDecisionId } from './decision-log.ts';
+import type { SettledOutcome } from './evidence.ts';
 
 export type SessionKind = 'project' | 'scratch';
 /** AO 어휘 (D-031). `blocked` 는 위임 승인 대기다 — 그 상태에서는 아무것도 자동으로 진행하지 않는다. */
@@ -47,7 +48,7 @@ export type TranscriptEntry =
   | { readonly kind: 'approval'; readonly approved: boolean; readonly write: boolean }
   | {
       readonly kind: 'result';
-      readonly outcome: 'ok' | 'unverified' | 'wrong';
+      readonly outcome: SettledOutcome;
       readonly verdict: 'pass' | 'fail' | 'unknown';
       readonly text: string;
       readonly review: string;

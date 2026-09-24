@@ -59,7 +59,7 @@ describe('지휘자 — 결과 처리 (SPEC §6.4.4)', () => {
   it('요약 프롬프트는 날조 금지와 판정·증거·outcome 을 싣는다', () => {
     const prompt = buildSummaryPrompt('타입 고쳐줘', {
       text: '고쳤다', verdict: 'pass', outcome: 'unverified',
-      report: { satisfied: false, missing: [], rejected: [], accepted: [], summary: '증거 0/1' },
+      report: { satisfied: false, contradictions: [], missing: [], rejected: [], accepted: [], summary: '증거 0/1' },
     });
     assert.ok(prompt.startsWith('아래 위임 결과'));
     assert.match(prompt, /지어내지 않는다/);

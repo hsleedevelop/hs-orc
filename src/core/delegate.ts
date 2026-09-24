@@ -11,7 +11,7 @@ import type { Budget } from './budget.ts';
 import { appendDecision } from './decision-log.ts';
 import { firstLine, secondLine } from './decide.ts';
 import { runDuo, type Verdict } from './duo.ts';
-import { collect, type Evidence, type EvidenceReport } from './evidence.ts';
+import { collect, outcomeOf, type Evidence, type EvidenceReport, type SettledOutcome } from './evidence.ts';
 import { changedFiles, runCommand } from './evidence-gather.ts';
 import type { SlotExecutor } from './executor.ts';
 import type { Journal } from './journal.ts';
@@ -41,7 +41,7 @@ export interface DelegateInput {
 export interface Delegated {
   readonly ok: boolean;
   readonly text: string;
-  readonly outcome: 'ok' | 'unverified' | 'wrong';
+  readonly outcome: SettledOutcome;
   readonly report: EvidenceReport;
   readonly verdict: Verdict;
   readonly review?: string;
@@ -94,13 +94,13 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
     outcome: run.ok ? 'ok' : 'failed',
     evidence: `운영 기준: ${plan.assignment.operatingCriterion}`,
     change: run.text.slice(0, 200),
-    // 증거가 모였을 때만 채운다. 빈 값은 "통과"가 아니라 "검증 안 함"이다.
-    verification: report.satisfied ? report.summary : '',
+    // 증거가 모였거나 나쁜 결과를 말할 때만 채운다. 빈 값은 "통과"가 아니라 "검증 안 함"이다.
+    verification: report.satisfied || report.contradictions.length > 0 ? report.summary : '',
     ...(charge ? { charge } : {}),
   });
 
-  // 2차 — 같은 id 로 append. 증거가 모였을 때만 ok 다 (SPEC §5).
-  const outcome = !run.ok ? 'wrong' : report.satisfied ? 'ok' : 'unverified';
+  // 2차 — 같은 id 로 append. 증거가 모이고 나쁜 결과가 없을 때만 ok 다 (SPEC §5, D-043).
+  const outcome = outcomeOf(run.ok, report);
   appendDecision(secondLine(decision, outcome, [stored && `원시 로그 ${stored}`, report.summary].filter(Boolean).join(' · ')));
 
   return {

@@ -18,7 +18,7 @@ import { appendDecision, decisionLogPath } from '../core/decision-log.ts';
 import { firstLine, secondLine } from '../core/decide.ts';
 import { storeRun } from '../core/run-store.ts';
 import { reportError, reportNotice } from '../core/report.ts';
-import { collect, type Evidence } from '../core/evidence.ts';
+import { collect, outcomeOf, type Evidence } from '../core/evidence.ts';
 import { readUnclassified, recordUnclassified, suggestRows } from '../core/unclassified.ts';
 import { defaultVerify } from '../data/verify.ts';
 import { depStatus } from './deps.ts';
@@ -486,12 +486,13 @@ async function main(): Promise<void> {
       ...report.accepted.map((e) => `       + ${e.kind}${e.kind === 'command' ? ` \`${e.cmd}\` exit=${e.exitCode}` : ''}`),
       ...report.missing.map((m) => `       - 없음: ${m}`),
       ...report.rejected.map((r) => `       ! 거절(${r.evidence.kind}): ${r.why}`),
+      ...report.contradictions.map((c) => `       ✗ 불일치: ${c}`),
     ].join('\n') + '\n',
   );
 
   // 2차 결정 로그 — **같은 id 로 append** 한다. 갱신이 아니다.
-  // 증거가 모였을 때만 ok 다. "성공했습니다"는 증거가 아니다 (SPEC §5).
-  const outcome = run.outcome !== 'ok' ? 'wrong' : report.satisfied ? 'ok' : 'unverified';
+  // 증거가 모이고 나쁜 결과(기대와 다른 exit·reviewer FAIL)가 없을 때만 ok 다 (SPEC §5, D-043).
+  const outcome = outcomeOf(run.outcome === 'ok', report);
   appendDecision(
     secondLine(
       decision,
@@ -499,7 +500,11 @@ async function main(): Promise<void> {
       [
         stored ? `원시 로그 ${stored}` : '',
         `운영 기준: ${plan.assignment.operatingCriterion}`,
-        report.satisfied ? `증거 ${report.accepted.length}건 충족` : `증거 미충족: ${report.missing.join(' / ')}`,
+        report.contradictions.length > 0
+          ? `불일치: ${report.contradictions.join(' / ')}`
+          : report.satisfied
+            ? `증거 ${report.accepted.length}건 충족`
+            : `증거 미충족: ${report.missing.join(' / ')}`,
       ]
         .filter(Boolean)
         .join(' · '),

@@ -9,6 +9,7 @@ import type { Engines } from '../data/engines.ts';
 import type { Matrix } from '../data/matrix.ts';
 import { resolveSlot, type ResolvedSlot } from './assign.ts';
 import type { Delegated } from './delegate.ts';
+import type { SettledOutcome } from './evidence.ts';
 import type { Verdict } from './duo.ts';
 import type { SlotExecutor, SlotRun } from './executor.ts';
 import { STAGE_LABEL, nextStage } from './ladder.ts';
@@ -95,7 +96,7 @@ export function buildSummaryPrompt(title: string, d: Pick<Delegated, 'text' | 'v
  * 다음 제안은 **코드가 계산한다** (SPEC §6.4.4) — 상향 판단을 모델에 넘기지 않는다 (G1).
  * v2.1 세션은 상향을 **실행하지 않으므로** 언제나 사다리의 첫 단계를 제안한다 (SPEC §2.4 순서).
  */
-export function nextSuggestion(outcome: 'ok' | 'unverified' | 'wrong', verdict: Verdict): string {
+export function nextSuggestion(outcome: SettledOutcome, verdict: Verdict): string {
   if (outcome === 'ok' && verdict !== 'fail') return '';
   const stage = nextStage([]);
   return stage ? `사다리 다음 단계: ${STAGE_LABEL[stage]} — 그 뒤에 다시 위임한다` : '';

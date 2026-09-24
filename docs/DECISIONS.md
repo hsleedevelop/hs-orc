@@ -1041,6 +1041,33 @@ D-041 실측에서 사용자는 "타입 오류**만**" 을 요청했지만 R01 �
 
 ---
 
+## D-043 — 나쁜 결과를 말하는 증거는 `ok` 가 아니라 `rework` 다 (B2)
+
+**배경**
+once(CLI)와 위임(GUI·TUI, `delegate.ts`)은 같은 식 `!run.ok ? 'wrong' : report.satisfied ? 'ok' : 'unverified'` 로 결정 로그 2차 outcome 을 정했다. 두 겹의 결함이 있었다.
+1. `validate` 는 명령 증거의 exit 가 정수인지만 본다 — `npm test` exit=1 도 R01 "기존 test 실행 결과" 로 충족돼 `ok` 가 됐다. R05·R06 은 SPEC §5 표가 "수정 전 **실패** / 수정 후 **통과**" 인데 코드는 phase 존재만 봤다.
+2. reviewer 판정이 outcome 에 들지 않았다 — R11 외 행은 review 증거를 요구하지 않아 reviewer FAIL 이어도 `ok`, R11 도 FAIL 리뷰를 "독립 리뷰 결과" 로 충족했다.
+결정 로그는 `/delegation-router` 의 하향 판단이 읽는다 — 거짓 `ok` 는 "내려도 됐다" 는 근거를 부풀린다(추론 — 라우터 집계는 이 저장소 밖이다). `Outcome` 에 정의만 있고 쓰지 않던 `rework` 가 정확히 이 상태다.
+
+**결정**
+1. `evidence.ts` 에 `contradiction(e)` — 모양 검사(`validate`)와 별개로 증거가 **나쁜 결과**를 말하는지 본다. phase 없는 명령과 `after`·`fix`·`regress`(및 그 밖의 phase)는 exit 0 을, `FAILING_PHASES`(`before`·`reproduce`)는 exit ≠ 0 을 기대한다. reviewer `fail` 도 나쁜 결과다. `unknown` 은 증거가 생기지 않으므로 판정에 쓰지 않는다.
+2. `collect` 는 `contradictions` 를 돌려주고, 있으면 요약이 `검증 결과 완료가 아니다 — …` 다. 실패한 증거를 **거절하지 않는다** — R05 `before` 처럼 실패가 증거인 단계가 있다.
+3. `outcomeOf(runOk, report)`: `wrong`(실행 실패) → `rework`(나쁜 결과) → `ok`(증거 충족) → `unverified`. CLI once 와 `delegate.ts` 가 이것 하나를 쓴다.
+4. outcome 타입을 `SettledOutcome`(`ok|rework|unverified|wrong`)으로 모은다 — delegate·conductor·transcript·GUI service. 다음 제안(`nextSuggestion`)은 `rework` 에도 사다리를 제안한다(`ok` 가 아니므로).
+5. CLI once 증거 출력에 `✗ 불일치: …` 줄, 2차 `verified` 에 `불일치: …` 를 남긴다. 위임 journal 의 검증 줄은 불일치가 있을 때도 채운다.
+
+**기각**
+- *A — 현상 유지 + `ok` 재정의* — `ok` 가 성공으로 읽히는 한 통계가 오염된다.
+- *B1 — exit 만 반영* — reviewer FAIL 을 계속 무시한다. loop(D-036)는 FAIL 을 완료로 보지 않는다.
+- *C — 실패한 명령을 증거에서 거절* — "증거 없음" 과 "실패의 증거" 가 섞이고, phase 를 모르면 R05·R06 이 영영 충족되지 않는다.
+
+**영향**
+같은 실행이 앞으로 `ok` 대신 `rework` 로 남는다 — 기존 로그 줄은 그대로라 전후 통계에 단절이 생긴다. 약한 reviewer 의 틀린 FAIL 도 `rework` 가 된다(보수적 방향). CLI once 의 exit code 는 바꾸지 않았다(실행 실패만 1) — `rework` 를 exit code 로 드러낼지는 별개다. loop 의 phase 처리(D-042: 게이트에서 제외)는 이 기대표를 아직 쓰지 않는다.
+
+**상태** 확정 — 2026-09-24 사용자 결정 (B2).
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |
