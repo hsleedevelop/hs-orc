@@ -131,6 +131,15 @@ describe('나쁜 결과의 증거는 완료가 아니다 (D-043)', () => {
   });
 });
 
+describe('돌지 못한 명령 (D-046)', () => {
+  it('126·127·-1 은 phase 와 무관하게 나쁜 결과다 — before 의 127 을 재현으로 읽지 않는다', () => {
+    const missing = collect(row('R05'), [cmd('no_such_cmd', 127, 'before'), cmd('t', 0, 'after')]);
+    assert.match(missing.contradictions[0] ?? '', /`before:no_such_cmd` 가 실행되지 못했다 \(exit 127/);
+    assert.equal(outcomeOf(true, missing), 'rework');
+    assert.match(collect(row('R01'), [cmd('slow', -1)]).contradictions[0] ?? '', /시그널·시간 초과/);
+  });
+});
+
 describe('기계적 수집', () => {
   it('명령을 실제로 돌려 exit code 를 받는다', () => {
     assert.deepEqual(

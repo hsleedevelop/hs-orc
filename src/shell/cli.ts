@@ -18,7 +18,7 @@ import { appendDecision, decisionLogPath } from '../core/decision-log.ts';
 import { firstLine, secondLine } from '../core/decide.ts';
 import { storeRun } from '../core/run-store.ts';
 import { reportError, reportNotice } from '../core/report.ts';
-import { FAILING_PHASES, collect, contradiction, outcomeOf, type Evidence } from '../core/evidence.ts';
+import { FAILING_PHASES, collect, contradiction, notRun, outcomeOf, type Evidence } from '../core/evidence.ts';
 import { readUnclassified, recordUnclassified, suggestRows } from '../core/unclassified.ts';
 import { defaultVerify } from '../data/verify.ts';
 import { depStatus } from './deps.ts';
@@ -300,6 +300,20 @@ async function main(): Promise<void> {
         .map((v) => runCommand(v.cmd, process.cwd(), v.phase))
         .flatMap((e) => (e.kind === 'command' ? [e] : []));
       process.stderr.write(`기준선 ${baseline.map((c) => `\`${cmdLabel(c)}\` exit=${c.exitCode}`).join(', ')}\n`);
+      // D-046: 돌지 못한 명령(126·127·시그널·시간 초과)은 환경 문제다 — 모델도 --fix-red-baseline 도 고치지 못한다.
+      const unrunnable = baseline.filter((c) => notRun(c.exitCode) !== null);
+      if (unrunnable.length > 0) {
+        process.stderr.write(
+          [
+            `중단   검증 명령을 실행할 수 없다 — 테스트 실패가 아니라 환경 문제다. 엔진을 띄우지 않았다.`,
+            ...unrunnable.map((c) => `$ ${cmdLabel(c)} → exit ${c.exitCode} (${notRun(c.exitCode)})\n${c.output.slice(-1500)}`),
+            `안내   PATH·설치·시간 제한을 확인한다.`,
+            '',
+          ].join('\n'),
+        );
+        process.exitCode = 1;
+        return;
+      }
       // D-045: 재현되지 않는 버그를 고치라고 시키는 것은 추측이다 — 우회 플래그 없이 사람에게 올린다.
       const notReproduced = baseline.filter((c) => c.phase !== undefined && contradiction(c) !== null);
       if (notReproduced.length > 0) {
@@ -337,6 +351,8 @@ async function main(): Promise<void> {
     // reviewer 가 죽으면 망가진 엔진에 primary 를 반복해 태우지 않고 사람에게 올린다 (D-036).
     // primary 가 죽은 경우는 Core 가 채점 없이 올린다 (D-039).
     let reviewerBroken = false;
+    // 사이클 중 검증 명령이 돌지 못하면 primary 가 고칠 수 없다 — 재시도로 상한까지 태우지 않고 올린다 (D-046).
+    let verifyBroken = false;
     const result = await runLoop(
       matrix,
       plan,
@@ -361,6 +377,18 @@ async function main(): Promise<void> {
             : verifyCmds.length > 0
               ? `primary 의 변경은 작업 트리에 적용되지 않았고 검증 명령(${verifyList})도 실행되지 않았다. 테스트가 통과한다고 가정하지 마라.`
               : undefined;
+          const unrunnable = ran.filter((c) => notRun(c.exitCode) !== null);
+          if (unrunnable.length > 0) {
+            verifyBroken = true;
+            return {
+              passed: false,
+              verification:
+                `reviewer ${plan.slots.reviewer.label} 생략 — 검증 명령을 실행할 수 없다(환경)` +
+                ` · ${unrunnable.map((c) => `\`${cmdLabel(c)}\` exit=${c.exitCode} (${notRun(c.exitCode)})`).join(', ')}`,
+              reason: unrunnable.map((c) => `$ ${cmdLabel(c)} → exit ${c.exitCode}\n${c.output.slice(-1500)}`).join('\n\n').slice(0, 4000),
+              reviewerSkipped: true,
+            };
+          }
           // 명령 실패로 FAIL 이 이미 정해졌으면 reviewer 를 돌리지 않는다 — 사이클당 약 24만 토큰(D-036 실측)을 아낀다 (D-041).
           // 다음 사이클 지적은 명령 출력만으로 충분하다: 무엇이 깨졌는지가 기계적으로 나와 있다.
           if (failed.length > 0) {
@@ -393,7 +421,7 @@ async function main(): Promise<void> {
           };
         },
         stop: (_ctx, verdict) => verdict.passed,
-        recover: () => (reviewerBroken ? 'escalate' : 'retry'),
+        recover: () => (reviewerBroken || verifyBroken ? 'escalate' : 'retry'),
       },
       // 분류 폴백이 이미 과금한 같은 budget 을 넘긴다 — 합산이다 (D-034).
       { goal: args.task, maxIterations, budgetUsd, budget },

@@ -119,11 +119,25 @@ export const FAILING_PHASES: ReadonlySet<string> = new Set(['before', 'reproduce
  * 모양이 맞는 증거이고, R05 `before` 처럼 실패해야 하는 단계도 있다. reviewer `unknown` 은 증거가
  * 아예 생기지 않으므로 여기 오지 않는다 (pass 로도 fail 로도 치지 않는다).
  */
+/**
+ * 명령이 **돌지 못한** 종료인가 (D-046) — `sh` 규약의 126(실행 불가)·127(명령 없음)과 `runCommand` 의
+ * -1(시그널·시간 초과). "돌았고 실패했다" 와 다르다: 모델이 고칠 수 없는 환경 문제이고, 재현도 아니다.
+ * 도구가 exit 1 로 내는 환경 오류(npm `MODULE_NOT_FOUND` 등)는 exit 만으로 가를 수 없다 — 출력은 파싱하지 않는다.
+ */
+export function notRun(exitCode: number): string | null {
+  if (exitCode === 126 || exitCode === 127) return '명령을 찾지 못했거나 실행할 수 없다';
+  if (exitCode === -1) return '시그널·시간 초과로 끝났다';
+  return null;
+}
+
 export function contradiction(evidence: Evidence): string | null {
   if (evidence.kind === 'command') {
+    const label = evidence.phase ? `${evidence.phase}:${evidence.cmd}` : evidence.cmd;
+    // 돌지 못한 명령은 phase 와 무관하게 나쁜 결과다 — before 의 127 을 "재현" 으로 읽지 않는다 (D-046).
+    const env = notRun(evidence.exitCode);
+    if (env) return `\`${label}\` 가 실행되지 못했다 (exit ${evidence.exitCode} — ${env})`;
     const expectFail = evidence.phase !== undefined && FAILING_PHASES.has(evidence.phase);
     if ((evidence.exitCode !== 0) === expectFail) return null;
-    const label = evidence.phase ? `${evidence.phase}:${evidence.cmd}` : evidence.cmd;
     return expectFail ? `\`${label}\` 는 실패해야 하는 단계인데 exit 0` : `\`${label}\` exit=${evidence.exitCode}`;
   }
   if (evidence.kind === 'review' && evidence.verdict === 'fail') return `reviewer ${evidence.reviewer} FAIL`;
