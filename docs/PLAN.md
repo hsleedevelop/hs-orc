@@ -304,17 +304,17 @@ PRD §7 은 v1 을 **"실제 작업 1건이 분류→배정→실행→증거 �
 - 다른 cwd resume, resume 중 모델 변경, 긴 세션 압축 — 미실측. codex 는 resume 에 쓰기를 실을 수 없어 쓰기 켠 후속은 잇지 않는다 (최종 리뷰 #1).
 - GuiService 는 활성 세션 하나. CLI·TUI 는 아직 `ConversationSession` 을 쓰지 않는다 (D-031 결정 8).
 - 최종 리뷰 Minor (2026-09-24 `final-review.md` 에서 옮김, 코드 대조로 미해결 확인. #12 `$evidence.resume` 기록은 반영됨):
-  - `approve()` 가 primary 시작 전 `budget.limitReached()` 를 보지 않는다 — `answer()`·`summarize()` 는 본다 (D-030 5항). 한 줄 + 테스트.
-  - 거절이 결정 로그에 안 남는다 — SPEC §8 은 "제안했지만 실행 안 됨(거절)"을 기록 대상으로 둔다. 계획 공백: `decided`+`declined` 두 줄을 남길지 §8 을 고칠지 결정.
-  - `runDuo` 가 던지면 1차 결정 줄이 `pending` 으로 남는다 (`delegate.ts`) — 감싸서 2차 줄 `wrong` 을 남긴다. `approve()` 안 `delegate()` throw 테스트도 이때 붙인다.
-  - `buildInvocation` 이 `write`+`nonGit` 을 함께 받는다 — 스크래치 쓰기 금지가 세션·GUI 에만 있다. resolve 에서 던지고 codex 쌍 테스트.
-  - 렌더러 `act()` 가 IPC 거절 시 오류만 띄우고 낡은 `SessionView`(예: `blocked`)를 남긴다 — 거절 분기에서 `convView()` 재조회.
-  - 세션 목록이 프로젝트 전환을 따라가지 않는다 (`SessionList` 가 `useAsync` 빈 deps, key 없음) — 옛 폴더 세션을 열면 폴더가 되돌아간다. `projects.current.dir` 로 key.
-  - 세션 목록에 SPEC §7.1 의 상태 열이 없다 — 상태는 저장되지 않으니 §7.1 에서 빼거나 나중에 저장.
-  - 위임 중 크래시 후 다시 열면 `approval` 뒤 `result`/`error` 가 없고 1차 결정 줄이 고아가 된다 — "결과가 기록되지 않았다" 배너.
-  - cursor 의 `result` 줄 `session_id` 는 실측이 아니라 추론이다 (`stream.test.ts` 는 claude 모양만) — cursor 실행 1회로 확인. 틀리면 cursor 행은 resume 안 됨(무해·가시).
-  - `records()` 가 호출마다 JSONL 을 다시 읽는다 (메시지당 3–4회) — v2.1 규모에선 무방, 한 번 읽기로 접는다.
-  - 렌더러가 안 쓰는 레거시 `plan`/`run` IPC·preload (`main.ts:40-44`, `preload.cjs:5-6`) — `service.test.ts` 와 함께 둘지 지울지 결정.
+  - ~~`approve()` 가 primary 시작 전 `budget.limitReached()` 를 보지 않는다~~ → 해결 (상한이면 시작하지 않고 결정 로그 `blocked`).
+  - ~~거절이 결정 로그에 안 남는다~~ → 해결 (사용자 결정: `decided`+`declined` 두 줄, SPEC §8). **남은 것:** CLI·TUI 의 승인 거절도 결정 로그에 안 남는다 — 같은 규칙을 옮길지.
+  - ~~`runDuo` 가 던지면 1차 결정 줄이 `pending` 으로 남는다~~ → 해결 (2차 `ran`/`wrong` + 세션 테스트).
+  - ~~`buildInvocation` 이 `write`+`nonGit` 을 함께 받는다~~ → 해결 (resolve 에서 던진다).
+  - ~~렌더러 `act()` 가 IPC 거절 시 낡은 `SessionView` 를 남긴다~~ → 해결 (`convView()` 재조회, 화면 실측 전).
+  - ~~세션 목록이 프로젝트 전환을 따라가지 않는다~~ → 해결 (`projects.current.dir` 로 key, 화면 실측 전).
+  - ~~세션 목록에 SPEC §7.1 의 상태 열이 없다~~ → §7.1 에서 뺐다 (사용자 결정).
+  - ~~위임 중 크래시 후 다시 열면 결과 없는 승인이 남는다~~ → 해결 (`interrupted` 배너). 1차 결정 줄이 고아로 남는 것은 그대로다 — 크래시한 프로세스는 2차를 못 쓴다.
+  - cursor 의 `result` 줄 `session_id` 는 실측이 아니라 추론이다 (`stream.test.ts` 는 claude 모양만) — cursor 실행 1회로 확인. 틀리면 cursor 행은 resume 안 됨(무해·가시). **2026-09-24 사용자 결정으로 보류** (구독 사용량).
+  - ~~`records()` 가 호출마다 JSONL 을 다시 읽는다~~ → 해결 (열 때 한 번 읽고 append 와 함께 든다).
+  - ~~렌더러가 안 쓰는 레거시 `plan`/`run` IPC·preload~~ → IPC·preload 만 지웠다 (사용자 결정). `GuiService.plan`·`run` 과 S7 판정 테스트는 남긴다.
 - SDD 원장 보류 minor (위와 겹치지 않는 것, 모두 미해결): `readTranscript` 가 ENOENT 외 읽기 오류도 빈 세션으로 삼킨다 · `conductor.ts` 의 `parseSuggest`≡`parseVerdict` 주석 과장 · `send('')` 가 조용히 `[]` (CLI 셸 때 `SessionStateError`) · `contextChars <= 0` 슬라이스 이상 · 승인 계획을 `delegate()` 전에 비워 throw 시 버려짐 · `openConversation` 스크래치 검사에 realpath 없음·`dir === scratchRoot()` 허용 · 세션 목록 `<tr onClick>` 키보드 불가(a11y) · `run.ts` truthy `sessionId` 검사.
 - Q12 스크래치 보존·정리.
 
