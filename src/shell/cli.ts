@@ -523,7 +523,9 @@ async function main(): Promise<void> {
       (stored ? `\n원본   ${stored}` : '') +
       '\n',
   );
-  if (run.outcome !== 'ok') process.exitCode = 1;
+  // 완료가 아니면 1 이다 — 실행 실패(wrong)와 나쁜 결과의 증거(rework). loop·기준선과 같은 규칙이다 (D-044).
+  // unverified 는 0 이다: 자동으로 못 모으는 증거(문서 절·측정값)가 많아 once 의 정상 결과다.
+  if (outcome === 'wrong' || outcome === 'rework') process.exitCode = 1;
 }
 
 await main().catch((error: unknown) => {

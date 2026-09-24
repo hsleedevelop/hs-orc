@@ -372,6 +372,17 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     assert.match(r.err, /--fix-red-baseline 은 --mode loop --write 에서만/);
   });
 
+  it('once 는 rework(검증 명령 실패)면 exit 1, unverified 면 exit 0 이다 (D-044)', () => {
+    reset();
+    const red = cli(['이 아키텍처 설계 검토해줘', '--run', '--verify', 'exit 1'], { PATH: fakeDir, REVIEWER_PASS: '1' });
+    assert.match(red.err, /outcome=rework/);
+    assert.equal(red.code, 1, '테스트가 실패했는데 exit 0 — 스크립트가 다음 단계로 넘어간다.');
+    reset();
+    const unknown = cli(['이 아키텍처 설계 검토해줘', '--run', '--verify', 'exit 0'], { PATH: fakeDir, REVIEWER_PASS: '1' });
+    assert.match(unknown.err, /outcome=unverified/);
+    assert.equal(unknown.code, 0, 'R10 은 문서 절을 자동으로 못 모은다 — unverified 는 once 의 정상 결과다.');
+  });
+
   it('reviewer 실행이 실패하면 재시도하지 않고 사람에게 올린다', () => {
     reset();
     const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run'], { PATH: fakeDir, REVIEWER_EXIT: '3' });
