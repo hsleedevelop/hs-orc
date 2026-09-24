@@ -1076,6 +1076,28 @@ once(CLI)와 위임(GUI·TUI, `delegate.ts`)은 같은 식 `!run.ok ? 'wrong' : 
 
 ---
 
+## D-044 — once 는 `rework` 면 exit 1 이다, `unverified` 는 0 그대로 (B)
+
+**배경**
+D-043 으로 once 의 결정 로그에 `rework`(테스트 실패·reviewer FAIL)가 생겼지만 CLI exit code 는 실행 실패(`wrong`)에만 1 이었다 — `hs-orc … && 다음 단계` 가 테스트가 실패한 뒤에도 진행된다. 같은 CLI 의 loop 는 `goal-reached` 가 아니면(검증 FAIL 포함) 1, D-042 기준선 실패도 1 이다. 저장소 안에 CLI exit code 를 읽는 곳은 없다(GUI·TUI 는 `delegate()` 를 직접 부른다). exit code 규약은 README·SPEC 어디에도 없었다.
+
+**결정**
+1. once 는 outcome 이 `wrong` 또는 `rework` 면 exit 1 이다.
+2. `unverified` 는 0 이다 — R02·R03·R07·R09·R10 은 증거(문서 절·측정값·시각)를 자동으로 못 모아 once 의 정상 결과이고, "나쁜 결과의 증거" 가 아니라 "증거 없음" 이다.
+3. README 에 exit code 표(0 / 1 / 3)를 둔다 — 규칙은 "완료가 아니면 1".
+
+**기각**
+- *A — 현상 유지 + 문서화* — 테스트 실패 뒤에도 스크립트가 진행되고 loop 와 어긋난다.
+- *C — 원인별 코드(`rework`=2 등)* — 2 는 관례상 사용법 오류이고, loop 까지 맞추려면 종료 사유별 코드표가 필요해 계약 표면이 커진다. 원인은 stderr·결정 로그에 있다.
+- *D — opt-in `--strict`* — 기본값이 계속 "실패해도 0" 이다.
+
+**영향**
+**깨지는 변경이다**: 외부 스크립트가 once 의 exit 0 에 기대고 있었다면 테스트가 실패한 실행에서 이제 1 을 받는다(의도). 실행 실패와 검증 실패가 같은 1 이라 구분은 stderr `outcome=` 또는 결정 로그로 한다.
+
+**상태** 확정 — 2026-09-24 사용자 결정 (B).
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |

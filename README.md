@@ -70,7 +70,13 @@ hs-orc "<작업>" --mode graph --graph examples/graph-nodes.json --run
 
 ## 증거 없이는 완료가 아니다
 
-`"성공했습니다"`는 증거가 아니다. 행마다 요구 증거가 정해져 있고, 그것이 모였을 때만 `outcome: ok`로 닫힌다. 안 모이면 `unverified`로 남는다 — 실패가 아니라 **아직 모른다**는 뜻이다.
+`"성공했습니다"`는 증거가 아니다. 행마다 요구 증거가 정해져 있고, 그것이 모였을 때만 `outcome: ok`로 닫힌다. 안 모이면 `unverified`로 남는다 — 실패가 아니라 **아직 모른다**는 뜻이다. 모였어도 기대와 다른 exit(테스트 실패 등)나 reviewer `FAIL`이 있으면 `rework`다 — 완료가 **아니라는** 증거다.
+
+| exit | 뜻 |
+|---|---|
+| 0 | 완료(`ok`), 아직 모름(`unverified`), `--run` 없이 제시만, 하한선에 걸려 직접 처리 |
+| 1 | 완료가 아님 — 실행 실패(`wrong`), `rework`, loop 가 목표에 못 닿음, graph 미완료, 기준선 실패, 분류 실패, 오류 |
+| 3 | `--crash-test` (크래시 리포팅 자가 검증) |
 
 증거로 인정하는 것은 실제로 돌린 명령의 **exit code**, git이 보고한 **변경 파일**, reviewer의 **판정**, 그리고 사람이 적어 주는 `--evidence <file.json>`이다. exit code 없는 명령, `file:line` 아닌 인용, 환경 표기 없는 측정값은 거절한다.
 
