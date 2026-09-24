@@ -61,6 +61,8 @@ export interface LoopResult {
   readonly iterations: number;
   readonly journal: Journal;
   readonly budget: Budget;
+  /** 마지막 사이클 primary 의 산출물 전문. journal 은 앞 200자만 남긴다 — 사용자가 결과를 보려면 이것이다. 한 사이클도 안 돌았으면 없다. */
+  readonly lastOutput?: string;
 }
 
 export interface LoopOptions {
@@ -88,6 +90,7 @@ export async function runLoop(
   const budget = options.budget ?? new Budget(options.budgetUsd, options.tokenBudget ?? 0);
   const history: string[] = [];
   let feedback: string | undefined;
+  let lastOutput: string | undefined;
   let iteration = 0;
   let stopReason: LoopStopReason = 'max-iterations';
 
@@ -118,6 +121,7 @@ export async function runLoop(
 
     // Executor — primary 슬롯
     const run = await execute(plan.slots.primary, task);
+    lastOutput = run.text;
     const execCharge = budget.charge(
       `#${iteration} Executor ${plan.slots.primary.label}`,
       run.actualUsd,
@@ -196,5 +200,5 @@ export async function runLoop(
     }
   }
 
-  return { stopReason, iterations: iteration, journal, budget };
+  return { stopReason, iterations: iteration, journal, budget, ...(lastOutput !== undefined ? { lastOutput } : {}) };
 }
