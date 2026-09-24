@@ -260,18 +260,13 @@ async function main(): Promise<void> {
       `상한   최대 ${maxIterations}사이클 · 최악 $${worst.toFixed(2)}(추정, 상한 $${budgetUsd} 을 넘으면 다음 사이클을 시작하지 않는다)` +
         ` · 토큰 ${tokenBudget} (0 = 없음)\n\n`,
     );
-    // 엔진 실행 자체가 죽으면 재시도하지 않는다 (D-036). primary 가 죽으면 에러 문자열을 채점하지 않고,
-    // reviewer 가 죽으면 망가진 엔진에 primary 를 반복해 태우지 않는다 — 둘 다 사람에게 올린다.
-    let broken: 'primary' | 'reviewer' | undefined;
-    const loopExecute: typeof execute = async (slot, prompt, runOptions) => {
-      const run = await execute(slot, prompt, runOptions);
-      if (!run.ok) broken = slot.role === 'primary' ? 'primary' : 'reviewer';
-      return run;
-    };
+    // reviewer 가 죽으면 망가진 엔진에 primary 를 반복해 태우지 않고 사람에게 올린다 (D-036).
+    // primary 가 죽은 경우는 Core 가 채점 없이 올린다 (D-039).
+    let reviewerBroken = false;
     const result = await runLoop(
       matrix,
       plan,
-      loopExecute,
+      execute,
       {
         // 재시도면 직전 reviewer 의 지적을 싣는다 — 사유 없는 재시도는 같은 실수를 반복한다 (D-036).
         plan: (ctx) =>
@@ -281,10 +276,8 @@ async function main(): Promise<void> {
         // Evaluator 는 reviewer 슬롯이 돈다 (D-003). 형식·판정은 once 의 독립 리뷰와 같다 —
         // 마지막 줄 PASS/FAIL, 못 읽으면 unknown 이고 통과로 봐주지 않는다.
         evaluate: async (_ctx, output) => {
-          if (broken === 'primary') {
-            return { passed: false, verification: `primary 실행 실패 — reviewer 생략: ${output.slice(0, 80)}`, skipped: true };
-          }
-          const check = await loopExecute(plan.slots.reviewer, reviewPrompt(plan, args.task, output));
+          const check = await execute(plan.slots.reviewer, reviewPrompt(plan, args.task, output));
+          if (!check.ok) reviewerBroken = true;
           const verdict = check.ok ? parseVerdict(check.text) : 'unknown';
           return {
             passed: verdict === 'pass',
@@ -296,7 +289,7 @@ async function main(): Promise<void> {
           };
         },
         stop: (_ctx, verdict) => verdict.passed,
-        recover: () => (broken ? 'escalate' : 'retry'),
+        recover: () => (reviewerBroken ? 'escalate' : 'retry'),
       },
       // 분류 폴백이 이미 과금한 같은 budget 을 넘긴다 — 합산이다 (D-034).
       { goal: args.task, maxIterations, budgetUsd, budget },
