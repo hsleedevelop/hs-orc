@@ -293,6 +293,19 @@ async function main(): Promise<void> {
     // D-042: phase 없는 명령을 작업 **전에** 한 번 돌린다. 이미 실패하면 그 실패를 고치는 것이 작업 범위인지
     // 제품은 판단할 수 없다 — 엔진을 띄우기 전에 사람에게 올린다. 범위에 넣으려면 --fix-red-baseline.
     // after·fix·regress 는 변경 전에 실패하는 것이 정상이라 여기서 보지 않는다 (D-045).
+    // D-048: 의존성이 없으면 검증 명령은 exit 1 로 "테스트 실패" 처럼 보인다 — after·fix·regress 는 기준선에서
+    // 돌지 않아 사이클마다 FAIL → 재시도로 샌다. 이미 기계적으로 아는 사실이니 엔진 전에 멈춘다. 설치하면 풀린다.
+    if (args.write && verifyCmds.length > 0 && deps.kind === 'missing') {
+      process.stderr.write(
+        [
+          `중단   의존성 없음 — ${deps.manifest} 는 있는데 node_modules 가 없다. 검증 명령이 환경 오류로 실패한다. 엔진을 띄우지 않았다.`,
+          `안내   \`${deps.install}\` 뒤에 다시 실행한다.`,
+          '',
+        ].join('\n'),
+      );
+      process.exitCode = 1;
+      return;
+    }
     const plainCmds = postCmds.filter((v) => v.phase === undefined);
     let reproduced = '';
     if (args.write && plainCmds.length + preCmds.length > 0) {

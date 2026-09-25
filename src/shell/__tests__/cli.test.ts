@@ -464,6 +464,31 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     assert.equal(r.code, 1);
   });
 
+  it('--write loop 는 의존성이 없으면 검증 명령이 있을 때 엔진 전에 멈추고, 없으면 경고만 한다 (D-048)', () => {
+    const manifest = path.join(sandbox, 'package.json');
+    writeFileSync(manifest, JSON.stringify({ dependencies: { left: '1.0.0' } }), 'utf8');
+    try {
+      reset();
+      const blocked = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', 'exit 0'], { PATH: fakeDir });
+      assert.notEqual(blocked.code, 0);
+      assert.match(blocked.err, /중단 {3}의존성 없음 — package\.json 는 있는데 node_modules 가 없다/);
+      assert.match(blocked.err, /안내 {3}`npm install` 뒤에 다시 실행한다/);
+      assert.equal(existsSync(claudeArgs), false, '의존성이 없는데 primary 를 태웠다 — 검증이 환경 오류로 실패해 재시도로 샌다.');
+
+      reset();
+      const noVerify = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write'], {
+        PATH: fakeDir,
+        REVIEWER_PASS: '1',
+        HS_ORC_VERIFY_CONFIG: path.join(fakeDir, 'no-such-verify.json'),
+      });
+      assert.equal(noVerify.code, 0, noVerify.err);
+      assert.match(noVerify.err, /의존성 없음 — package\.json 는 있는데/, '경고는 그대로 찍는다.');
+      assert.doesNotMatch(noVerify.err, /중단 {3}의존성 없음/);
+    } finally {
+      rmSync(manifest, { force: true });
+    }
+  });
+
   it('--fix-red-baseline 은 --mode loop --write 밖에서 조용히 무시되지 않고 던진다 (D-042)', () => {
     const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--fix-red-baseline'], NO_PATH);
     assert.notEqual(r.code, 0);
