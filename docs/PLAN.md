@@ -316,7 +316,7 @@ PRD §7 은 v1 을 **"실제 작업 1건이 분류→배정→실행→증거 �
 - ~~분류 폴백(Haiku) 호출은 `Budget` 에 과금·상한 판정되지 않는다~~ → **D-034 해결** (받은 예산에 과금, 상한이면 시작하지 않는다). 리뷰 Minor 중 "분류 엔진 실패가 '맞는 행 없음'으로 표시"도 해결 (`failed` + 사유).
 - ~~분류 폴백의 metered 경로 테스트 없음 (D-034 리뷰 Minor)~~ → **D-037** 로 닫음: luna(codex)는 지휘자 격리 수단이 없어 분류기 후보에서 뺐다. Haiku 는 claude 가 실제 금액을 주므로 해당 경로가 없다.
 - ~~`delegate()` 의 journal `charge` 는 reviewer 가 돌면 reviewer 의 charge 다 (`GuiService.run` 때부터).~~ → 해결 (2026-09-25): `runDuo` 가 `primaryCharge` 를 돌려주고 GUI(`delegate`)·TUI 의 journal 실행 줄이 그것을 싣는다. TUI 에도 같은 결함이 있었다.
-- git 이 아닌 **project** 폴더에서 codex 위임은 여전히 거절된다 (nonGit 은 스크래치에만).
+- ~~git 이 아닌 **project** 폴더에서 codex 위임은 여전히 거절된다 (nonGit 은 스크래치에만).~~ → **D-055** (읽기 전용만 허용, 쓰기 켠 위임은 그대로 거절).
 - 다른 cwd resume, resume 중 모델 변경, 긴 세션 압축 — 미실측. codex 는 resume 에 쓰기를 실을 수 없어 쓰기 켠 후속은 잇지 않는다 (최종 리뷰 #1).
 - GuiService 는 활성 세션 하나. CLI·TUI 는 아직 `ConversationSession` 을 쓰지 않는다 (D-031 결정 8).
 - 최종 리뷰 Minor (2026-09-24 `final-review.md` 에서 옮김, 코드 대조로 미해결 확인. #12 `$evidence.resume` 기록은 반영됨):

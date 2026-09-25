@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { SlotExecutor } from '../../../core/executor.ts';
 import { readDecisions } from '../../../core/decision-log.ts';
-import { GuiService } from '../service.ts';
+import { GuiService, skipGitCheck } from '../service.ts';
 import { samePath } from '../worktree.ts';
 import { spawnSync } from 'node:child_process';
 
@@ -201,6 +201,15 @@ describe('GUI — 워크트리', () => {
     assert.ok(samePath(service.cwd, repo), '발밑을 지운 채로 남아 있으면 안 된다');
     assert.equal(after.worktrees.items.length, 1);
     assert.equal(after.project.recent.some((r) => samePath(r.dir, inside)), false, '지운 폴더가 최근 목록에 남으면 안 된다');
+  });
+});
+
+describe('codex git 검사 끄기 (D-055)', () => {
+  it('스크래치는 늘 끄고, git 이 아닌 project 는 읽기 전용일 때만 끈다 — git 저장소는 끄지 않는다', () => {
+    assert.equal(skipGitCheck('scratch', false, false), true);
+    assert.equal(skipGitCheck('project', false, false), true);
+    assert.equal(skipGitCheck('project', false, true), false, '쓰기를 되돌릴 git 이 없다');
+    assert.equal(skipGitCheck('project', true, false), false);
   });
 });
 

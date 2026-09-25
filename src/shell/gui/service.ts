@@ -44,6 +44,7 @@ import {
   listWorktrees,
   mainWorktree,
   removeWorktree,
+  repoRoot,
   samePath,
   type WorktreeInfo,
 } from './worktree.ts';
@@ -117,6 +118,14 @@ export interface WorktreeState {
   readonly items: readonly WorktreeInfo[];
   /** 지금 작업 폴더가 이 목록의 어느 것인가. 어느 것도 아니면 빈 문자열이다. */
   readonly current: string;
+}
+
+/**
+ * codex 의 git 검사를 끌지 (D-055). 스크래치는 언제나 끈다. git 이 아닌 project 폴더는 **읽기 전용일 때만** 끈다 —
+ * 쓰기를 되돌릴 git 이 없고 바뀐 파일 증거도 `git status` 로 모은다. 쓰기를 켜면 codex 가 거절하는 그대로 둔다.
+ */
+export function skipGitCheck(kind: SessionKind, inGit: boolean, write: boolean): boolean {
+  return kind === 'scratch' || (!inGit && !write);
 }
 
 export class GuiService {
@@ -390,7 +399,7 @@ export class GuiService {
   private attach(kind: SessionKind, dir: string, id: string): SessionView {
     const catalog = loadEngines();
     const timeout = loadLimits().runTimeoutMs;
-    const nonGit = kind === 'scratch';
+    const inGit = kind === 'project' && repoRoot(dir) !== null;
     this.session = new ConversationSession({
       matrix: loadMatrix(),
       catalog,
@@ -400,8 +409,9 @@ export class GuiService {
       budget: this.sessionBudget(dir, id),
       journal: this.journal,
       // 지휘자(직접 답·요약)만 격리한다 (D-032 B1) — 위임 실행기(executorFor)는 그대로 사용자 설정을 싣는다.
-      conduct: this.execute ?? createExecutor(catalog, dir, timeout, { nonGit, isolate: true }),
-      executorFor: (write) => this.execute ?? createExecutor(catalog, dir, timeout, { write, nonGit }),
+      conduct: this.execute ?? createExecutor(catalog, dir, timeout, { nonGit: skipGitCheck(kind, inGit, false), isolate: true }),
+      executorFor: (write) =>
+        this.execute ?? createExecutor(catalog, dir, timeout, { write, nonGit: skipGitCheck(kind, inGit, write) }),
     });
     return this.conversation();
   }

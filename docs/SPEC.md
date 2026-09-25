@@ -401,7 +401,7 @@ Evaluator에는 reviewer 슬롯 모델을 쓴다 — 매트릭스의 독립 리�
 
 | 종류 | 작업 폴더 | 기록 파일 |
 |---|---|---|
-| `project` | 사용자가 고른 폴더 (워크트리 포함, D-029) | `<폴더>/.hs-orc/sessions/<id>.jsonl` |
+| `project` | 사용자가 고른 폴더 (워크트리 포함, D-029). git 이 아니면 codex 는 **읽기 전용 위임만** 돈다 (D-055) | `<폴더>/.hs-orc/sessions/<id>.jsonl` |
 | `scratch` | `~/.hs-orc/scratch/<id>/` 를 세션 시작 때 만든다 (`HS_ORC_SCRATCH` 로 뿌리를 바꾼다). git 아님, **쓰기 켤 수 없음** | 그 폴더의 `.hs-orc/sessions/<id>.jsonl` |
 
 - `id` 는 결정 로그와 같은 `MMDD-HHMM-xxx` (§8).
