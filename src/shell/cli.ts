@@ -377,6 +377,10 @@ async function main(): Promise<void> {
     let reviewerBroken = false;
     // 사이클 중 검증 명령이 돌지 못하면 primary 가 고칠 수 없다 — 재시도로 상한까지 태우지 않고 올린다 (D-046).
     let verifyBroken = false;
+    // D-049: 약화로 FAIL 한 다음 사이클도 기계적 FAIL(약화·명령 실패)이면 과제와 기존 테스트가 충돌하는 것이다 —
+    // 모델은 약화 없이 풀 수 없다. 재시도로 상한까지 태우지 않고 사람에게 올린다. 첫 약화는 한 번 재시도한다(형식만 바꾼 실수일 수 있다).
+    let weakenedLastCycle = false;
+    let testConflict = false;
     const result = await runLoop(
       matrix,
       plan,
@@ -419,6 +423,8 @@ async function main(): Promise<void> {
           // 명령 실패로 FAIL 이 이미 정해졌으면 reviewer 를 돌리지 않는다 — 사이클당 약 24만 토큰(D-036 실측)을 아낀다 (D-041).
           // 다음 사이클 지적은 명령 출력만으로 충분하다: 무엇이 깨졌는지가 기계적으로 나와 있다.
           if (failed.length > 0 || weakened.length > 0) {
+            if (weakenedLastCycle) testConflict = true;
+            weakenedLastCycle = weakened.length > 0;
             const failedBlock = failed.map((c) => `$ ${cmdLabel(c)} → exit ${c.exitCode}\n${c.output.slice(-1500)}`).join('\n\n');
             // 약화를 앞에 둔다 — 4000자 자르기에 먼저 잘리지 않게, 그리고 "테스트를 고쳐 통과" 가 답이 아님을 먼저 말한다.
             const weakBlock = weakened.length > 0
@@ -432,7 +438,8 @@ async function main(): Promise<void> {
                   .filter(Boolean)
                   .join(' · ') +
                 (ran.length > 0 ? ` · 검증 명령 ${ran.map((c) => `\`${cmdLabel(c)}\` exit=${c.exitCode}`).join(', ')}` : '') +
-                addedNote,
+                addedNote +
+                (testConflict ? ' · 과제가 기존 테스트와 충돌한다 — 재시도하지 않는다' : ''),
               // 있는 블록만 빈 줄 하나로 잇는다 — 약화만 있을 때 지적 끝에 빈 줄이 겹치던 자리다 (D-047 실측).
               reason: [weakBlock, failedBlock ? `Core 가 실행한 검증 명령이 실패했다:\n${failedBlock}` : '']
                 .filter(Boolean)
@@ -441,6 +448,7 @@ async function main(): Promise<void> {
               reviewerSkipped: true,
             };
           }
+          weakenedLastCycle = false; // 기계적 FAIL 이 끊겼다 — "연속" 이 아니다.
           const check = await execute(plan.slots.reviewer, reviewPrompt(plan, args.task, output, checks));
           if (!check.ok) reviewerBroken = true;
           const verdict = check.ok ? parseVerdict(check.text) : 'unknown';
@@ -461,7 +469,7 @@ async function main(): Promise<void> {
           };
         },
         stop: (_ctx, verdict) => verdict.passed,
-        recover: () => (reviewerBroken || verifyBroken ? 'escalate' : 'retry'),
+        recover: () => (reviewerBroken || verifyBroken || testConflict ? 'escalate' : 'retry'),
       },
       // 분류 폴백이 이미 과금한 같은 budget 을 넘긴다 — 합산이다 (D-034).
       { goal: args.task, maxIterations, budgetUsd, budget },
@@ -471,6 +479,9 @@ async function main(): Promise<void> {
     process.stderr.write(
       `\n${result.journal.render()}\n중단   ${result.stopReason} · ${result.iterations}회\n누적   ${result.budget.summary()}\n`,
     );
+    if (testConflict) {
+      process.stderr.write('안내   과제가 기존 테스트와 충돌한다 — 테스트를 직접 고치거나 과제를 바꾼 뒤 다시 실행한다 (D-049).\n');
+    }
     if (result.journal.unverified.length > 0) {
       process.stderr.write(`경고   검증 기록이 빈 사이클 ${result.journal.unverified.length}건 — "통과"가 아니다.\n`);
     }
