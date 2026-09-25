@@ -1047,7 +1047,7 @@ D-041 실측에서 사용자는 "타입 오류**만**" 을 요청했지만 R01 �
 - *D — "만/only" 같은 문구로 의도 추론* — 추론 금지 원칙(SPEC §5)에 어긋난다.
 
 **영향**
-기준선 실행만큼(명령당 최대 300초) 시작이 늦어진다. 원래 빨간 저장소는 매번 `--fix-red-baseline` 이 필요하다. exit 수준이라 "기존 실패 1건 + 새 실패 1건" 은 기준선 실패로만 보인다 — 테스트 이름 비교는 도구마다 형식이 달라 열지 않는다. D-041 실측 조건이라면 엔진 토큰 0 에서 멈췄을 것이다(추론 — 이 변경 뒤 실제 엔진으로 재실행하지 않았다). once 의 outcome 이 실패한 명령을 증거로 인정해 `ok` 로 남을 수 있는 문제는 별개다(미결).
+기준선 실행만큼(명령당 최대 300초) 시작이 늦어진다. 원래 빨간 저장소는 매번 `--fix-red-baseline` 이 필요하다. exit 수준이라 "기존 실패 1건 + 새 실패 1건" 은 기준선 실패로만 보인다 — 테스트 이름 비교는 도구마다 형식이 달라 열지 않는다. D-041 실측 조건이라면 엔진 토큰 0 에서 멈췄을 것이다(추론 — 이 변경 뒤 실제 엔진으로 재실행하지 않았다). once 의 outcome 이 실패한 명령을 증거로 인정해 `ok` 로 남을 수 있는 문제는 별개다(미결) → **D-043** 으로 해결 (`contradiction()` → `rework`, once·위임 모두 `outcomeOf`) · exit code 는 **D-044**.
 
 **실행 확인** (2026-09-24, 실제 CLI · 엔진 호출 0회): D-041 실측과 같은 스크래치 저장소에서 `--task R01 --mode loop --run --write --max-iterations 1`. PATH 를 `trap/`(claude·codex·cursor-cli·cursor-agent — 표식을 남기고 exit 99) · `nodeonly/`(node·npm·npx) · `/usr/bin:/bin` 으로만 두고, 실행 전 `command -v` 로 엔진 넷이 전부 trap 인지 확인했다(엔진은 PATH 로만 해석된다 — `resolve.ts`).
 - green(`npm test` 통과): `기준선 \`npm test\` exit=0` → 게이트 통과 → trap codex 1회 → primary 실패 → `escalated · 1회`(D-039).
