@@ -9,6 +9,7 @@ import { appendFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { newDecisionId } from './decision-log.ts';
+import type { ContextCut } from './context.ts';
 import type { SettledOutcome } from './evidence.ts';
 
 export type SessionKind = 'project' | 'scratch';
@@ -34,6 +35,8 @@ export type TranscriptEntry =
       readonly cost: string;
       /** 분류 폴백이 돌았다는 사실 같은, 답보다 먼저 알려야 할 줄들. */
       readonly notes: readonly string[];
+      /** 맥락을 잘랐으면 버린 양. 안 잘랐으면 없다 (D-053). */
+      readonly cut?: ContextCut;
     }
   | {
       readonly kind: 'plan';
@@ -55,6 +58,8 @@ export type TranscriptEntry =
       readonly evidence: string;
       readonly decisionId: string;
       readonly engineSession?: EngineSessionRef;
+      /** 위임 프롬프트의 맥락을 잘랐으면 버린 양 (D-053). */
+      readonly cut?: ContextCut;
     }
   | { readonly kind: 'summary'; readonly text: string; readonly next: string }
   | { readonly kind: 'error'; readonly text: string };

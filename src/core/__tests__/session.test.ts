@@ -131,6 +131,20 @@ describe('대화 세션 — 메시지 1건 (SPEC §6.4.2)', () => {
     assert.doesNotMatch(c.prompts[1] ?? '', /\[최근 대화\][^[]*뭘 할 수 있어/);
   });
 
+  it('맥락을 자르면 버린 양을 직접 답 기록에 남긴다 — 안 잘랐으면 남기지 않는다 (D-053)', async () => {
+    const c = conductSpy();
+    const session = new ConversationSession({
+      matrix, catalog, kind: 'project', dir: mkdtempSync(path.join(os.tmpdir(), 'hs-session-')), id: '0923-1200-aaa',
+      budget: new Budget(20, 2_000_000), journal: new Journal(), conduct: c.exec, executorFor: () => delegateSpy().exec,
+      context: { contextTurns: 1, contextChars: 6000 },
+    });
+    const first = (await session.send('넌 누구니')).find((r) => r.kind === 'direct');
+    await session.send('뭘 할 수 있어');
+    const third = (await session.send('고마워')).find((r) => r.kind === 'direct');
+    assert.equal(first?.kind === 'direct' ? first.cut : 'x', undefined);
+    assert.deepEqual(third?.kind === 'direct' ? third.cut : null, { turns: 1, chars: 0 });
+  });
+
   it('다시 열면 턴을 이어 가고, 남은 배정은 되살리지 않는다', async () => {
     const c = conductSpy();
     const { dir } = make(c.exec);
