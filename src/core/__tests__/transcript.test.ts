@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendFileSync, existsSync, mkdtempSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { appendRecord, listSessions, prepareSession, readTranscript, transcriptPath, type TranscriptRecord } from '../transcript.ts';
@@ -30,6 +30,21 @@ describe('대화 기록 (SPEC §6.4.1)', () => {
 
   it('아직 없는 기록은 빈 대화다 — 던지지 않는다', () => {
     assert.deepEqual(readTranscript(path.join(tmp(), 'none.jsonl')), { records: [], broken: 0 });
+  });
+
+  it('없는 것 말고 읽기 오류는 던진다 — 빈 대화로 삼키면 다음 send 가 턴 1 을 다시 쓴다', () => {
+    const file = transcriptPath(tmp(), 'dir');
+    mkdirSync(file, { recursive: true }); // 읽으면 EISDIR
+    assert.throws(() => readTranscript(file), /EISDIR/);
+  });
+
+  it('목록은 읽지 못한 기록 하나 때문에 통째로 실패하지 않는다 — 그 세션을 읽지 못했다고 보여준다', () => {
+    const dir = tmp();
+    appendRecord(transcriptPath(dir, 'good'), user(1, '안녕'));
+    mkdirSync(transcriptPath(dir, 'bad'), { recursive: true });
+    const byId = new Map(listSessions(dir, 'project').map((s) => [s.id, s.preview]));
+    assert.equal(byId.get('good'), '안녕');
+    assert.equal(byId.get('bad'), '(읽지 못한 기록)');
   });
 
   it('스크래치는 HS_ORC_SCRATCH 안에 폴더를 만들고, project 는 만들지 않는다', () => {

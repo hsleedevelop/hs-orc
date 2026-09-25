@@ -27,6 +27,7 @@ import {
   type SessionSummary,
   type TranscriptRecord,
 } from '../../core/transcript.ts';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import {
   describeProject,
@@ -44,6 +45,19 @@ import {
   samePath,
   type WorktreeInfo,
 } from './worktree.ts';
+
+/**
+ * 스크래치 세션 폴더는 뿌리 **아래** 여야 한다. 뿌리 자체는 다른 스크래치 세션을 다 품고,
+ * 뿌리 안의 링크는 밖을 가리킬 수 있어 실제 경로로 비교한다. 없는 폴더는 밖으로 본다.
+ */
+function insideScratchRoot(dir: string): boolean {
+  try {
+    const rel = path.relative(realpathSync(scratchRoot()), realpathSync(dir));
+    return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+  } catch {
+    return false;
+  }
+}
 
 export interface PlanOptions {
   /** D-025: primary 슬롯에만 파일 쓰기를 허용한다. */
@@ -315,7 +329,7 @@ export class GuiService {
   openConversation(kind: SessionKind, dir: string, id: string): SessionView {
     if (kind === 'project') {
       this.useProject(dir);
-    } else if (path.relative(scratchRoot(), dir).startsWith('..')) {
+    } else if (!insideScratchRoot(dir)) {
       throw new Error(`스크래치 뿌리 밖의 폴더다: ${dir}`);
     }
     return this.attach(kind, dir, id);

@@ -4,7 +4,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { SlotExecutor } from '../../../core/executor.ts';
@@ -272,5 +272,16 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     service.closeConversation();
     const reopened = service.openConversation('scratch', afterA.dir, afterA.id);
     assert.equal(reopened.budget, afterA.budget);
+  });
+
+  it('스크래치 뿌리 자체나 뿌리 밖을 가리키는 링크는 스크래치 세션으로 열지 않는다', () => {
+    isolated();
+    const root = process.env['HS_ORC_SCRATCH'] as string;
+    mkdirSync(root, { recursive: true });
+    const outside = mkdtempSync(path.join(os.tmpdir(), 'hs-outside-'));
+    symlinkSync(outside, path.join(root, 'link'));
+    const service = new GuiService(fake, 20, process.cwd());
+    assert.throws(() => service.openConversation('scratch', root, 'x'), /스크래치 뿌리 밖/);
+    assert.throws(() => service.openConversation('scratch', path.join(root, 'link'), 'x'), /스크래치 뿌리 밖/);
   });
 });
