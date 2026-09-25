@@ -9,9 +9,9 @@ import path from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import type { SlotExecutor } from '../../core/executor.ts';
 import { Journal } from '../../core/journal.ts';
-import { prepareSession, type TranscriptRecord } from '../../core/transcript.ts';
+import { appendRecord, prepareSession, transcriptPath, type TranscriptRecord } from '../../core/transcript.ts';
 import { assembleSession, restoreBudget } from '../conversation.ts';
-import { renderRecord, runChat } from '../chat.ts';
+import { findSession, openingLines, parseChatArgs, renderRecord, runChat } from '../chat.ts';
 
 const at = { v: 1 as const, at: '2026-09-26T00:00:00.000Z', turn: 1 };
 
@@ -112,5 +112,41 @@ describe('chat — 입력 루프', () => {
   it('/quit 뒤의 줄은 처리하지 않는다', async () => {
     const { calls } = await drive(['/quit', '넌 누구니']);
     assert.deepEqual(calls, []);
+  });
+});
+
+describe('chat — 진입', () => {
+  it('인자를 읽고, 모르는 옵션과 --scratch·--resume 동시 지정은 던진다', () => {
+    assert.deepEqual(parseChatArgs(['--scratch', '--verify', 'npm test']), { scratch: true, list: false, verify: ['npm test'] });
+    assert.equal(parseChatArgs(['--resume', 'abc']).resume, 'abc');
+    assert.throws(() => parseChatArgs(['--oops']), /모르는 옵션/);
+    assert.throws(() => parseChatArgs(['--resume']), /값이 없다/);
+    assert.throws(() => parseChatArgs(['--scratch', '--resume', 'x']), /함께 쓸 수 없다/);
+  });
+
+  it('없는 세션 id 는 찾지 못한다', () => {
+    process.env['HS_ORC_SCRATCH'] = mkdtempSync(path.join(os.tmpdir(), 'hs-chat-none-'));
+    assert.equal(findSession(mkdtempSync(path.join(os.tmpdir(), 'hs-chat-cwd-')), 'nope'), undefined);
+  });
+
+  it('스크래치 세션을 id 로 찾는다', async () => {
+    const { session } = await drive(['넌 누구니']);
+    assert.equal(findSession(process.cwd(), session.id)?.dir, session.dir);
+  });
+
+  it('위임 도중 끊긴 세션을 다시 열면 끊김을 알린다', async () => {
+    const { session } = await drive(['이 타입 에러 고쳐줘']);
+    appendRecord(transcriptPath(session.dir, session.id), { v: 1, at: new Date().toISOString(), turn: 1, kind: 'approval', approved: true, write: false });
+    const budget = restoreBudget(session.dir, session.id);
+    const reopened = assembleSession({ kind: 'scratch', dir: session.dir, id: session.id, budget, journal: new Journal() });
+    assert.ok(openingLines(reopened, budget).some((l) => l.startsWith('끊김')));
+  });
+
+  it('승인 안 된 배정으로 끝난 세션은 그 배정을 되살리지 않는다고 알린다', async () => {
+    const { session } = await drive(['이 타입 에러 고쳐줘']);
+    const budget = restoreBudget(session.dir, session.id);
+    const reopened = assembleSession({ kind: 'scratch', dir: session.dir, id: session.id, budget, journal: new Journal() });
+    assert.ok(openingLines(reopened, budget).some((l) => l.includes('되살리지 않는다') && l.includes('/task R01')));
+    assert.equal(reopened.state, 'waiting_input');
   });
 });

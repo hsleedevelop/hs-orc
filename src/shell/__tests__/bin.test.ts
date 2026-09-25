@@ -64,6 +64,30 @@ describe('hs-orc 진입점', () => {
     assert.match(r.err, /그런 화면이 없다: bogus/);
   });
 
+  it('chat --list 는 cli 로 새지 않고 세션 목록을 낸다', () => {
+    const r = spawnSync(process.execPath, [BIN, 'chat', '--list'], {
+      cwd: outside,
+      encoding: 'utf8',
+      env: { ...process.env, PATH: '', HS_ORC_SCRATCH: path.join(outside, 'scratch') },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /세션 없음/);
+    assert.doesNotMatch(r.stderr, /업무/);
+  });
+
+  it('chat --resume 에 없는 id 를 주면 새 세션을 만들지 않고 1 로 끝난다', () => {
+    const r = spawnSync(process.execPath, [BIN, 'chat', '--resume', 'nope'], {
+      cwd: outside,
+      encoding: 'utf8',
+      env: { ...process.env, PATH: '', HS_ORC_SCRATCH: path.join(outside, 'scratch') },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /그런 세션이 없다: nope/);
+    assert.equal(existsSync(path.join(outside, '.hs-orc', 'sessions')), false);
+  });
+
   it('`--` 뒤의 첫 낱말은 하위명령이 아니다', () => {
     const r = hsOrc(['--', 'tui 화면 하나 만들어줘']);
     assert.equal(r.code, 0);

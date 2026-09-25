@@ -28,6 +28,7 @@ const USAGE = `hs-orc ${version} — 작업 1건을 분류·배정하고 두 슬
 
   hs-orc "<작업>" [옵션…]        배정·비용 제시. 실제 실행은 --run 이다 (승인 게이트).
   hs-orc tui ["<작업>"] [옵션…]  TUI
+  hs-orc chat [--scratch|--resume <id>|--list]  대화 세션 (줄 입력)
   hs-orc gui                      GUI (Electron)
   hs-orc -- "<작업>"              첫 인자를 하위명령으로 해석하지 않는다
   hs-orc --help | --version
@@ -115,6 +116,8 @@ if (first === '--help' || first === '-h' || first === 'help') {
   process.stdout.write(`${version}\n`);
 } else if (first === 'tui') {
   await runShell('src/shell/tui/main.ts', argv.slice(1));
+} else if (first === 'chat') {
+  await runShell('src/shell/chat-main.ts', argv.slice(1));
 } else if (first === 'gui') {
   runGui(argv.slice(1));
 } else if (first === 'build-gui') {

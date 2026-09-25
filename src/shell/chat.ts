@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline';
 import type { Budget } from '../core/budget.ts';
 import type { ContextCut } from '../core/context.ts';
 import type { ConversationSession } from '../core/session.ts';
-import type { TranscriptRecord } from '../core/transcript.ts';
+import { listScratchSessions, listSessions, type SessionSummary, type TranscriptRecord } from '../core/transcript.ts';
 
 const cutLine = (cut: ContextCut | undefined): string[] => (cut ? [`맥락   앞 대화 ${cut.turns}턴·${cut.chars}자를 싣지 못했다`] : []);
 
@@ -121,4 +121,59 @@ export async function runChat(
   } finally {
     rl.close();
   }
+}
+
+export interface ChatArgs {
+  readonly scratch: boolean;
+  readonly resume?: string;
+  readonly list: boolean;
+  readonly verify: readonly string[];
+}
+
+export const CHAT_USAGE = '사용법: hs-orc chat [--scratch | --resume <id>] [--list] [--verify "<명령>"]...';
+
+export function parseChatArgs(argv: readonly string[]): ChatArgs {
+  let scratch = false;
+  let list = false;
+  let resume: string | undefined;
+  const verify: string[] = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    const value = (): string => {
+      const next = argv[i + 1];
+      if (next === undefined) throw new Error(`${arg ?? ''} 에 값이 없다.`);
+      i += 1;
+      return next;
+    };
+    switch (arg) {
+      case '--scratch': scratch = true; break;
+      case '--list': list = true; break;
+      case '--resume': resume = value(); break;
+      case '--verify': verify.push(value()); break;
+      // 조용한 폴백 금지 — 오타가 무시되면 사용자는 켠 줄 안다.
+      default: throw new Error(`모르는 옵션이다: ${arg ?? ''}\n  ${CHAT_USAGE}`);
+    }
+  }
+  if (scratch && resume !== undefined) throw new Error('--scratch 와 --resume 은 함께 쓸 수 없다 — 이어 갈 세션의 종류는 기록이 정한다.');
+  return { scratch, list, verify, ...(resume !== undefined ? { resume } : {}) };
+}
+
+/** 이 폴더의 project 세션을 먼저, 다음에 스크래치를 본다. 스크래치 폴더는 목록에서 오므로 뿌리 안이다. */
+export function findSession(cwd: string, id: string): SessionSummary | undefined {
+  return [...listSessions(cwd, 'project'), ...listScratchSessions()].find((s) => s.id === id);
+}
+
+export function openingLines(session: ConversationSession, budget: Budget, tail = 10): string[] {
+  const records = session.records().filter((r) => r.kind !== 'spend');
+  const last = records.at(-1);
+  return [
+    `세션   ${session.kind} ${session.id} · ${session.dir}`,
+    `누적   ${budget.summary()}`,
+    ...(records.length > tail ? [`       (앞 기록 ${records.length - tail}개 생략)`] : []),
+    ...records.slice(-tail).flatMap(renderRecord),
+    ...(session.interrupted ? ['끊김   지난 위임은 승인 뒤 결과가 기록되지 않았다 — 다시 보내면 새로 띄운다.'] : []),
+    // Core 는 승인 안 된 배정을 되살리지 않는다 (session.ts 생성자) — 사용자에게 그 사실과 길을 알린다.
+    ...(last?.kind === 'plan' ? [`안내   승인 안 된 배정은 되살리지 않는다 — 다시 보내거나 /task ${last.taskId}.`] : []),
+    CHAT_HELP,
+  ];
 }
