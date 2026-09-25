@@ -451,6 +451,21 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     assert.doesNotMatch(prompts[1] ?? '', /\n\n\n/, '지적 끝에 빈 줄이 겹쳤다.');
   });
 
+  it('약화 FAIL 다음 사이클도 기계적 FAIL 이면 과제·테스트 충돌로 보고 재시도하지 않는다 (D-049)', () => {
+    reset();
+    seedTest();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--max-iterations', '5'], {
+      PATH: fakeDir,
+      REVIEWER_PASS: '1',
+      HS_ORC_VERIFY_CONFIG: testsConfig,
+      PRIMARY_DO: 'echo one > tw/a.test.txt',
+    });
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /과제가 기존 테스트와 충돌한다 — 재시도하지 않는다/);
+    assert.match(r.err, /중단 {3}escalated · 2회/, '충돌인데 상한까지 재시도했다.');
+    assert.match(r.err, /안내 {3}과제가 기존 테스트와 충돌한다 — 테스트를 직접 고치거나 과제를 바꾼 뒤 다시 실행한다/);
+  });
+
   it('once 는 기존 테스트를 약화하면 rework·exit 1 이다 (D-047)', () => {
     reset();
     seedTest();
