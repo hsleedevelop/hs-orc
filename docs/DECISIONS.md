@@ -1391,6 +1391,42 @@ D-032 A2 로 토큰 상한이 세션 단위가 됐지만 세션 `Budget` 은 Gui
 
 ---
 
+## D-056 — CLI 에 `hs-orc chat` 을 두어 `ConversationSession` 을 붙인다 (D-031 결정 8 의 CLI 몫)
+
+**배경**
+D-031 결정 8 은 Core 에 헤드리스 `ConversationSession` 을 두고 "첫 셸은 GUI, CLI·TUI 는 뒤따른다" 고 했다. 지금 CLI·TUI 는 세션을 쓰지 않는다(PLAN S10 후속). 조사(2026-09-26):
+
+| | CLI `--mode pingpong` | TUI Run 화면 | `ConversationSession` (GUI) |
+|---|---|---|---|
+| 턴 | 1턴 뒤 프로세스 종료 — 다회 대화가 성립하지 않는다 | 인자 작업 1건, 입력창 없음 | 무제한 (`send`·`planAs`) |
+| 배정 | 시작 때 1회 고정 | 1회 | 턴마다 (D-031 결정 6) |
+| 맥락·resume | 없음 | 없음 | `buildContext` + 같은 슬롯 resume |
+| 기록 | journal(stderr)만, 결정 로그 없음 | 결정 로그 2회(늘 `unverified`) | jsonl + 결정 로그 + `spend` |
+| 분류 폴백 | D-026 켜짐 | D-026 켜짐 | 꺼짐, 지휘자 SUGGEST (D-033) |
+
+TUI 에 대화를 붙이려면 Ink 7 에 없는 텍스트 입력을 직접 만들거나 의존성을 더해야 한다 — CLI 줄 입력(`node:readline`)보다 크다.
+
+**결정**
+1. **CLI 가 먼저다.** 하위명령 `hs-orc chat` 이 줄 단위 REPL 로 `ConversationSession` 을 연다 — 새 project 세션(기본)·`--scratch`·`--resume <id>`·`--list`. 배정이 뜨면 `y`(읽기 전용)·`w`(쓰기)·`n`(거절)·`a`(지휘자에게 묻기, D-038)로 답하고, `/task Rxx` 가 `planAs` 다.
+2. **세션 조립은 셸 공용 함수 하나다.** `GuiService.attach()` 의 조립(지휘자 격리 D-032 B1·D-050, `skipGitCheck` D-055, 기록 `spend` 재생 D-054)을 `src/shell/conversation.ts` 로 옮기고 GUI·CLI 가 같이 쓴다 — 셸마다 조립이 갈리면 같은 세션이 셸마다 다른 실행기로 돈다 (D-026 전례).
+3. **`--mode pingpong` 은 동작을 바꾸지 않고**, 끝에 `hs-orc chat` 을 가리키는 안내 한 줄을 더한다. 스크립트 호환을 깨지 않는다.
+4. TUI 대화 화면은 이 결정 밖이다 — CLI 가 실사용으로 확인된 뒤 따로 정한다.
+5. 규칙은 세션을 따른다: `chat` 은 D-033(폴백 대신 SUGGEST)·결정 로그의 거절/차단 기록(SPEC §8)을 Core 그대로 쓴다. 한 번 실행(`hs-orc "<작업>"`)은 D-026 폴백을 유지한다 — 입력 단위가 다르다(D-033 근거 그대로).
+
+**기각**
+- *TUI 채팅 화면 먼저* — 입력 컴포넌트·재그림·키 처리가 붙어 첫 end-to-end 가 커지고 테스트가 어렵다.
+- *CLI 가 `GuiService` 를 그대로 쓴다* — project 세션을 열 때 `useProject` 가 최근 폴더 목록에 쓰는 등 GUI 전용 부수효과와 레거시 `plan()`·`run()` 이 따라온다.
+- *`--mode pingpong` 을 chat 으로 대체·제거* — 동작이 달라(1턴·고정 배정·`--side`) 대체가 아니고, 제거는 호환을 깬다. 2026-09-26 사용자 결정으로 유지 + 안내.
+
+**영향**
+- `bin/hs-orc.mjs` 에 `chat` 하위명령이 는다. 작업 문자열이 `chat` 인 한 번 실행은 `hs-orc -- chat` 으로 부른다(`tui`·`gui` 와 같다).
+- SPEC §6.4.2 의 "CLI·TUI 는 대화 맥락이 없으므로" 는 "CLI 한 번 실행·TUI 는" 으로 좁힌다.
+- 2026-09-25 결정("CLI·TUI 승인 거절은 결정 로그에 옮기지 않는다")은 한 번 실행에 그대로다 — `chat` 의 거절은 Core 가 이미 기록한다.
+
+**상태** 확정 — 2026-09-26 사용자 결정 (A: CLI chat 먼저 · pingpong 유지 + 안내). 계획 `docs/superpowers/plans/2026-09-26-cli-chat.md`.
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |
