@@ -318,7 +318,7 @@ PRD §7 은 v1 을 **"실제 작업 1건이 분류→배정→실행→증거 �
 - ~~`delegate()` 의 journal `charge` 는 reviewer 가 돌면 reviewer 의 charge 다 (`GuiService.run` 때부터).~~ → 해결 (2026-09-25): `runDuo` 가 `primaryCharge` 를 돌려주고 GUI(`delegate`)·TUI 의 journal 실행 줄이 그것을 싣는다. TUI 에도 같은 결함이 있었다.
 - ~~git 이 아닌 **project** 폴더에서 codex 위임은 여전히 거절된다 (nonGit 은 스크래치에만).~~ → **D-055** (읽기 전용만 허용, 쓰기 켠 위임은 그대로 거절).
 - 다른 cwd resume, resume 중 모델 변경, 긴 세션 압축 — 미실측. codex 는 resume 에 쓰기를 실을 수 없어 쓰기 켠 후속은 잇지 않는다 (최종 리뷰 #1).
-- GuiService 는 활성 세션 하나. CLI·TUI 는 아직 `ConversationSession` 을 쓰지 않는다 (D-031 결정 8).
+- GuiService 는 활성 세션 하나. CLI 는 `hs-orc chat` 이 세션을 쓴다 (D-056). TUI 는 아직 쓰지 않는다 — CLI 실사용 뒤에 정한다.
 - 최종 리뷰 Minor (2026-09-24 `final-review.md` 에서 옮김, 코드 대조로 미해결 확인. #12 `$evidence.resume` 기록은 반영됨):
   - ~~`approve()` 가 primary 시작 전 `budget.limitReached()` 를 보지 않는다~~ → 해결 (상한이면 시작하지 않고 결정 로그 `blocked`).
   - ~~거절이 결정 로그에 안 남는다~~ → 해결 (사용자 결정: `decided`+`declined` 두 줄, SPEC §8). ~~**남은 것:** CLI·TUI 의 승인 거절도 결정 로그에 안 남는다 — 같은 규칙을 옮길지.~~ → 옮기지 않는다 (2026-09-25 사용자 결정). GUI 세션에는 지휘자 제안에 대한 **거절 버튼**이 있지만, CLI 는 `--run` 없으면 제시만(dry-run)이고 TUI 는 승인(y/Enter)과 종료뿐이다 — 기록할 거절 행위가 없고, 종료를 거절로 적으면 추측이 로그에 들어간다. TUI 에 명시적 거절 키가 생기면 그때 옮긴다.

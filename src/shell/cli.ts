@@ -252,7 +252,10 @@ async function main(): Promise<void> {
     const session = new PingpongSession(matrix, plan, execute, budgetUsd, 0, budget);
     const turn = await session.turn({ prompt: args.task, side: args.side });
     process.stdout.write(`${turn.text}\n`);
-    process.stderr.write(`\n${session.journal.render()}\n누적   ${turn.budget}\n제안   ${turn.suggestion}\n`);
+    process.stderr.write(
+      `\n${session.journal.render()}\n누적   ${turn.budget}\n제안   ${turn.suggestion}\n` +
+        '안내   이 모드는 1턴으로 끝난다 — 맥락을 잇는 다회 대화는 hs-orc chat 이다 (D-056).\n',
+    );
     printTokenCapHint(budget);
     return;
   }
