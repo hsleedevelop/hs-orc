@@ -144,7 +144,7 @@ describe('판정 읽기', () => {
   });
 
   it('Core 검증 결과가 있을 때만 "다시 실행하지 마라" 를 싣는다', () => {
-    // 결과가 없으면 reviewer 의 자체 검증(codex 읽기 전용 샌드박스)을 막지 않는다. "다시 실행하지 마라" 를 싣는다 — 없으면 reviewer 의 자체 검증을 막지 않는다.
+    // 결과가 없으면 reviewer 의 자체 검증(codex 읽기 전용 샌드박스)을 막지 않는다.
     assert.match(reviewPrompt(planR01, 't', 'o', '$ npm test\nexit=0'), /Core 가 이미 실행했다\. 다시 실행하지 말고/);
     assert.doesNotMatch(reviewPrompt(planR01, 't', 'o'), /다시 실행하지 말고/);
   });
