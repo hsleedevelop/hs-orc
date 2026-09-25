@@ -49,7 +49,7 @@ export function buildDirectPrompt(matrix: Matrix, context: string, message: stri
 const SUGGEST_LINE = /^SUGGEST:\s*(R\d{2}|NONE)\s*$/i;
 
 /**
- * **마지막 줄만** 읽는다 — reviewer 판정(`parseVerdict`)과 같은 규칙이다.
+ * **마지막 줄만**, 그 줄 전체가 형식에 맞을 때만 읽는다 — reviewer 판정(`parseVerdict`, 끝 3줄의 단어)보다 엄격하다.
  * 본문 중간의 SUGGEST 는 제안이 아니다. 없는 행 id 는 버린다 — 행을 추측하지 않는다.
  */
 export function parseSuggest(matrix: Matrix, text: string): { body: string; suggest: string | null } {

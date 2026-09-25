@@ -19,7 +19,20 @@ const LIMITS_PATH = path.resolve(import.meta.dirname, '..', '..', 'data', 'limit
 
 let cached: Limits | undefined;
 
+/** 수기 파일이라 값을 믿지 않는다. 0·음수 상한은 막지 않고, `contextChars` 가 2 미만이면 맥락 자르기가 깨진다. */
+export function checkLimits(limits: Limits): Limits {
+  for (const key of ['budgetUsd', 'tokenBudget', 'maxIterations', 'maxNodes', 'runTimeoutMs', 'contextTurns', 'contextChars'] as const) {
+    const value = limits[key];
+    if (!Number.isFinite(value) || value <= 0) throw new Error(`limits.json 의 ${key} 는 양수여야 한다: ${value}`);
+  }
+  if (!Number.isInteger(limits.contextTurns)) throw new Error(`limits.json 의 contextTurns 는 정수여야 한다: ${limits.contextTurns}`);
+  if (!Number.isInteger(limits.contextChars) || limits.contextChars < 2) {
+    throw new Error(`limits.json 의 contextChars 는 2 이상의 정수여야 한다: ${limits.contextChars}`);
+  }
+  return limits;
+}
+
 export function loadLimits(): Limits {
-  cached ??= JSON.parse(readFileSync(LIMITS_PATH, 'utf8')) as Limits;
+  cached ??= checkLimits(JSON.parse(readFileSync(LIMITS_PATH, 'utf8')) as Limits);
   return cached;
 }

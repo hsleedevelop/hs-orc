@@ -331,7 +331,10 @@ PRD §7 은 v1 을 **"실제 작업 1건이 분류→배정→실행→증거 �
   - cursor 의 `result` 줄 `session_id` 는 실측이 아니라 추론이다 (`stream.test.ts` 는 claude 모양만) — cursor 실행 1회로 확인. 틀리면 cursor 행은 resume 안 됨(무해·가시). **2026-09-24 사용자 결정으로 보류** (구독 사용량).
   - ~~`records()` 가 호출마다 JSONL 을 다시 읽는다~~ → 해결 (열 때 한 번 읽고 append 와 함께 든다).
   - ~~렌더러가 안 쓰는 레거시 `plan`/`run` IPC·preload~~ → IPC·preload 만 지웠다 (사용자 결정). `GuiService.plan`·`run` 과 S7 판정 테스트는 남긴다.
-- SDD 원장 보류 minor (위와 겹치지 않는 것, 모두 미해결): `readTranscript` 가 ENOENT 외 읽기 오류도 빈 세션으로 삼킨다 · `conductor.ts` 의 `parseSuggest`≡`parseVerdict` 주석 과장 · `send('')` 가 조용히 `[]` (CLI 셸 때 `SessionStateError`) · `contextChars <= 0` 슬라이스 이상 · 승인 계획을 `delegate()` 전에 비워 throw 시 버려짐 · `openConversation` 스크래치 검사에 realpath 없음·`dir === scratchRoot()` 허용 · 세션 목록 `<tr onClick>` 키보드 불가(a11y) · `run.ts` truthy `sessionId` 검사.
+- SDD 원장 보류 minor — 2026-09-25 정리:
+  - 고침: `readTranscript` 는 없는 기록(ENOENT·ENOTDIR)만 빈 대화로 보고 다른 읽기 오류는 던진다(목록은 그 세션을 "(읽지 못한 기록)" 으로 보여준다) · `parseSuggest` 주석을 실제 규칙(마지막 줄 전체 일치, `parseVerdict` 보다 엄격)으로 · `limits.json` 을 읽을 때 검사(`checkLimits` — 상한은 양수, `contextChars` 는 2 이상 정수) · 스크래치 `openConversation` 은 실제 경로로 비교하고 뿌리 자체를 막는다 · 세션 목록 행은 Tab·Enter/Space 로 연다.
+  - 남김: 승인 계획을 `delegate()` 전에 비워 throw 시 버려짐 — `planAs` 로 다시 배정할 수 있어 재시도 승인 흐름이 필요해질 때 · `send('')` 의 조용한 `[]` — GUI 가 빈 입력을 먼저 막고 CLI 대화 셸이 아직 없다.
+  - 버림: `run.ts` 의 truthy `sessionId` — 빈 id 는 이어 붙일 수 없어 버리는 것이 맞다.
 - Q12 스크래치 보존·정리.
 
 ---

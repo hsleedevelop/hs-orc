@@ -266,7 +266,10 @@ function SessionList(props: { onOpen: (v: SessionView) => void; onError: (m: str
       !list ? text('불러오는 중…', 'dim')
       : list.length === 0 ? text('아직 없다', 'dim')
       : h('table', null, h('tbody', null, ...list.map((s) =>
-          h('tr', { key: `${s.dir}/${s.id}`, className: 'clickable', onClick: () => open(s) },
+          h('tr', {
+            key: `${s.dir}/${s.id}`, className: 'clickable', tabIndex: 0, role: 'button', onClick: () => open(s),
+            onKeyDown: (e: { key: string; preventDefault: () => void }) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(s); } },
+          },
             h('td', { className: 'mono dim' }, s.kind === 'scratch' ? '스크래치' : elide(s.dir, 30)),
             h('td', null, s.preview || '(빈 세션)'),
             h('td', { className: 'mono dim' }, s.lastAt.slice(0, 16).replace('T', ' '))))))));

@@ -102,8 +102,12 @@ export function readTranscript(file: string): LoadedTranscript {
   let text: string;
   try {
     text = readFileSync(file, 'utf8');
-  } catch {
-    return { records: [], broken: 0 }; // 아직 없는 기록은 정상 상태다.
+  } catch (error) {
+    // 아직 없는 기록만 정상 상태다(경로 중간이 파일이어도 기록은 있을 수 없다). 다른 읽기 오류를
+    // 빈 대화로 삼키면 다시 연 세션이 턴 1 부터 덧쓴다.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return { records: [], broken: 0 };
+    throw error;
   }
   const records: TranscriptRecord[] = [];
   let broken = 0;
@@ -141,10 +145,17 @@ export function listSessions(dir: string, kind: SessionKind): SessionSummary[] {
   }
   return names
     .map((name): SessionSummary => {
-      const { records } = readTranscript(path.join(folder, name));
+      const id = name.slice(0, -'.jsonl'.length);
+      let records: TranscriptRecord[];
+      try {
+        ({ records } = readTranscript(path.join(folder, name)));
+      } catch {
+        // 한 세션을 못 읽어도 목록은 보여준다. 열면 그때 오류가 드러난다.
+        return { id, dir, kind, lastAt: '', preview: '(읽지 못한 기록)' };
+      }
       const first = records.find((r) => r.kind === 'user');
       return {
-        id: name.slice(0, -'.jsonl'.length),
+        id,
         dir,
         kind,
         lastAt: records.at(-1)?.at ?? '',
