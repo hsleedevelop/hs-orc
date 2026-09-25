@@ -448,6 +448,7 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     assert.match(r.err, /중단 {3}goal-reached · 2회/);
     const prompts = readFileSync(claudeArgs, 'utf8').split('<<END>>');
     assert.match(prompts[1] ?? '', /기존 테스트를 약하게 만들지 말고 코드를 고쳐라/);
+    assert.doesNotMatch(prompts[1] ?? '', /\n\n\n/, '지적 끝에 빈 줄이 겹쳤다.');
   });
 
   it('once 는 기존 테스트를 약화하면 rework·exit 1 이다 (D-047)', () => {

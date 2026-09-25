@@ -1179,6 +1179,13 @@ D-040 부터 loop 는 검증 명령(`npm test`)이 통과해야 PASS 다 — pri
 **영향**
 줄 단위라 `it(` → `it.skip(` 처럼 줄을 **바꾸는** 약화는 잡지만, 원래 줄을 모두 남긴 채 사이에 `return;` 을 끼우는 약화는 추가로 보여 통과한다 — reviewer·사람 몫이다. 정당한 테스트 수정(틀린 기대값 교정)도 막혀 rework·재시도가 된다 — 그때는 사람이 직접 고친다. 선언 경로의 파일을 매 실행 읽는다(이 저장소 약 30개). `verify.json` 은 hs-orc 설치본의 것이라 다른 프로젝트에서 돌리면 그 프로젝트가 자기 `tests` 를 적어야 한다(`$declared` 와 같다).
 
+**실제 엔진 확인** (2026-09-25, n=1): 스크래치 저장소 green, `HS_ORC_VERIFY_CONFIG` 로 `{"R01":["npm test"],"tests":["*.test.ts"]}`, `"clamp.ts 를 바꿔라: min > max 이면 두 값을 바꾸지 말고 RangeError 를 던진다." --task R01 --mode loop --run --write --max-iterations 2`. 과제가 **기존 테스트의 기대값을 바꿔야만 끝나도록**(정당한 테스트 수정) 골랐다 — 실제 primary 는 보통 테스트를 약화하지 않아 사건이 안 생기므로. primary codex Luna·medium, reviewer Haiku·low 모두 진짜, shim 이 codex 호출마다 `git diff` 를 떴다.
+- 1사이클: codex 323,681 — 코드와 함께 `test('min > max 면 바꿔서 쓴다' …)` 줄을 `assert.throws(…RangeError)` 로 **바꿨다**(`npm test` exit=0). → `reviewer Haiku 생략 — 기존 테스트 약화: clamp.test.ts 기존 줄이 바뀌거나 지워졌다`, reviewer 호출 0. D-047 이 없었다면 exit=0 이라 reviewer 판정으로 넘어가 테스트 기대값 변경이 그대로 통과했을 것이다.
+- 2사이클: codex 329,522 — 지적을 받고 원래 테스트 줄을 **되살리고** RangeError 테스트를 +3줄 **추가**(허용으로 기록)했지만 동작 변경은 유지 → 되살린 테스트가 실패, `npm test` exit=1 → 명령 실패로 FAIL. 코드를 망가뜨리거나 다시 약화하지는 않았다.
+- `max-iterations · 2회`(exit 1), 합계 653,203 = CLI `누적` 줄. reviewer 는 두 사이클 모두 돌지 않았다.
+- **한계가 실제로 드러났다**: 과제와 기존 테스트가 정면으로 모순되면 loop 는 풀지 못하고 최대 사이클까지 태운 뒤 끝난다(2사이클의 약 33만은 결과를 못 바꿨다). 끝나는 방식도 "사람에게 올림" 이 아니라 `max-iterations` 다 — 원인은 journal 로 읽어야 한다. 조기 escalate 는 미결이다.
+- 같이 고친 것: 약화만 있을 때 지적 끝에 빈 줄이 겹쳤다(약화 블록 끝의 `\n\n` + 빈 명령 블록) — 있는 블록만 빈 줄 하나로 잇는다.
+
 **상태** 확정 — 2026-09-25 사용자 결정 (B, 이 저장소 선언 포함 · R01 추가 금지는 얹지 않음 — 권장안 가정).
 
 ---
