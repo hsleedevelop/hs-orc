@@ -3,7 +3,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { appendFileSync, mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable, Writable } from 'node:stream';
@@ -116,6 +116,14 @@ describe('chat — 입력 루프', () => {
     assert.match(out, /승인 대기 중인 배정이 없다/);
   });
 
+  it('승인 대기 중에도 /quit 은 승인하지 않고 나가고, /help 는 도움말을 보여준 뒤 계속 묻는다', async () => {
+    const { out, calls, session } = await drive(['이 타입 에러 고쳐줘', '/help', '/quit', 'y']);
+    assert.deepEqual(calls, []);
+    assert.equal(session.records().at(-1)?.kind, 'plan');
+    assert.match(out, /명령 {3}메시지를 그냥 쓰면/);
+    assert.doesNotMatch(out, /y·w·n·a 중 하나로 답한다/);
+  });
+
   it('/quit 뒤의 줄은 처리하지 않는다', async () => {
     const { calls } = await drive(['/quit', '넌 누구니']);
     assert.deepEqual(calls, []);
@@ -124,11 +132,24 @@ describe('chat — 입력 루프', () => {
 
 describe('chat — 진입', () => {
   it('인자를 읽고, 모르는 옵션과 --scratch·--resume 동시 지정은 던진다', () => {
-    assert.deepEqual(parseChatArgs(['--scratch', '--verify', 'npm test']), { scratch: true, list: false, verify: ['npm test'] });
+    assert.deepEqual(parseChatArgs(['--scratch', '--verify', 'npm test']), { scratch: true, list: false, help: false, verify: ['npm test'] });
     assert.equal(parseChatArgs(['--resume', 'abc']).resume, 'abc');
     assert.throws(() => parseChatArgs(['--oops']), /모르는 옵션/);
     assert.throws(() => parseChatArgs(['--resume']), /값이 없다/);
     assert.throws(() => parseChatArgs(['--scratch', '--resume', 'x']), /함께 쓸 수 없다/);
+  });
+
+  it('--help 는 도움말 요청으로 읽는다', () => {
+    assert.equal(parseChatArgs(['--help']).help, true);
+    assert.equal(parseChatArgs([]).help, false);
+  });
+
+  it('다시 열 때 깨진 기록 줄 수를 알린다 (SPEC §6.4.1)', async () => {
+    const { session } = await drive(['넌 누구니']);
+    appendFileSync(transcriptPath(session.dir, session.id), '{깨진 줄\n');
+    const budget = restoreBudget(session.dir, session.id);
+    const reopened = assembleSession({ kind: 'scratch', dir: session.dir, id: session.id, budget, journal: new Journal() });
+    assert.ok(openingLines(reopened, budget).includes('경고   기록에 깨진 줄 1개 — 건너뛰고 보여준다'));
   });
 
   it('없는 세션 id 는 찾지 못한다', () => {

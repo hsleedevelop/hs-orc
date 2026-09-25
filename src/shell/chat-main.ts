@@ -5,11 +5,15 @@
 import { Journal } from '../core/journal.ts';
 import { listScratchSessions, listSessions, prepareSession, type SessionKind } from '../core/transcript.ts';
 import { assembleSession, restoreBudget } from './conversation.ts';
-import { findSession, interruptGuard, openingLines, parseChatArgs, runChat } from './chat.ts';
+import { CHAT_HELP, CHAT_USAGE, findSession, interruptGuard, openingLines, parseChatArgs, runChat } from './chat.ts';
 
 async function main(): Promise<void> {
   const args = parseChatArgs(process.argv.slice(2));
   const cwd = process.cwd();
+  if (args.help) {
+    process.stdout.write(`${CHAT_USAGE}\n${CHAT_HELP}\n`);
+    return;
+  }
   if (args.list) {
     const all = [...listSessions(cwd, 'project'), ...listScratchSessions()].sort((a, b) => b.lastAt.localeCompare(a.lastAt));
     process.stdout.write(all.length === 0 ? '세션 없음\n' : `${all.map((s) => `${s.id}  ${s.kind.padEnd(7)} ${s.lastAt}  ${s.preview}`).join('\n')}\n`);

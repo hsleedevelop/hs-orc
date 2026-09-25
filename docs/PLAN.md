@@ -334,7 +334,7 @@ PRD §7 은 v1 을 **"실제 작업 1건이 분류→배정→실행→증거 �
   - ~~렌더러가 안 쓰는 레거시 `plan`/`run` IPC·preload~~ → IPC·preload 만 지웠다 (사용자 결정). `GuiService.plan`·`run` 과 S7 판정 테스트는 남긴다.
 - SDD 원장 보류 minor — 2026-09-25 정리:
   - 고침: `readTranscript` 는 없는 기록(ENOENT·ENOTDIR)만 빈 대화로 보고 다른 읽기 오류는 던진다(목록은 그 세션을 "(읽지 못한 기록)" 으로 보여준다) · `parseSuggest` 주석을 실제 규칙(마지막 줄 전체 일치, `parseVerdict` 보다 엄격)으로 · `limits.json` 을 읽을 때 검사(`checkLimits` — 상한은 양수, `contextChars` 는 2 이상 정수) · 스크래치 `openConversation` 은 실제 경로로 비교하고 뿌리 자체를 막는다 · 세션 목록 행은 Tab·Enter/Space 로 연다.
-  - 남김: 승인 계획을 `delegate()` 전에 비워 throw 시 버려짐 — `planAs` 로 다시 배정할 수 있어 재시도 승인 흐름이 필요해질 때 · `send('')` 의 조용한 `[]` — GUI 가 빈 입력을 먼저 막고 CLI 대화 셸이 아직 없다.
+  - 남김: 승인 계획을 `delegate()` 전에 비워 throw 시 버려짐 — `planAs` 로 다시 배정할 수 있어 재시도 승인 흐름이 필요해질 때 · `send('')` 의 조용한 `[]` — GUI 와 `hs-orc chat`(D-056) 이 빈 입력을 먼저 거른다.
   - 버림: `run.ts` 의 truthy `sessionId` — 빈 id 는 이어 붙일 수 없어 버리는 것이 맞다.
 - ~~Q12 스크래치 보존·정리~~ → 자동 정리 없음 (DECISIONS Q12).
 
