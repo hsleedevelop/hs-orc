@@ -73,7 +73,8 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
     throw error;
   }
   const run = duo.primary;
-  const charge = budget.charges.at(-1);
+  // journal 줄은 primary 실행이다 — 과금도 primary 것을 싣는다.
+  const charge = duo.primaryCharge;
 
   let stored = '';
   try {
@@ -102,7 +103,7 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
     change: run.text.slice(0, 200),
     // 증거가 모였거나 나쁜 결과를 말할 때만 채운다. 빈 값은 "통과"가 아니라 "검증 안 함"이다.
     verification: report.satisfied || report.contradictions.length > 0 ? report.summary : '',
-    ...(charge ? { charge } : {}),
+    charge,
   });
 
   // 2차 — 같은 id 로 append. 증거가 모이고 나쁜 결과가 없을 때만 ok 다 (SPEC §5, D-043).

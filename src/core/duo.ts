@@ -11,13 +11,15 @@
 import type { Matrix } from '../data/matrix.ts';
 import type { AssignmentPlan } from './assign.ts';
 import { estimateUsd, type SlotExecutor, type SlotRun } from './executor.ts';
-import type { Budget } from './budget.ts';
+import type { Budget, Charge } from './budget.ts';
 import type { Evidence } from './evidence.ts';
 
 export type Verdict = 'pass' | 'fail' | 'unknown';
 
 export interface DuoResult {
   readonly primary: SlotRun;
+  /** primary 의 과금. `budget.charges.at(-1)` 은 reviewer 가 돌면 reviewer 것이다. */
+  readonly primaryCharge: Charge;
   /** reviewer 를 끄면 `null`. 끈 것과 실패한 것을 구분한다. */
   readonly review: SlotRun | null;
   readonly verdict: Verdict;
@@ -93,17 +95,17 @@ export async function runDuo(
     task,
     options.resumePrimary !== undefined ? { resume: options.resumePrimary } : undefined,
   );
-  budget.charge(`${primarySlot.label}·${primarySlot.effort}`, primary.actualUsd, estimateUsd(matrix, primarySlot), primary.meteredUsd, primarySlot.plan);
+  const primaryCharge = budget.charge(`${primarySlot.label}·${primarySlot.effort}`, primary.actualUsd, estimateUsd(matrix, primarySlot), primary.meteredUsd, primarySlot.plan);
   // 금액과 토큰은 **같은 자리**에서 센다. 한쪽만 세면 구독제에서 상한이 통째로 비어 버린다 (D-030).
   budget.countTokens(primary.usage);
 
   if (options.skipReviewer === true || !primary.ok) {
     // primary 가 실패했으면 검증할 산출물이 없다. reviewer 를 돌려 돈만 쓰지 않는다.
-    return { primary, review: null, verdict: 'unknown', evidence: [] };
+    return { primary, primaryCharge, review: null, verdict: 'unknown', evidence: [] };
   }
 
   // 상한을 넘겼으면 reviewer 를 시작하지 않는다 — 쓴 것은 못 되돌린다. **금액과 토큰 둘 다 본다** (D-030).
-  if (budget.limitReached()) return { primary, review: null, verdict: 'unknown', evidence: [] };
+  if (budget.limitReached()) return { primary, primaryCharge, review: null, verdict: 'unknown', evidence: [] };
 
   const review = await execute(reviewerSlot, reviewPrompt(plan, task, primary.text));
   budget.charge(`${reviewerSlot.label}·${reviewerSlot.effort}`, review.actualUsd, estimateUsd(matrix, reviewerSlot), review.meteredUsd, reviewerSlot.plan);
@@ -122,5 +124,5 @@ export async function runDuo(
           },
         ];
 
-  return { primary, review, verdict, evidence };
+  return { primary, primaryCharge, review, verdict, evidence };
 }

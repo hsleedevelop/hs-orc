@@ -86,7 +86,7 @@ function RunScreen({
     // **두 슬롯을 실제로 돌린다** (D-009).
     void runDuo(matrix, result.plan, execute, task, budget).then((duo) => {
       const run = duo.primary;
-      const charge = budget.charges.at(-1);
+      const charge = duo.primaryCharge;
       journal.append({
         index: journal.records.length + 1,
         unit: '실행',
@@ -98,7 +98,7 @@ function RunScreen({
         change: run.text.slice(0, 200),
         // reviewer 판정이 있으면 그것이 검증이다. 없으면 빈 칸이고 "통과"가 아니다.
         verification: duo.verdict === 'unknown' ? '' : `reviewer ${result.plan.slots.reviewer.label}: ${duo.verdict.toUpperCase()}`,
-        ...(charge ? { charge } : {}),
+        charge,
       });
       // 원시 로그를 먼저 보존하고, 실패해도 화면에 보이는 상태로 남긴다.
       let stored = '';
