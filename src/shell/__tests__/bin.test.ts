@@ -76,6 +76,17 @@ describe('hs-orc 진입점', () => {
     assert.doesNotMatch(r.stderr, /업무/);
   });
 
+  it('chat --help 는 사용법을 내고 0 으로 끝난다', () => {
+    const r = spawnSync(process.execPath, [BIN, 'chat', '--help'], {
+      cwd: outside,
+      encoding: 'utf8',
+      env: { ...process.env, PATH: '', HS_ORC_SCRATCH: path.join(outside, 'scratch') },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    assert.equal(r.status, 0);
+    assert.match(r.stdout, /사용법: hs-orc chat/);
+  });
+
   it('chat --resume 에 없는 id 를 주면 새 세션을 만들지 않고 1 로 끝난다', () => {
     const r = spawnSync(process.execPath, [BIN, 'chat', '--resume', 'nope'], {
       cwd: outside,

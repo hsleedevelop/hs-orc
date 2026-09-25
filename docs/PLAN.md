@@ -319,7 +319,7 @@ PRD §7 은 v1 을 **"실제 작업 1건이 분류→배정→실행→증거 �
 - ~~git 이 아닌 **project** 폴더에서 codex 위임은 여전히 거절된다 (nonGit 은 스크래치에만).~~ → **D-055** (읽기 전용만 허용, 쓰기 켠 위임은 그대로 거절).
 - 다른 cwd resume, resume 중 모델 변경, 긴 세션 압축 — 미실측. codex 는 resume 에 쓰기를 실을 수 없어 쓰기 켠 후속은 잇지 않는다 (최종 리뷰 #1).
 - GuiService 는 활성 세션 하나. CLI 는 `hs-orc chat` 이 세션을 쓴다 (D-056). TUI 는 아직 쓰지 않는다 — CLI 실사용 뒤에 정한다.
-  - 2026-09-26 실측 (`hs-orc chat --scratch`, 격리 Haiku·low): "넌 누구니" 직접 답 1회 $0.0642 API 환산(구독제, 청구 없음)·토큰 31,519 → `--resume` 이 기록과 누적을 그대로 되살렸다. 비용이 S10 GUI 실측($0.0111)의 약 6배다 — 원인 미확인(캐시 쓰기 추정, 미검증).
+  - 2026-09-26 실측 (`hs-orc chat --scratch`, 격리 Haiku·low): "넌 누구니" 직접 답 1회 $0.0642 API 환산(구독제, 청구 없음)·토큰 31,519 → `--resume` 이 기록과 누적을 그대로 되살렸다. 비용이 S10 GUI 실측($0.0111)의 약 6배지만 **토큰 양은 같다**(engines.json 격리 재실측 2026-09-25: $0.0116/32,385 tok) — chat 경로의 문제가 아니라 엔진 프롬프트 캐시 상태 차이로 본다: 31.5k 전부 1시간 캐시 쓰기(Haiku 입력 $1/MTok × 2) ≈ $0.063 으로 실측과 맞고, 캐시 적중이면 약 $0.01 이다. 추론이다 — 엔진 usage 의 `cache_creation` 내역은 저장되지 않아(safe-mode 실행은 claude 세션 기록도 없다) 직접 확인하지 못했다.
 - 최종 리뷰 Minor (2026-09-24 `final-review.md` 에서 옮김, 코드 대조로 미해결 확인. #12 `$evidence.resume` 기록은 반영됨):
   - ~~`approve()` 가 primary 시작 전 `budget.limitReached()` 를 보지 않는다~~ → 해결 (상한이면 시작하지 않고 결정 로그 `blocked`).
   - ~~거절이 결정 로그에 안 남는다~~ → 해결 (사용자 결정: `decided`+`declined` 두 줄, SPEC §8). ~~**남은 것:** CLI·TUI 의 승인 거절도 결정 로그에 안 남는다 — 같은 규칙을 옮길지.~~ → 옮기지 않는다 (2026-09-25 사용자 결정). GUI 세션에는 지휘자 제안에 대한 **거절 버튼**이 있지만, CLI 는 `--run` 없으면 제시만(dry-run)이고 TUI 는 승인(y/Enter)과 종료뿐이다 — 기록할 거절 행위가 없고, 종료를 거절로 적으면 추측이 로그에 들어간다. TUI 에 명시적 거절 키가 생기면 그때 옮긴다.
@@ -334,7 +334,7 @@ PRD §7 은 v1 을 **"실제 작업 1건이 분류→배정→실행→증거 �
   - ~~렌더러가 안 쓰는 레거시 `plan`/`run` IPC·preload~~ → IPC·preload 만 지웠다 (사용자 결정). `GuiService.plan`·`run` 과 S7 판정 테스트는 남긴다.
 - SDD 원장 보류 minor — 2026-09-25 정리:
   - 고침: `readTranscript` 는 없는 기록(ENOENT·ENOTDIR)만 빈 대화로 보고 다른 읽기 오류는 던진다(목록은 그 세션을 "(읽지 못한 기록)" 으로 보여준다) · `parseSuggest` 주석을 실제 규칙(마지막 줄 전체 일치, `parseVerdict` 보다 엄격)으로 · `limits.json` 을 읽을 때 검사(`checkLimits` — 상한은 양수, `contextChars` 는 2 이상 정수) · 스크래치 `openConversation` 은 실제 경로로 비교하고 뿌리 자체를 막는다 · 세션 목록 행은 Tab·Enter/Space 로 연다.
-  - 남김: 승인 계획을 `delegate()` 전에 비워 throw 시 버려짐 — `planAs` 로 다시 배정할 수 있어 재시도 승인 흐름이 필요해질 때 · `send('')` 의 조용한 `[]` — GUI 가 빈 입력을 먼저 막고 CLI 대화 셸이 아직 없다.
+  - 남김: 승인 계획을 `delegate()` 전에 비워 throw 시 버려짐 — `planAs` 로 다시 배정할 수 있어 재시도 승인 흐름이 필요해질 때 · `send('')` 의 조용한 `[]` — GUI 와 `hs-orc chat`(D-056) 이 빈 입력을 먼저 거른다.
   - 버림: `run.ts` 의 truthy `sessionId` — 빈 id 는 이어 붙일 수 없어 버리는 것이 맞다.
 - ~~Q12 스크래치 보존·정리~~ → 자동 정리 없음 (DECISIONS Q12).
 
