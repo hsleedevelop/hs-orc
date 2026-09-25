@@ -321,7 +321,7 @@ PRD §7 은 v1 을 **"실제 작업 1건이 분류→배정→실행→증거 �
 - GuiService 는 활성 세션 하나. CLI·TUI 는 아직 `ConversationSession` 을 쓰지 않는다 (D-031 결정 8).
 - 최종 리뷰 Minor (2026-09-24 `final-review.md` 에서 옮김, 코드 대조로 미해결 확인. #12 `$evidence.resume` 기록은 반영됨):
   - ~~`approve()` 가 primary 시작 전 `budget.limitReached()` 를 보지 않는다~~ → 해결 (상한이면 시작하지 않고 결정 로그 `blocked`).
-  - ~~거절이 결정 로그에 안 남는다~~ → 해결 (사용자 결정: `decided`+`declined` 두 줄, SPEC §8). **남은 것:** CLI·TUI 의 승인 거절도 결정 로그에 안 남는다 — 같은 규칙을 옮길지.
+  - ~~거절이 결정 로그에 안 남는다~~ → 해결 (사용자 결정: `decided`+`declined` 두 줄, SPEC §8). ~~**남은 것:** CLI·TUI 의 승인 거절도 결정 로그에 안 남는다 — 같은 규칙을 옮길지.~~ → 옮기지 않는다 (2026-09-25 사용자 결정). GUI 세션에는 지휘자 제안에 대한 **거절 버튼**이 있지만, CLI 는 `--run` 없으면 제시만(dry-run)이고 TUI 는 승인(y/Enter)과 종료뿐이다 — 기록할 거절 행위가 없고, 종료를 거절로 적으면 추측이 로그에 들어간다. TUI 에 명시적 거절 키가 생기면 그때 옮긴다.
   - ~~`runDuo` 가 던지면 1차 결정 줄이 `pending` 으로 남는다~~ → 해결 (2차 `ran`/`wrong` + 세션 테스트).
   - ~~`buildInvocation` 이 `write`+`nonGit` 을 함께 받는다~~ → 해결 (resolve 에서 던진다).
   - ~~렌더러 `act()` 가 IPC 거절 시 낡은 `SessionView` 를 남긴다~~ → 해결 (`convView()` 재조회, 화면 실측 전).
@@ -335,7 +335,7 @@ PRD §7 은 v1 을 **"실제 작업 1건이 분류→배정→실행→증거 �
   - 고침: `readTranscript` 는 없는 기록(ENOENT·ENOTDIR)만 빈 대화로 보고 다른 읽기 오류는 던진다(목록은 그 세션을 "(읽지 못한 기록)" 으로 보여준다) · `parseSuggest` 주석을 실제 규칙(마지막 줄 전체 일치, `parseVerdict` 보다 엄격)으로 · `limits.json` 을 읽을 때 검사(`checkLimits` — 상한은 양수, `contextChars` 는 2 이상 정수) · 스크래치 `openConversation` 은 실제 경로로 비교하고 뿌리 자체를 막는다 · 세션 목록 행은 Tab·Enter/Space 로 연다.
   - 남김: 승인 계획을 `delegate()` 전에 비워 throw 시 버려짐 — `planAs` 로 다시 배정할 수 있어 재시도 승인 흐름이 필요해질 때 · `send('')` 의 조용한 `[]` — GUI 가 빈 입력을 먼저 막고 CLI 대화 셸이 아직 없다.
   - 버림: `run.ts` 의 truthy `sessionId` — 빈 id 는 이어 붙일 수 없어 버리는 것이 맞다.
-- Q12 스크래치 보존·정리.
+- ~~Q12 스크래치 보존·정리~~ → 자동 정리 없음 (DECISIONS Q12).
 
 ---
 

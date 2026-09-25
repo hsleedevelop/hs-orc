@@ -190,4 +190,4 @@ Terminal-Bench 4.0(독립 벤치마크, model+agent harness 구성), Artificial 
 4. ~~v2 GUI의 기술 선택~~ → D-021 (Electron + React)
 5. ~~엔진 resume 비대화 왕복 실측~~ → D-031 에 기록 (세 엔진 통과)
 6. ~~직접 답의 모델·effort~~ → Haiku·low (Q11). 경계는 SPEC §6.4.2
-7. 스크래치 세션 보존·정리 정책 (Q12)
+7. ~~스크래치 세션 보존·정리 정책~~ → 자동 정리 없음 (Q12)
