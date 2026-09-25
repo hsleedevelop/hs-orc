@@ -43,6 +43,7 @@ npm link            # 또는: ln -s "$PWD/bin/hs-orc.mjs" ~/.local/bin/hs-orc
 hs-orc "<작업>"                      # 배정·비용 제시까지. 여기서 멈춘다
 hs-orc "<작업>" --run                # 두 슬롯 실행 (읽기 전용)
 hs-orc "<작업>" --write --run        # primary 가 파일을 고칠 수 있다
+hs-orc chat [--scratch|--resume <id>]   # 대화 세션 (줄 입력)
 hs-orc tui "<작업>"                  # TUI
 hs-orc gui                           # GUI (Electron)
 hs-orc --help

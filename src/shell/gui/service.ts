@@ -15,15 +15,13 @@ import { delegate } from '../../core/delegate.ts';
 import type { EvidenceReport, SettledOutcome } from '../../core/evidence.ts';
 import { reportError } from '../../core/report.ts';
 import { dashboardView, runView, titleInfo, type RunView } from '../tui/model.ts';
-import { ConversationSession } from '../../core/session.ts';
+import type { ConversationSession } from '../../core/session.ts';
 import {
   listScratchSessions,
   listSessions,
   prepareSession,
   readTranscript,
-  replaySpend,
   scratchRoot,
-  transcriptPath,
   type SessionKind,
   type SessionState,
   type SessionSummary,
@@ -44,10 +42,12 @@ import {
   listWorktrees,
   mainWorktree,
   removeWorktree,
-  repoRoot,
   samePath,
   type WorktreeInfo,
 } from './worktree.ts';
+import { assembleSession, restoreBudget } from '../conversation.ts';
+
+export { skipGitCheck } from '../conversation.ts';
 
 /**
  * 스크래치 세션 폴더는 뿌리 **아래** 여야 한다. 뿌리 자체는 다른 스크래치 세션을 다 품고,
@@ -120,14 +120,6 @@ export interface WorktreeState {
   readonly current: string;
 }
 
-/**
- * codex 의 git 검사를 끌지 (D-055). 스크래치는 언제나 끈다. git 이 아닌 project 폴더는 **읽기 전용일 때만** 끈다 —
- * 쓰기를 되돌릴 git 이 없고 바뀐 파일 증거도 `git status` 로 모은다. 쓰기를 켜면 codex 가 거절하는 그대로 둔다.
- */
-export function skipGitCheck(kind: SessionKind, inGit: boolean, write: boolean): boolean {
-  return kind === 'scratch' || (!inGit && !write);
-}
-
 export class GuiService {
   readonly journal = new Journal();
   /** 레거시: `plan()`·`run()`(CLI 와 같은 1 회성 실행) 전용 Budget. 대화 세션은 각자 자기 것을 쓴다 (D-032 A2). */
@@ -158,8 +150,7 @@ export class GuiService {
     const key = `${dir}::${id}`;
     const existing = this.sessionBudgets.get(key);
     if (existing) return existing;
-    const created = new Budget(this.budgetUsd, loadLimits().tokenBudget);
-    replaySpend(created, readTranscript(transcriptPath(dir, id)).records);
+    const created = restoreBudget(dir, id, this.budgetUsd);
     this.sessionBudgets.set(key, created);
     return created;
   }
@@ -397,21 +388,13 @@ export class GuiService {
   }
 
   private attach(kind: SessionKind, dir: string, id: string): SessionView {
-    const catalog = loadEngines();
-    const timeout = loadLimits().runTimeoutMs;
-    const inGit = kind === 'project' && repoRoot(dir) !== null;
-    this.session = new ConversationSession({
-      matrix: loadMatrix(),
-      catalog,
+    this.session = assembleSession({
       kind,
       dir,
       id,
       budget: this.sessionBudget(dir, id),
       journal: this.journal,
-      // 지휘자(직접 답·요약)만 격리한다 (D-032 B1) — 위임 실행기(executorFor)는 그대로 사용자 설정을 싣는다.
-      conduct: this.execute ?? createExecutor(catalog, dir, timeout, { nonGit: skipGitCheck(kind, inGit, false), isolate: true }),
-      executorFor: (write) =>
-        this.execute ?? createExecutor(catalog, dir, timeout, { write, nonGit: skipGitCheck(kind, inGit, write) }),
+      ...(this.execute ? { execute: this.execute } : {}),
     });
     return this.conversation();
   }
