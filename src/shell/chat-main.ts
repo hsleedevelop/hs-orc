@@ -5,7 +5,7 @@
 import { Journal } from '../core/journal.ts';
 import { listScratchSessions, listSessions, prepareSession, type SessionKind } from '../core/transcript.ts';
 import { assembleSession, restoreBudget } from './conversation.ts';
-import { findSession, openingLines, parseChatArgs, runChat } from './chat.ts';
+import { findSession, interruptGuard, openingLines, parseChatArgs, runChat } from './chat.ts';
 
 async function main(): Promise<void> {
   const args = parseChatArgs(process.argv.slice(2));
@@ -29,6 +29,12 @@ async function main(): Promise<void> {
   const budget = restoreBudget(dir, id);
   const session = assembleSession({ kind, dir, id, budget, journal: new Journal() });
   process.stdout.write(`${openingLines(session, budget).join('\n')}\n`);
+  const guard = interruptGuard(session, (line) => void process.stdout.write(`${line}\n`));
+  process.on('SIGINT', () => {
+    if (guard() === 'wait') return;
+    process.stdout.write(`\n이어서: hs-orc chat --resume ${id}\n`);
+    process.exit(130);
+  });
   await runChat(session, budget, { input: process.stdin, output: process.stdout }, { verify: args.verify });
   process.stdout.write(`\n이어서: hs-orc chat --resume ${id}\n`);
 }

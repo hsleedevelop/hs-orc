@@ -107,6 +107,9 @@ export async function runChat(
           const m = /^\/task\s+(R\d{2})$/i.exec(line);
           if (m?.[1]) show(await session.planAs(m[1].toUpperCase()));
           else say('형식: /task R01');
+        } else if (/^[ywna]$/i.test(line)) {
+          // 위임 중에 미리 친 답이 줄 대기열에 남았다가 여기로 온다 — 메시지로 보내면 유료 직접 답과 쓸모없는 턴이 생긴다.
+          say('승인 대기 중인 배정이 없다 — 메시지로 보내려면 문장으로 쓴다.');
         } else if (line.startsWith('/')) {
           say(`모르는 명령이다: ${line} — /help`);
         } else if (line) {
@@ -176,4 +179,25 @@ export function openingLines(session: ConversationSession, budget: Budget, tail 
     ...(last?.kind === 'plan' ? [`안내   승인 안 된 배정은 되살리지 않는다 — 다시 보내거나 /task ${last.taskId}.`] : []),
     CHAT_HELP,
   ];
+}
+
+/**
+ * Ctrl-C 처리. 엔진은 자기 프로세스 그룹으로 떠(adapters/run.ts `detached`) 셸이 죽어도 **계속 돌고 과금된다** —
+ * 쓰기를 켰으면 파일도 계속 고친다. 그래서 위임이 도는 중의 첫 Ctrl-C 는 경고만 하고 끝날 때까지 기다린다.
+ * 같은 위임 중 두 번째는 나간다(사용자가 알고 고른 것). 입력 대기 중이면 바로 나간다.
+ */
+export function interruptGuard(
+  session: Pick<ConversationSession, 'state' | 'records'>,
+  say: (line: string) => void,
+): () => 'exit' | 'wait' {
+  // 위임 하나 동안 기록 길이는 그대로다(결과는 끝날 때 붙는다) — 그 길이로 "같은 위임" 을 가린다.
+  let warnedAt = -1;
+  return () => {
+    if (session.state !== 'working') return 'exit';
+    const at = session.records().length;
+    if (warnedAt === at) return 'exit';
+    warnedAt = at;
+    say('\n중단   위임이 도는 중이다 — 끝날 때까지 기다린다. 한 번 더 누르면 엔진을 남겨 둔 채 나간다(엔진은 계속 돌고 과금된다).');
+    return 'wait';
+  };
 }

@@ -11,7 +11,7 @@ import type { SlotExecutor } from '../../core/executor.ts';
 import { Journal } from '../../core/journal.ts';
 import { appendRecord, prepareSession, transcriptPath, type TranscriptRecord } from '../../core/transcript.ts';
 import { assembleSession, restoreBudget } from '../conversation.ts';
-import { findSession, openingLines, parseChatArgs, renderRecord, runChat } from '../chat.ts';
+import { findSession, interruptGuard, openingLines, parseChatArgs, renderRecord, runChat } from '../chat.ts';
 
 const at = { v: 1 as const, at: '2026-09-26T00:00:00.000Z', turn: 1 };
 
@@ -109,6 +109,13 @@ describe('chat — 입력 루프', () => {
     assert.equal(plan?.kind === 'plan' ? plan.taskId : '', 'R02');
   });
 
+  it('승인 대기가 아닐 때 온 y·w·n·a 는 메시지로 보내지 않는다 — 위임 중 미리 친 답이 유료 직접 답으로 새지 않는다', async () => {
+    const { out, calls, session } = await drive(['넌 누구니', 'y', 'n']);
+    assert.equal(calls.length, 1, '첫 메시지의 지휘자 1회뿐');
+    assert.equal(session.records().filter((r) => r.kind === 'user').length, 1);
+    assert.match(out, /승인 대기 중인 배정이 없다/);
+  });
+
   it('/quit 뒤의 줄은 처리하지 않는다', async () => {
     const { calls } = await drive(['/quit', '넌 누구니']);
     assert.deepEqual(calls, []);
@@ -148,5 +155,20 @@ describe('chat — 진입', () => {
     const reopened = assembleSession({ kind: 'scratch', dir: session.dir, id: session.id, budget, journal: new Journal() });
     assert.ok(openingLines(reopened, budget).some((l) => l.includes('되살리지 않는다') && l.includes('/task R01')));
     assert.equal(reopened.state, 'waiting_input');
+  });
+});
+
+describe('chat — Ctrl-C', () => {
+  it('위임이 도는 중이면 첫 Ctrl-C 는 경고만 하고 기다린다, 두 번째는 나간다', () => {
+    const lines: string[] = [];
+    const guard = interruptGuard({ state: 'working', records: () => [] }, (l) => lines.push(l));
+    assert.equal(guard(), 'wait');
+    assert.match(lines.join('\n'), /엔진을 남겨 둔 채/);
+    assert.equal(guard(), 'exit');
+  });
+
+  it('입력 대기 중이면 바로 나간다', () => {
+    const guard = interruptGuard({ state: 'waiting_input', records: () => [] }, () => undefined);
+    assert.equal(guard(), 'exit');
   });
 });
