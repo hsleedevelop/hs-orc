@@ -422,7 +422,7 @@ async function main(): Promise<void> {
             const failedBlock = failed.map((c) => `$ ${cmdLabel(c)} → exit ${c.exitCode}\n${c.output.slice(-1500)}`).join('\n\n');
             // 약화를 앞에 둔다 — 4000자 자르기에 먼저 잘리지 않게, 그리고 "테스트를 고쳐 통과" 가 답이 아님을 먼저 말한다.
             const weakBlock = weakened.length > 0
-              ? `기존 테스트를 약하게 만들지 말고 코드를 고쳐라 (줄 추가만 허용):\n${weakened.map((w) => `- ${w}`).join('\n')}\n\n`
+              ? `기존 테스트를 약하게 만들지 말고 코드를 고쳐라 (줄 추가만 허용):\n${weakened.map((w) => `- ${w}`).join('\n')}`
               : '';
             return {
               passed: false,
@@ -433,7 +433,11 @@ async function main(): Promise<void> {
                   .join(' · ') +
                 (ran.length > 0 ? ` · 검증 명령 ${ran.map((c) => `\`${cmdLabel(c)}\` exit=${c.exitCode}`).join(', ')}` : '') +
                 addedNote,
-              reason: `${weakBlock}${failedBlock ? `Core 가 실행한 검증 명령이 실패했다:\n${failedBlock}` : ''}`.slice(0, 4000),
+              // 있는 블록만 빈 줄 하나로 잇는다 — 약화만 있을 때 지적 끝에 빈 줄이 겹치던 자리다 (D-047 실측).
+              reason: [weakBlock, failedBlock ? `Core 가 실행한 검증 명령이 실패했다:\n${failedBlock}` : '']
+                .filter(Boolean)
+                .join('\n\n')
+                .slice(0, 4000),
               reviewerSkipped: true,
             };
           }
