@@ -15,6 +15,14 @@ describe('쓰기 권한 (D-025)', () => {
     }
   });
 
+  it('codex 는 쓰기를 요청하지 않으면 읽기 전용 sandbox 를 명시한다 — 신뢰된 폴더의 기본값에 기대지 않는다 (D-051)', () => {
+    const readOnly = 'sandbox_mode="read-only"';
+    assert.ok(build('luna', 'medium', 'codex').argv.includes(readOnly));
+    // exec resume 은 -s 를 받지 않는다 — 같은 -c 로 resume 경로도 막는다.
+    assert.ok(buildInvocation(catalog, 'luna', 'low', 'hi', { engine: 'codex', resume: 'T1' }).argv.includes(readOnly));
+    assert.ok(!buildInvocation(catalog, 'luna', 'medium', 'PROMPT', { engine: 'codex', write: true }).argv.includes(readOnly));
+  });
+
   it('엔진별 실측 플래그를 붙인다 — 워크스페이스 밖까지 여는 값은 쓰지 않는다', () => {
     const write = (model: Parameters<typeof buildInvocation>[1], engine: 'claude' | 'codex' | 'cursor') =>
       buildInvocation(catalog, model, 'high', 'PROMPT', { engine, write: true }).argv;
@@ -40,7 +48,7 @@ describe('쓰기 권한 (D-025)', () => {
 describe('argv 생성', () => {
   it('codex 는 exec 서브커맨드와 -c model_reasoning_effort 를 쓴다', () => {
     assert.deepEqual(build('sol', 'xhigh').argv, [
-      'exec', 'PROMPT', '-m', 'gpt-5.6-sol', '-c', 'model_reasoning_effort="xhigh"',
+      'exec', 'PROMPT', '-m', 'gpt-5.6-sol', '-c', 'model_reasoning_effort="xhigh"', '-c', 'sandbox_mode="read-only"',
     ]);
   });
 
@@ -193,14 +201,14 @@ describe('resume argv (SPEC §3.8, Q10 실측)', () => {
 
 describe('격리 (D-032 B1) — 지휘자만 사용자 전역 설정에서 뗀다', () => {
   const catalog = loadEngines();
-  it('claude 는 isolate 요청 시 선언된 네 인자를 그대로, 순서대로 붙인다', () => {
+  it('claude 는 isolate 요청 시 선언된 다섯 인자를 그대로, 순서대로 붙인다', () => {
     const { argv } = buildInvocation(catalog, 'haiku', 'low', 'hi', { engine: 'claude', isolate: true });
-    assert.deepEqual(argv.slice(-4), ['--setting-sources', 'project,local', '--strict-mcp-config', '--disable-slash-commands']);
+    assert.deepEqual(argv.slice(-5), ['--setting-sources', 'project,local', '--strict-mcp-config', '--disable-slash-commands', '--safe-mode']);
   });
 
   it('claude 는 isolate 를 요청하지 않으면 격리 인자가 하나도 없다', () => {
     const { argv } = buildInvocation(catalog, 'haiku', 'low', 'hi', { engine: 'claude' });
-    assert.doesNotMatch(argv.join(' '), /--setting-sources|--strict-mcp-config|--disable-slash-commands/);
+    assert.doesNotMatch(argv.join(' '), /--setting-sources|--strict-mcp-config|--disable-slash-commands|--safe-mode/);
   });
 
   it('선언이 없는 엔진(codex)에 isolate 를 요청하면 격리 없이 조용히 돌리지 않고 던진다', () => {

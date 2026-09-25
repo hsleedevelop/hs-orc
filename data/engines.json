@@ -12,7 +12,8 @@
     "plan": "엔진별 요금제 (D-030). 이 저장소를 쓰는 사람의 실제 구독 상태를 적는다 — 제품이 알아낼 수 없다. 2026-09-22 기준 claude·codex·cursor 모두 구독제다. subscription 이면 total_cost_usd(actual) 와 토큰×단가(metered) 가 **청구되지 않는다** — API 로 썼다면 들었을 환산액이다. 이 선언이 바뀌면 누적 상한이 무엇을 막는지도 바뀐다.",
     "nonGit": "codex exec 는 git 저장소 밖에서 --skip-git-repo-check 없이 거절한다 (2026-09-23 실측). 스크래치 세션에만 붙인다 — 쓰기를 켤 수 없는 자리다. project 세션(git 이 아닌 폴더 포함)에는 붙이지 않는다.",
     "resume": "2026-09-23 Q10 실측 (DECISIONS D-031): claude -p --resume <id> · codex exec resume <id> <prompt> (-m·effort 를 받는다) · cursor-agent -p --resume <id>. 무작위 코드워드를 셋 다 회수했고 id 는 불변이다. codex exec resume --help 에는 -s/--sandbox 가 없다(2026-09-23 --help 및 clap dry run, 존재하지 않는 세션 id 로 -s workspace-write 를 붙였더니 'unexpected argument' exit 2 — 모델 호출 전) — 그래서 write+resume 은 codex 에서 불가능으로 선언한다.",
-    "isolate": "2026-09-23 실측, 빈 스크래치 폴더·같은 직접 답 프롬프트·Haiku·low: 현행 $0.0493/44,438 tok → --setting-sources project,local --strict-mcp-config --disable-slash-commands 적용 후 $0.0180/34,514 tok, 전역 CLAUDE.md 의 호칭 지시(\"전하\")가 사라졌다. --bare 는 기각 — OAuth·키체인을 안 읽고 API 키만 받아 구독제 사용자에게 못 쓴다 (D-032)."
+    "isolate": "2026-09-23 실측, 빈 스크래치 폴더·같은 직접 답 프롬프트·Haiku·low: 현행 $0.0493/44,438 tok → --setting-sources project,local --strict-mcp-config --disable-slash-commands 적용 후 $0.0180/34,514 tok, 전역 CLAUDE.md 의 호칭 지시(\"전하\")가 사라졌다. --bare 는 기각 — OAuth·키체인을 안 읽고 API 키만 받아 구독제 사용자에게 못 쓴다 (D-032). 2026-09-25 재실측(claude 2.1.281, project·스크래치 폴더 모두): 위 세 인자로는 ~/.claude/CLAUDE.md·rules 가 다시 실렸다 → --safe-mode 를 더해 NONE, $0.0116/32,385 tok. safe-mode 는 프로젝트 CLAUDE.md 도 끈다 (D-050).",
+    "readOnly": "2026-09-25 S10 재측정: 쓰기 끔으로 승인한 codex 위임이 src/shell/deps.ts 를 실제로 고쳤다(file_change completed). 읽기 전용이 인자 부재에 기대고 있었고, ~/.codex/config.toml 의 [projects.\"/Users/hsonpro\"] trust_level=trusted 아래에서 codex 기본 sandbox 가 쓰기 가능이었다(추론). -s 는 exec resume 이 받지 않으므로 -c sandbox_mode=\"read-only\" 로 exec·resume 모두 막는다 (D-051). claude·cursor 는 미선언·미실측."
   },
   "efforts": [
     "low",
@@ -57,7 +58,8 @@
         "--setting-sources",
         "project,local",
         "--strict-mcp-config",
-        "--disable-slash-commands"
+        "--disable-slash-commands",
+        "--safe-mode"
       ]
     },
     "codex": {
@@ -86,6 +88,10 @@
         "scope": "workspace",
         "note": "cwd 워크스페이스 안에서만 쓴다. danger-full-access 는 쓰지 않는다."
       },
+      "readOnlyArgv": [
+        "-c",
+        "sandbox_mode=\"read-only\""
+      ],
       "nonGitArgv": [
         "--skip-git-repo-check"
       ],
