@@ -25,6 +25,19 @@ export interface Charge {
   readonly plan: BillingPlan;
 }
 
+export interface BudgetMark {
+  readonly charges: number;
+  readonly tokens: number;
+  readonly unreported: number;
+}
+
+/** 한 구간에 쌓인 과금·토큰. 대화 기록의 `spend` 줄이 이것이다 (D-054). */
+export interface Spend {
+  readonly charges: readonly Charge[];
+  readonly tokens: number;
+  readonly unreported: number;
+}
+
 export class TokenBudgetExceeded extends Error {
   override name = 'TokenBudgetExceeded';
   readonly spentTokens: number;
@@ -61,6 +74,26 @@ export class Budget {
   constructor(limitUsd: number, limitTokens = 0) {
     this.limitUsd = limitUsd;
     this.limitTokens = limitTokens;
+  }
+
+  /** 지금까지의 위치. `since()` 에 넘기면 그 뒤에 쌓인 것만 돌려준다 (D-054). */
+  mark(): BudgetMark {
+    return { charges: this.charges.length, tokens: this.tokens, unreported: this.unreported };
+  }
+
+  since(mark: BudgetMark): Spend {
+    return {
+      charges: this.charges.slice(mark.charges),
+      tokens: this.tokens - mark.tokens,
+      unreported: this.unreported - mark.unreported,
+    };
+  }
+
+  /** 기록해 둔 증분을 되살린다 — 앱을 다시 켜고 세션을 열 때 (D-054). 상한 판정도 그대로 따라온다. */
+  absorb(spend: Spend): void {
+    this.charges.push(...spend.charges);
+    this.tokens += spend.tokens;
+    this.unreported += spend.unreported;
   }
 
   get spentTokens(): number {

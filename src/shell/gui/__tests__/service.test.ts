@@ -274,6 +274,17 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     assert.equal(reopened.budget, afterA.budget);
   });
 
+  it('앱을 다시 켜고 같은 세션을 열면 기록의 spend 로 Budget 을 되살린다 — spend 는 화면에 싣지 않는다 (D-054)', async () => {
+    isolated();
+    const first = new GuiService(fake, 20, process.cwd());
+    first.startConversation('scratch');
+    const afterA = await first.converse('넌 누구니');
+    const restarted = new GuiService(fake, 20, process.cwd());
+    const reopened = restarted.openConversation('scratch', afterA.dir, afterA.id);
+    assert.equal(reopened.budget, afterA.budget);
+    assert.ok(reopened.records.every((r) => r.kind !== 'spend'));
+  });
+
   it('스크래치 뿌리 자체나 뿌리 밖을 가리키는 링크는 스크래치 세션으로 열지 않는다', () => {
     isolated();
     const root = process.env['HS_ORC_SCRATCH'] as string;

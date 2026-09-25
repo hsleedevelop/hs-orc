@@ -21,7 +21,9 @@ import {
   listSessions,
   prepareSession,
   readTranscript,
+  replaySpend,
   scratchRoot,
+  transcriptPath,
   type SessionKind,
   type SessionState,
   type SessionSummary,
@@ -125,8 +127,7 @@ export class GuiService {
   private readonly budgetUsd: number;
   /**
    * 세션별 Budget (D-032 A2). 키는 `${dir}::${id}` — 앱을 끄지 않고 다시 열면 같은 것을 이어 쓴다.
-   * **앱을 재시작하면 이 Map 도 비어서 0 부터 다시 잰다** — transcript 는 토큰을 저장하지 않는다,
-   * 알려진 한계다.
+   * 앱을 재시작하면 처음 열 때 기록의 `spend` 를 재생해 되살린다 (D-054).
    */
   private readonly sessionBudgets = new Map<string, Budget>();
   /**
@@ -149,6 +150,7 @@ export class GuiService {
     const existing = this.sessionBudgets.get(key);
     if (existing) return existing;
     const created = new Budget(this.budgetUsd, loadLimits().tokenBudget);
+    replaySpend(created, readTranscript(transcriptPath(dir, id)).records);
     this.sessionBudgets.set(key, created);
     return created;
   }
@@ -342,7 +344,8 @@ export class GuiService {
       kind: s.kind,
       dir: s.dir,
       state: s.state,
-      records: s.records(),
+      // spend 는 Budget 을 되살리는 재료다 — 화면은 마지막 기록으로 버튼을 고르므로 싣지 않는다 (D-054).
+      records: s.records().filter((r) => r.kind !== 'spend'),
       broken: readTranscript(s.file).broken,
       budget: this.sessionBudget(s.dir, s.id).summary(),
       appBudget: this.appBudgetSummary(),

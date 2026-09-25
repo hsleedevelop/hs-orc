@@ -145,6 +145,17 @@ describe('대화 세션 — 메시지 1건 (SPEC §6.4.2)', () => {
     assert.deepEqual(third?.kind === 'direct' ? third.cut : null, { turns: 1, chars: 0 });
   });
 
+  it('유료 호출 뒤에 쌓인 과금·토큰을 spend 한 줄로 남긴다 (D-054)', async () => {
+    const exec: SlotExecutor = () =>
+      Promise.resolve({ ...reply('답\nSUGGEST: NONE'), actualUsd: 0.02, usage: { inputTokens: 10, outputTokens: 5, cachedInputTokens: 0, cacheWriteTokens: 0 } });
+    const { session } = make(exec);
+    const out = await session.send('넌 누구니');
+    const last = session.records().at(-1);
+    assert.equal(out.at(-1)?.kind, 'direct', '돌려준 줄은 그대로다');
+    assert.equal(last?.kind, 'spend');
+    assert.deepEqual(last?.kind === 'spend' ? [last.charges.map((c) => c.usd), last.tokens, last.unreported] : null, [[0.02], 15, 0]);
+  });
+
   it('다시 열면 턴을 이어 가고, 남은 배정은 되살리지 않는다', async () => {
     const c = conductSpy();
     const { dir } = make(c.exec);
