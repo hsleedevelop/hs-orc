@@ -50,6 +50,12 @@ export interface EngineSpec {
    */
   readonly nonGitArgv?: readonly string[];
   /**
+   * 쓰기를 요청하지 **않았을 때** 붙이는 읽기 전용 인자 (D-051). 엔진 기본값에 기대지 않는다 —
+   * codex 는 신뢰된 폴더에서 기본 sandbox 가 쓰기 가능이라, 인자가 없으면 "읽기 전용" 위임이 파일을 고친다.
+   * resume 경로에도 붙으므로 resume 이 받는 형식(`-c`)이어야 한다.
+   */
+  readonly readOnlyArgv?: readonly string[];
+  /**
    * 비대화 resume (SPEC §3.8, 2026-09-23 Q10 실측). claude·cursor 는 플래그, codex 는 `exec resume <id>` 서브커맨드다.
    * 선언이 없는 엔진에 resume 을 요청하면 **던진다** — 맥락 없는 새 실행으로 조용히 떨어지지 않는다.
    * `write: false` 면 이 엔진의 resume 경로는 쓰기 인자를 받지 못한다는 뜻이다 (실측 근거는 `$evidence.resume`).

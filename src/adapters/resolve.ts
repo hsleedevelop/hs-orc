@@ -156,6 +156,9 @@ export function buildInvocation(
       throw new EngineError(`${target} 에 쓰기 권한 선언이 없다 (engines.json). 읽기 전용으로 말없이 떨어뜨리지 않는다.`);
     }
     argv.push(...spec.write.argv);
+  } else if (spec.readOnlyArgv) {
+    // 읽기 전용을 엔진 기본값에 맡기지 않는다 (D-051) — codex 는 신뢰된 폴더에서 기본이 쓰기 가능이다.
+    argv.push(...spec.readOnlyArgv);
   }
 
   // 스크래치 세션에서만 붙인다 — codex exec 는 git 저장소 밖에서 이게 없으면 거절한다 (SPEC §6.4.1).
