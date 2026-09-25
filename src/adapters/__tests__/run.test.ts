@@ -43,6 +43,18 @@ describe('프로세스 실행', () => {
     assert.equal(result.usage?.inputTokens, 7);
   });
 
+  it('codex 의 에이전트 메시지 여러 개는 빈 줄로 나눠 잇는다 — 문단이 뭉치지 않는다', async () => {
+    const msg = (t: string) => JSON.stringify({ type: 'item.completed', item: { id: 'i', type: 'agent_message', text: t } });
+    const result = await runProcess({
+      bin: '/bin/sh',
+      argv: ['-c', `printf '%s\\n' '${msg('확인하겠습니다.')}' '${msg('고쳤습니다.')}'`],
+      cwd: process.cwd(),
+      timeoutMs: 10_000,
+      format: 'codex',
+    }).result;
+    assert.equal(result.text, '확인하겠습니다.\n\n고쳤습니다.');
+  });
+
   it('개행 없이 끝난 마지막 줄도 잃지 않는다', async () => {
     const line = JSON.stringify({ type: 'result', is_error: false, result: '끝' });
     const result = await sh(`printf '%s' '${line}'`).result;
