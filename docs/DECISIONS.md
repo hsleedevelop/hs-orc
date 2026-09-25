@@ -1312,7 +1312,7 @@ cursor 는 실행하지 않았다(구독 사용량 — 2026-09-24 보류 결정 
 **영향**
 - claude 읽기 전용 실행(reviewer·쓰기 끔 위임·지휘자)의 argv 가 두 토큰 늘어난다. 쓰기 허용(`acceptEdits`) 실행에는 붙지 않는다.
 - Bash 경유 쓰기는 여전히 `default` 모드의 거절에 기댄다 — 사용자 allow 에 `Bash(...)` 가 있으면 그 명령은 돈다.
-- **미검증**: `--disallowedTools` 를 붙인 실제 실행(인자 파싱·`--resume` 병용)은 아직 돌리지 않았다 — `claude --help` 의 "Comma or space-separated" 문구와 단위 테스트까지다. 다음 실제 엔진 실행(S10 등)에서 `init.tools` 에 Edit·Write 가 빠졌는지 본다.
+- **확인** (2026-09-25, 같은 스크래치, haiku·low, `createAdapter('claude').buildArgv` 그대로, 각 n=1): exec 와 `--resume <id>` 둘 다 인자 파싱 오류 없이 돌았고 `init.tools` 에 Edit·Write·NotebookEdit 가 없었다(나머지 306개 유지). 모델이 Write·Edit 를 부르자 "No such tool available … disabled for this session" 로 막혔고, 이어 Bash(`echo >`, `sed -i`)로 우회하려다 `default` 모드의 승인 요구로 거절됐다 — 위 Bash 항목이 실제 경로임을 확인. 스크래치 `git status` 무변경. 비용 보고값 exec $0.12·resume $0.14.
 
 **상태** 확정 — 2026-09-25 사용자 결정 (claude 명시, cursor 위험 기록·미결).
 
