@@ -9,6 +9,7 @@ import { appendFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { newDecisionId } from './decision-log.ts';
+import type { Budget, Spend } from './budget.ts';
 import type { ContextCut } from './context.ts';
 import type { SettledOutcome } from './evidence.ts';
 
@@ -62,7 +63,12 @@ export type TranscriptEntry =
       readonly cut?: ContextCut;
     }
   | { readonly kind: 'summary'; readonly text: string; readonly next: string }
-  | { readonly kind: 'error'; readonly text: string };
+  | { readonly kind: 'error'; readonly text: string }
+  /**
+   * 유료 호출로 쌓인 과금·토큰 (D-054). 앱을 다시 켜고 세션을 열면 이것을 재생해 세션 Budget 을
+   * 되살린다. 화면에는 보이지 않는다.
+   */
+  | ({ readonly kind: 'spend' } & Spend);
 
 export type TranscriptRecord = TranscriptEntry & { readonly v: 1; readonly at: string; readonly turn: number };
 
@@ -95,6 +101,11 @@ export function prepareSession(
 export function appendRecord(file: string, record: TranscriptRecord): void {
   mkdirSync(path.dirname(file), { recursive: true });
   appendFileSync(file, `${JSON.stringify(record)}\n`, 'utf8');
+}
+
+/** 기록의 `spend` 를 Budget 에 재생한다 (D-054). */
+export function replaySpend(budget: Budget, records: readonly TranscriptRecord[]): void {
+  for (const r of records) if (r.kind === 'spend') budget.absorb(r);
 }
 
 export interface LoadedTranscript {

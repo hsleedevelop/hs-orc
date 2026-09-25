@@ -406,7 +406,7 @@ Evaluator에는 reviewer 슬롯 모델을 쓴다 — 매트릭스의 독립 리�
 
 - `id` 는 결정 로그와 같은 `MMDD-HHMM-xxx` (§8).
 - 기록은 **append-only JSONL** 이다. 한 줄 = 한 사건:
-  `{ v:1, at, turn, kind, … }` — `kind` 는 `user`(메시지) · `direct`(직접 답) · `plan`(배정·비용) · `approval`(승인·거절) · `result`(primary 출력·reviewer 판정·증거·outcome·엔진 세션 id) · `summary`(지휘자 요약·다음 제안) · `error`(실패 사유).
+  `{ v:1, at, turn, kind, … }` — `kind` 는 `user`(메시지) · `direct`(직접 답) · `plan`(배정·비용) · `approval`(승인·거절) · `result`(primary 출력·reviewer 판정·증거·outcome·엔진 세션 id) · `summary`(지휘자 요약·다음 제안) · `error`(실패 사유) · `spend`(그 호출들로 쌓인 과금·토큰 — 화면에 안 보인다. 앱을 다시 켜고 열면 재생해 세션 Budget 을 되살린다, D-054).
 - 세션을 다시 열면 기록을 **처음부터 다시 읽어** 화면과 맥락을 복원한다. 깨진 줄은 건너뛰고 수를 센다 — 결정 로그와 같은 규칙.
 - 세션 상태는 AO 어휘를 빌린다: `waiting_input`(메시지 대기) · `working`(엔진 실행 중) · `blocked`(위임 승인 대기). **`blocked` 에서는 자동으로 아무것도 진행하지 않는다.**
 
@@ -542,7 +542,7 @@ v2 의 Run 폼은 세션 화면으로 대체한다. 탭을 옮겨도 세션 화�
 | 세션 id·resume argv (v2.1) | 세 엔진 스트림 캡처에서 id 를 읽는지, resume 시 argv 가 §3.8 과 같은지 |
 | 메시지 처리 (v2.1) | 가짜 executor 로: 분류됨 → `blocked` + plan / 미분류 → 직접 답 · 읽기 전용 · 승인 없음 / 직접 답 실패 → `error` + `waiting_input` |
 | `SUGGEST` 읽기 (v2.1) | 마지막 줄만 본다 · 못 읽으면 제안 없음 · 없는 행 id 는 버린다 |
-| 대화 기록 (v2.1) | append-only · 다시 열면 같은 화면·맥락 · 깨진 줄을 세고 건너뛴다 |
+| 대화 기록 (v2.1) | append-only · 다시 열면 같은 화면·맥락 · 깨진 줄을 세고 건너뛴다 · 앱 재시작 뒤 열어도 세션 Budget 이 같다 |
 | 맥락 자르기 (v2.1) | 턴 수·글자 수 상한 · `result` 본문 제외 · resume 시 그 실행 이후만 · 잘렸을 때만 버린 양을 기록에 남긴다 |
 | resume 정책 (v2.1) | 같은 엔진·모델·effort·폴더일 때만 primary 가 잇는다 · **reviewer 는 절대 잇지 않는다** · resume 실패는 새 세션으로 조용히 떨어지지 않는다 |
 | 스크래치 (v2.1) | `HS_ORC_SCRATCH` 안에만 만든다 · 쓰기를 켤 수 없다 |

@@ -9,7 +9,7 @@ import type { Engines } from '../data/engines.ts';
 import type { Matrix } from '../data/matrix.ts';
 import { loadLimits } from '../data/limits.ts';
 import type { AssignmentPlan } from './assign.ts';
-import type { Budget } from './budget.ts';
+import type { Budget, BudgetMark } from './budget.ts';
 import { buildSummaryPrompt, conductorSlot, directAnswer, nextSuggestion } from './conductor.ts';
 import { buildContext, type ContextLimits } from './context.ts';
 import { appendDecision } from './decision-log.ts';
@@ -198,6 +198,7 @@ export class ConversationSession {
     // route() 가 이미 working 으로 바꿔 놓았을 수 있다 — 여기서도 다시 대입해 answer() 를 단독으로
     // 불러도(테스트 등) 같은 보장이 서게 하고, 모든 탈출 경로를 finally 하나로 묶는다 (final-review #2).
     this.stateValue = 'working';
+    const mark = budget.mark();
     try {
       if (budget.limitReached()) {
         return [this.append({ kind: 'error', text: `누적 상한에 닿아 직접 답도 시작하지 않는다 (${budget.summary()}).` })];
@@ -224,6 +225,7 @@ export class ConversationSession {
       return [this.append({ kind: 'error', text: `직접 답을 받지 못했다: ${why(error)}` })];
     } finally {
       this.stateValue = 'waiting_input';
+      this.recordSpend(mark);
     }
   }
 
@@ -246,6 +248,7 @@ export class ConversationSession {
       return out;
     }
     this.stateValue = 'working';
+    const mark = budget.mark();
     try {
       const ref = this.resumable(pending.plan, write);
       const context = buildContext(this.records(), this.contextLimits, {
@@ -291,8 +294,19 @@ export class ConversationSession {
       out.push(this.append({ kind: 'error', text: `위임이 끝나지 못했다: ${why(error)}` }));
     } finally {
       this.stateValue = 'waiting_input';
+      this.recordSpend(mark);
     }
     return out;
+  }
+
+  /**
+   * mark 뒤로 쌓인 과금·토큰을 `spend` 한 줄로 남긴다 (D-054). 쌓인 게 없으면 남기지 않는다.
+   * 결과·요약 **뒤에** 붙인다 — `interrupted` 는 마지막 줄이 승인인지로 끊김을 판정한다.
+   */
+  private recordSpend(mark: BudgetMark): void {
+    const spend = this.deps.budget.since(mark);
+    if (spend.charges.length === 0 && spend.tokens === 0 && spend.unreported === 0) return;
+    this.append({ kind: 'spend', ...spend });
   }
 
   /**
