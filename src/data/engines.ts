@@ -52,7 +52,8 @@ export interface EngineSpec {
   /**
    * 쓰기를 요청하지 **않았을 때** 붙이는 읽기 전용 인자 (D-051). 엔진 기본값에 기대지 않는다 —
    * codex 는 신뢰된 폴더에서 기본 sandbox 가 쓰기 가능이라, 인자가 없으면 "읽기 전용" 위임이 파일을 고친다.
-   * resume 경로에도 붙으므로 resume 이 받는 형식(`-c`)이어야 한다.
+   * resume 경로에도 붙으므로 resume 이 받는 형식(codex `-c`)이어야 한다.
+   * claude 의 `--disallowedTools` 는 가변 인자라 값을 쉼표로 묶은 한 토큰으로 둔다 — 뒤에 플래그만 온다 (D-052).
    */
   readonly readOnlyArgv?: readonly string[];
   /**

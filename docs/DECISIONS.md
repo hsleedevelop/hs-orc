@@ -1289,6 +1289,35 @@ S10 재판정에서 **쓰기 끔으로 승인한** project 위임(R01, codex Lun
 
 ---
 
+## D-052 — claude 읽기 전용도 인자로 명시한다 (`--disallowedTools Edit,Write,NotebookEdit`), cursor 는 미결로 둔다
+
+**배경**
+D-051 이 "실측 뒤에 판단" 으로 남긴 claude·cursor 를 확인했다. 스크래치 git 저장소(홈 아래, README 한 줄)에서 hs-orc 읽기 전용 argv 그대로 — `claude -p … --model claude-haiku-4-5-20251001 --effort low --output-format stream-json --verbose`, 권한 인자 없음 — "hello.txt 를 만들고 README 첫 줄을 고쳐라" 를 시켰다 (2026-09-25, n=1, 3턴, $0.063).
+- `init.permissionMode = default`. Read 는 통과, **Write 는 `permission_denials` 로 거절**, 모델이 "Write 권한 필요" 로 멈췄다. `git status` 무변경.
+- Edit·Bash 는 시도되지 않았다 — 그 경로는 미실측.
+- 이 거절은 사용자 설정에 달렸다: `~/.claude/settings.json` 에 `permissions` 가 없고 `settings.local.json` 의 allow 는 `Skill(claude-hud:setup)` 하나뿐이다. `defaultMode: acceptEdits` 나 `Edit(...)` allow 를 둔 사용자에게서는 샌다.
+
+cursor 는 실행하지 않았다(구독 사용량 — 2026-09-24 보류 결정 유지). 설정 근거만 봤다: `~/.cursor/cli-config.json` 이 `approvalMode: allowlist`, `sandbox.mode: disabled` 이고 allow 에 `Mcp(omnigent:sys_os_write)`·`sys_os_edit`·`sys_os_shell` 이 있다 — `--force` 없이도 MCP 로 쓰는 경로가 있을 수 있다(추론).
+
+**결정**
+1. claude `readOnlyArgv = ["--disallowedTools", "Edit,Write,NotebookEdit"]`. deny 규칙은 사용자 allow·`defaultMode` 보다 우선한다.
+2. `--permission-mode plan` 이 아닌 이유: 모드를 바꾸면 reviewer 가 "계획 세우기" 로 행동이 바뀔 수 있다(출력 형식 영향 미실측). deny 는 도구만 뺀다.
+3. 값은 쉼표로 묶은 **한 토큰**이다 — `<tools...>` 가변 인자라 뒤따르는 위치 인자를 먹을 수 있다. `buildInvocation` 에서 뒤에 오는 것은 `--resume`·스트림·격리 플래그뿐이다.
+4. cursor 는 선언하지 않는다. 후보는 `--mode ask`(help: "read-only") 또는 `--mode plan` — resume 과 함께 받는지, MCP 쓰기도 막는지 실측이 필요하다. cursor 보류가 풀릴 때 잰다.
+
+**기각**
+- *기본값(default 모드)에 계속 맡김* — D-051 과 같은 이유로, 제품의 읽기 전용 약속이 사용자 설정에 달리면 안 된다.
+- *cursor 에 `--mode ask` 를 실측 없이 선언* — D-051 의 "실측 뒤 판단" 과 충돌하고, resume 경로가 깨지면 이어 붙이기가 멈춘다.
+
+**영향**
+- claude 읽기 전용 실행(reviewer·쓰기 끔 위임·지휘자)의 argv 가 두 토큰 늘어난다. 쓰기 허용(`acceptEdits`) 실행에는 붙지 않는다.
+- Bash 경유 쓰기는 여전히 `default` 모드의 거절에 기댄다 — 사용자 allow 에 `Bash(...)` 가 있으면 그 명령은 돈다.
+- **미검증**: `--disallowedTools` 를 붙인 실제 실행(인자 파싱·`--resume` 병용)은 아직 돌리지 않았다 — `claude --help` 의 "Comma or space-separated" 문구와 단위 테스트까지다. 다음 실제 엔진 실행(S10 등)에서 `init.tools` 에 Edit·Write 가 빠졌는지 본다.
+
+**상태** 확정 — 2026-09-25 사용자 결정 (claude 명시, cursor 위험 기록·미결).
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |
