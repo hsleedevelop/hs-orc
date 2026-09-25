@@ -44,6 +44,26 @@ describe('위임 1건 (SPEC §4 5~7단계)', () => {
     assert.equal(d.verdict, 'pass');
   });
 
+  it('journal 의 실행 줄은 reviewer 가 돌아도 primary 의 과금을 싣는다', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-delegate-'));
+    process.env['HS_ORC_DECISION_LOG'] = path.join(dir, 'log.jsonl');
+    process.env['HS_ORC_RUN_STORE'] = path.join(dir, 'runs');
+    const execute: SlotExecutor = (slot) =>
+      Promise.resolve(slot.label === 'Haiku'
+        ? { ok: true, text: 'PASS', rawStdout: '', rawStderr: '', durationMs: 1, actualUsd: 0.01 }
+        : { ok: true, text: 'ran', rawStdout: '', rawStderr: '', durationMs: 1, actualUsd: 0.5 });
+    const budget = new Budget(20, 2_000_000);
+    const journal = new Journal();
+
+    await delegate({
+      matrix, plan: assign(matrix, catalog, row('R01')), reason: '수동 지정 R01', title: 't', prompt: 't',
+      verify: [], cwd: dir, execute, budget, journal,
+    });
+
+    assert.equal(budget.charges.length, 2, 'reviewer 가 실제로 돌았다');
+    assert.equal(journal.records.at(-1)?.charge?.usd, 0.5);
+  });
+
   it('검증 명령이 실패하면 결정 로그 2차 outcome 은 ok 가 아니라 rework 다 (D-043)', async () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-delegate-'));
     const log = path.join(dir, 'log.jsonl');
