@@ -23,6 +23,14 @@ describe('쓰기 권한 (D-025)', () => {
     assert.ok(!buildInvocation(catalog, 'luna', 'medium', 'PROMPT', { engine: 'codex', write: true }).argv.includes(readOnly));
   });
 
+  it('claude 는 쓰기를 요청하지 않으면 편집 도구를 막는다 — 사용자 설정의 기본 모드에 기대지 않는다 (D-052)', () => {
+    const readOnly = ['--disallowedTools', 'Edit,Write,NotebookEdit'];
+    const hasReadOnly = (argv: readonly string[]) => argv.join('\0').includes(readOnly.join('\0'));
+    assert.ok(hasReadOnly(build('haiku', 'low', 'claude').argv));
+    assert.ok(hasReadOnly(buildInvocation(catalog, 'haiku', 'low', 'hi', { engine: 'claude', resume: 'S1' }).argv));
+    assert.ok(!hasReadOnly(buildInvocation(catalog, 'haiku', 'low', 'hi', { engine: 'claude', write: true }).argv));
+  });
+
   it('엔진별 실측 플래그를 붙인다 — 워크스페이스 밖까지 여는 값은 쓰지 않는다', () => {
     const write = (model: Parameters<typeof buildInvocation>[1], engine: 'claude' | 'codex' | 'cursor') =>
       buildInvocation(catalog, model, 'high', 'PROMPT', { engine, write: true }).argv;
@@ -54,7 +62,7 @@ describe('argv 생성', () => {
 
   it('claude 는 -p 와 --effort 를 쓴다', () => {
     assert.deepEqual(build('fable', 'high').argv, [
-      '-p', 'PROMPT', '--model', 'claude-fable-5-1', '--effort', 'high',
+      '-p', 'PROMPT', '--model', 'claude-fable-5-1', '--effort', 'high', '--disallowedTools', 'Edit,Write,NotebookEdit',
     ]);
   });
 
