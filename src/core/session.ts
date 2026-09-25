@@ -204,7 +204,7 @@ export class ConversationSession {
       }
       const slot = conductorSlot(catalog);
       const context = buildContext(this.records(), this.contextLimits, { before: this.turn });
-      const answer = await directAnswer(conduct, slot, matrix, context, text);
+      const answer = await directAnswer(conduct, slot, matrix, context.text, text);
       const charge = budget.charge(`${slot.label}·${slot.effort}`, answer.run.actualUsd, estimateUsd(matrix, slot), answer.run.meteredUsd, slot.plan);
       budget.countTokens(answer.run.usage);
       if (!answer.run.ok) {
@@ -217,6 +217,7 @@ export class ConversationSession {
           suggest: answer.suggest,
           cost: `$${charge.usd.toFixed(4)} ${charge.source}`,
           notes,
+          ...(context.cut ? { cut: context.cut } : {}),
         }),
       ];
     } catch (error) {
@@ -251,7 +252,7 @@ export class ConversationSession {
         before: this.turn,
         ...(ref ? { after: ref.turn } : {}),
       });
-      const prompt = context ? `[최근 대화]\n${context}\n\n[이번 요청]\n${pending.title}` : pending.title;
+      const prompt = context.text ? `[최근 대화]\n${context.text}\n\n[이번 요청]\n${pending.title}` : pending.title;
       const d = await delegate({
         matrix,
         plan: pending.plan,
@@ -276,6 +277,7 @@ export class ConversationSession {
           evidence: d.report.summary,
           decisionId: d.decisionId,
           ...(d.primarySession ? { engineSession: d.primarySession } : {}),
+          ...(context.cut ? { cut: context.cut } : {}),
         }),
       );
       if (ref && !d.ok) {
