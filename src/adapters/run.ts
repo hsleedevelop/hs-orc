@@ -41,7 +41,8 @@ export function runProcess(spec: SpawnSpec, onEvent?: (event: RunEvent) => void)
   const emit = (event: RunEvent): void => {
     switch (event.kind) {
       case 'text':
-        text += event.text;
+        // codex 는 에이전트 메시지를 하나씩 통째로 낸다 — 붙이면 "…하겠습니다.위임 판단: …" 처럼 문단이 뭉친다.
+        text = text ? `${text}\n\n${event.text}` : event.text;
         break;
       case 'done':
         text = event.text || text;
