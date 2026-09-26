@@ -8,7 +8,7 @@ import { loadMatrix } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
 import { assign } from '../assign.ts';
 import { Budget } from '../budget.ts';
-import { createExecutor, sinceBaseline } from '../executor.ts';
+import { createExecutor, sinceBaseline, type SlotRun } from '../executor.ts';
 
 /**
  * 쓰기 권한 부여 지점은 `createExecutor` **한 곳**이고, 거기서 reviewer 가 구조적으로 배제된다 (D-025).
@@ -175,6 +175,47 @@ describe('압축 몫은 modelUsage 누적 차분으로 센다 — 두 번 세지
     assert.equal(budget.spentTokens, total(second.reported?.usage));
     assert.equal(budget.spentTokens, 44501);
     assert.doesNotMatch(budget.summary(), /압축 토큰을 보고하지 않는/);
+  });
+
+  /**
+   * 2026-09-26 실엔진 검증 원본 (claude 2.1.283 · Haiku low): 한 세션을 orc 실행기로 다섯 번 이었다 —
+   * 1턴 · resume 3번 · 임계값을 낮춘 자동 압축 resume 1번(chain-5).
+   */
+  const chain = async (): Promise<SlotRun[]> => {
+    const execute = createExecutor(catalog, fakeDir, 10_000);
+    const runs: SlotRun[] = [];
+    for (let i = 1; i <= 5; i += 1) {
+      replay(`claude-d060-chain-${i}.jsonl`);
+      const prev = runs.at(-1);
+      runs.push(await execute(plan.slots.reviewer, 'P', prev ? { resume: prev.sessionId ?? '', ...(prev.reported ? { baseline: prev.reported } : {}) } : undefined));
+    }
+    return runs;
+  };
+
+  it('resume 체인: 턴별로 매긴 토큰·금액의 합이 마지막 result 의 세션 누적과 같다', async () => {
+    const runs = await chain();
+    // 압축 없는 resume 은 그 턴의 result.usage 그대로다 — 앞 턴을 다시 세지 않는다.
+    assert.deepEqual(runs[1]?.usage, { inputTokens: 10, outputTokens: 95, cachedInputTokens: 20110, cacheWriteTokens: 122 });
+    assert.deepEqual(runs[3]?.usage, { inputTokens: 10, outputTokens: 45, cachedInputTokens: 20379, cacheWriteTokens: 125 });
+
+    const budget = new Budget(100, 2_000_000);
+    for (const run of runs) {
+      budget.charge('Haiku·low', run.actualUsd, 0, run.meteredUsd, plan.slots.reviewer.plan);
+      budget.countTokens(run.usage, run.compactionUncounted);
+    }
+    const last = runs.at(-1)?.reported;
+    assert.equal(budget.spentTokens, total(last?.usage));
+    assert.equal(budget.spentTokens, 124098);
+    assert.equal(budget.spentUsd, Number((last?.costUsd ?? NaN).toFixed(6)), '금액은 total_cost_usd 누적 $0.0384377');
+  });
+
+  it('자동 압축(trigger: auto) resume 도 압축 몫이 modelUsage 차분에 든다', async () => {
+    const compacted = (await chain())[4];
+    assert.deepEqual(compacted?.compactions, [{ trigger: 'auto', preTokens: 20597, postTokens: 912 }]);
+    // result.usage 는 본 답변 몫(10·70·16,950·1,792)뿐이다. 차분에는 압축 호출 몫(1,481·864·20,379·78)이 더 들고,
+    // 그 캐시 읽기 20,379 는 직전 턴 맥락이다 (pre_tokens 20,597 = 직전 턴 합 20,559 + 새 메시지).
+    assert.deepEqual(compacted?.usage, { inputTokens: 1491, outputTokens: 934, cachedInputTokens: 37329, cacheWriteTokens: 1870 });
+    assert.ok(Math.abs((compacted?.actualUsd ?? 0) - 0.0135754) < 1e-9, `금액도 차분이다: ${compacted?.actualUsd}`);
   });
 
   it('codex 실행은 압축 몫이 빠질 수 있다고 표시된다 — 보정하지 않는다', async () => {
