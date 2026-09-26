@@ -12,6 +12,7 @@
  */
 import { createElement as h, useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { compactLines, cutLine } from '../../transcript-lines.ts';
 
 const SCREENS = ['Session', 'Dashboard', 'Agents', 'Reviews', 'Debug'] as const;
 type Screen = (typeof SCREENS)[number];
@@ -27,12 +28,14 @@ interface WorktreeState { repo: string | null; items: WorktreeInfo[]; current: s
 
 type SessionKind = 'project' | 'scratch';
 type SessionState = 'waiting_input' | 'working' | 'blocked';
+interface Cut { turns: number; chars: number }
+interface Compaction { trigger: string; preTokens?: number; postTokens?: number }
 type Rec =
   | { kind: 'user'; turn: number; text: string }
-  | { kind: 'direct'; turn: number; text: string; suggest: string | null; cost: string; notes: string[] }
+  | { kind: 'direct'; turn: number; text: string; suggest: string | null; cost: string; notes: string[]; cut?: Cut }
   | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; estimateUsd: number; notes: string[] }
   | { kind: 'approval'; turn: number; approved: boolean; write: boolean }
-  | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string }
+  | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string; cut?: Cut; compacted?: Compaction[] }
   | { kind: 'summary'; turn: number; text: string; next: string }
   | { kind: 'error'; turn: number; text: string };
 interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean }
@@ -361,6 +364,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
           ...r.notes.map((n, j) => h('div', { key: `n${j}`, className: 'hint' }, n)),
           h('div', null, r.text),
           h('div', { className: 'hint' }, `직접 답 · 지휘자 Haiku·low · ${r.cost}`),
+          ...cutLine(r.cut).map((l, j) => h('div', { key: `c${j}`, className: 'hint' }, l)),
           suggest && r === last && view.state === 'waiting_input'
             ? h('button', { className: 'btn accent', disabled: busy, onClick: () => act(orc.convPlanAs(suggest)) }, `${suggest} 로 위임`)
             : null);
@@ -377,7 +381,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
             h('span', { className: r.outcome === 'ok' ? 'good mono' : 'warn mono' }, `outcome = ${r.outcome}`)),
           h('div', { className: r.outcome === 'ok' ? 'good mono' : 'warn mono' }, r.evidence),
           h('pre', { style: { marginTop: 10 } }, r.text || '(빈 출력)'),
-          r.review ? h('pre', { style: { marginTop: 10 } }, r.review) : null);
+          r.review ? h('pre', { style: { marginTop: 10 } }, r.review) : null,
+          ...[...cutLine(r.cut), ...compactLines(r.compacted)].map((l, j) => h('div', { key: `c${j}`, className: 'hint' }, l)));
       case 'summary':
         return h('div', { key: i, className: 'bubble orc' },
           r.text ? h('div', null, r.text) : null,

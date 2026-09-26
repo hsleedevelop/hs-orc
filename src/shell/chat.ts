@@ -4,11 +4,9 @@
  */
 import { createInterface } from 'node:readline';
 import type { Budget } from '../core/budget.ts';
-import type { ContextCut } from '../core/context.ts';
 import type { ConversationSession } from '../core/session.ts';
 import { listScratchSessions, listSessions, readTranscript, type SessionSummary, type TranscriptRecord } from '../core/transcript.ts';
-
-const cutLine = (cut: ContextCut | undefined): string[] => (cut ? [`맥락   앞 대화 ${cut.turns}턴·${cut.chars}자를 싣지 못했다`] : []);
+import { compactLines, cutLine } from './transcript-lines.ts';
 
 export function renderRecord(r: TranscriptRecord): string[] {
   switch (r.kind) {
@@ -39,7 +37,7 @@ export function renderRecord(r: TranscriptRecord): string[] {
         r.text,
         ...(r.review ? [`검증   ${r.review.slice(0, 600)}`] : []),
         ...cutLine(r.cut),
-        ...(r.compacted ?? []).map((c) => `압축   엔진이 앞 맥락을 요약으로 바꿨다 (${c.trigger}${c.preTokens !== undefined && c.postTokens !== undefined ? ` ${c.preTokens}→${c.postTokens} 토큰` : ''})`),
+        ...compactLines(r.compacted),
       ];
     case 'summary':
       return [...(r.text ? [r.text] : []), `다음   ${r.next}`];
