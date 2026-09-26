@@ -151,3 +151,25 @@ describe('claude 토큰은 modelUsage 합으로 읽는다 (D-060)', () => {
     }
   });
 });
+
+/** 2026-09-26 Q18 실측 원본 (claude 2.1.283 · Haiku low, 새 실행 1회씩) — 지휘자 격리 argv · 그 argv + 창 env · 비격리 등가 + `autoCompactWindow`. */
+describe('실패한 압축 시도는 압축으로 세지 않는다 (D-058, Q18 캡처)', () => {
+  const compactions = (name: string) => {
+    const events = fixture(name).flatMap((l) => parseLine('claude', l));
+    assert.equal(events.filter((e) => e.kind === 'unparsed').length, 0, name);
+    return events.flatMap((e) => (e.kind === 'compact' ? [e.compaction] : []));
+  };
+
+  it('격리는 임계값 판정을 건너뛰고, env 로 켠 판정은 too_few_groups 로 실패해 status 줄만 남는다 — 둘 다 압축 없음', () => {
+    assert.deepEqual(compactions('claude-q18-isolated.jsonl'), []);
+    assert.ok(fixture('claude-q18-isolated-env.jsonl').some((l) => l.includes('"compact_result":"failed"')), '실패한 시도 줄이 캡처에 있어야 이 검사가 뜻이 있다');
+    assert.deepEqual(compactions('claude-q18-isolated-env.jsonl'), []);
+  });
+
+  it('설정 출처면 한 실행 안에서 자동 압축한다 — 성공한 두 번만 읽는다', () => {
+    assert.deepEqual(compactions('claude-q18-settings.jsonl'), [
+      { trigger: 'auto', preTokens: 20532, postTokens: 1742 },
+      { trigger: 'auto', preTokens: 19824, postTokens: 2001 },
+    ]);
+  });
+});

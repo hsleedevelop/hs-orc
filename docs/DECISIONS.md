@@ -1496,6 +1496,7 @@ resume 체인(D-031 결정 4)에서 orc 는 이을 때 그 실행 **이후**의 
 - **압축 뒤 답: `CODEWORD=ORC-102924 FACT13=NONE`.** 코드워드는 남았고 **사실 13(`5978-6dd1fe`)은 잃었다.** 요약은 "기억하라" 고 한 대표 값은 싣지만 목록의 세부는 버린다. 같은 대화를 orc 의 최근 N턴 맥락(D-053)으로 보냈다면 1턴 본문이 그대로 실렸을 것이다(추론 — 사실 목록이 약 1.5k 자라 글자 상한 안이다).
 - 결정 3(압축돼도 잇는다)과 기각한 "*압축된 세션은 다음부터 잇지 않는다*" 의 근거("압축이 orc 의 자르기보다 나쁘다는 근거가 없다")가 **n=1 로 흔들린다.** 정책을 바꿀지는 Q16.
 - 2.1.283 부터 `result` 뒤에 `system`·`task_summary` 줄이 하나 더 온다. 파서는 줄마다 읽으므로 영향이 없다.
+- **설정 의존** (Q18): 2.1.283 은 설정·env 가 없으면 Haiku 임계값 압축을 하지 않는다 — PCT override 만으로는 이 결과가 나오지 않는다. 이 실측은 격리 인자 기록이 없고 압축이 일어났으므로 사용자 전역 `autoCompactWindow` 를 싣고 돈 것이다(추론). 아래 **압축 창 출처 실측**.
 - 비용: claude API 환산 누적 $0.1496 (상한 $0.40, 구독제 청구 없음).
 
 **codex 압축 실측** (2026-09-26, codex 0.154.0 · Luna low, 스크래치, n=1 · 사용자 승인 A): 같은 방법(코드워드 + 사실 20개)을 `exec resume … -c model_auto_compact_token_limit=20000` 으로 되물었다. Luna 의 `model_context_window` 는 828,400 이라 자연 압축은 멀다.
@@ -1503,6 +1504,36 @@ resume 체인(D-031 결정 4)에서 orc 는 이을 때 그 실행 **이후**의 
 - **압축 뒤 답: 코드워드·사실 13 모두 맞았다.** `compacted.replacement_history` 는 **사용자 메시지 원문**(1,320자, 두 값 포함)과 본문이 비어 있는 `compaction` 항목 하나다 — 시스템·스킬 맥락과 모델 답은 불투명한 요약으로 바뀐다. claude 가 사용자 메시지까지 요약해 세부를 잃은 것과 다르다. orc 의 위임 프롬프트는 사용자 메시지이므로 codex 쪽 손실 위험은 더 작다(n=1, 추론).
 - 압축에 든 토큰(세션 로그 `last_token_usage.total_tokens` 5,638, 입력·출력 칸은 0)은 `turn.completed.usage` 누적(40,419 → 86,886)에 들어가지 않았다 — claude 와 마찬가지로 Budget 토큰이 압축 몫을 세지 않는다.
 - 토큰: 약 92.6k (상한 250k, 구독제).
+
+**압축 창 출처 실측 — 경로별** (2026-09-26, claude 2.1.283 · Haiku low, 스크래치, 새 실행 1회씩 n=1 · 사용자 승인: Haiku low 최대 3회·$1): D-060 곁가지("압축 창이 명시돼야 임계값 압축을 한다")를 orc 가 실제로 띄우는 경로별로 확인했다.
+- **코드** (2.1.283 바이너리 읽기): 자동 압축 판정은 압축 창 출처를 env(`CLAUDE_CODE_AUTO_COMPACT_WINDOW`) → 합친 설정의 `autoCompactWindow` → 계정 client data → 실험값 → 모델 기본표 → `auto` 순으로 정하고, 출처가 `auto` 면 임계값 검사 **전에** `false` 를 돌려준다(원격 세션이 아닐 때). 그때 남는 것은 API prompt-too-long 뒤의 반응형 압축(`trigger: "ptl"` 경로)뿐이다. 모델 기본표에는 `claude-sonnet-5`(1,000,000)만 있어 Sonnet 5 는 설정 없이도 임계값이 돈다(코드 읽기, 미실측).
+- **설정 출처**: 사용자 `~/.claude/settings.json` 에 `autoCompactWindow: 1000000` 이 있다(값만 확인). `settings.local.json`·관리 설정·셸 rc 에는 압축 창 설정이 없고, `~/.claude.json` 에 계정 client data 창(`autoCompactWindowsCache`)도 없다. orc 는 claude 를 부모 env 그대로 띄운다(`runProcess`) — env 로 들어오는 값은 없다.
+
+| orc 경로 | 호출 | claude 설정 출처 | 모델 | 사용자 `autoCompactWindow` | 창 출처 | 임계값 압축 |
+|---|---|---|---|---|---|---|
+| 지휘자 직접 답·요약 | `conductor.ts`·`session.ts` (`conduct`) | `isolateArgv` — `--setting-sources project,local` … `--safe-mode` (D-050) | Haiku low | 안 실림 | `auto` | **안 함** (실측 A) |
+| LLM 분류 폴백 | `classify-llm.ts` (`isolate: true`) | 같다 | Haiku low | 안 실림 | `auto` | 안 함 — 단발 분류라 맥락이 자랄 일이 없다 |
+| 대화 세션 위임 primary·reviewer (GUI·`chat`) | `conversation.ts` `executorFor` | 기본 (user·project·local) | 배정 모델 | 실림 | `settings` | 함 (실측 C, 등가) |
+| CLI `once`·`loop`, GUI 단발 실행 | `cli.ts`·`gui/service.ts` `createExecutor` | 기본 | 배정 모델 | 실림 | `settings` | 함 |
+
+세 실측 모두 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=5`(임계값 9,000 = Haiku 유효 창 180,000 × 5%)로 돌렸다. 판정 근거를 보려고 `DEBUG=1` 로 디버그 로그를 켰다 — argv 는 그대로다. 부모 Claude 세션의 `CLAUDE_CODE_*` env 는 벗겼다.
+
+| | 인자 | 결과 | 디버그 로그 | 금액 |
+|---|---|---|---|---|
+| A | orc 지휘자 argv 그대로(`createAdapter('claude').start({ isolate: true })`), 파일 1개 읽기 | 도구 뒤 두 번째 호출의 맥락 20,752 토큰(임계값의 2.3배) — **압축 없음** | `autocompact` 줄 **0** (API 요청 2회·Read 1회는 찍혔다) — 판정 전에 빠졌다 | $0.0455826 |
+| B | A + `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000` | 압축 없음 — 시도는 `status` 줄 `compact_result: "failed"`, `compact_error: "too_few_groups"` | `level=compact effectiveWindow=180000` → `routing through reactive (thresholdSource=env)` → `no assistant messages in summarize set, bailing` | $0.0078462 |
+| C | 비격리 위임 argv + 캡처 위생(`--setting-sources project,local --strict-mcp-config`, D-060 실엔진 검증과 같다) + `--settings '{"autoCompactWindow":1000000}'`, 파일 3개 이어 읽기 | **자동 압축 2회** `{auto, 20,532 → 1,742}`·`{auto, 19,824 → 2,001}`, 답 정확 | `thresholdSource=settings` — 첫 시도는 B 처럼 bail, 둘째·셋째 성공 | $0.06422365 |
+
+- **A 와 B 는 env 한 줄만 다르다** — 판정이 돌았느냐가 출처로만 갈렸다. 지휘자 격리 경로는 임계값 압축을 하지 않는다(확인).
+- **새 실행 한 번 안의 압축은 라운드가 쌓여야 된다.** 임계값 압축은 반응형 경로로 넘겨져 마지막 라운드를 남기고 앞 라운드를 요약하는데, 도구 1회짜리 실행은 요약할 assistant 라운드가 없어 실패한다(B). 3번 연속 실패하면 그 세션은 자동 압축을 멈춘다(코드, `consecutiveFailures ≥ 3`). orc 파서는 실패 `status` 줄을 압축으로 세지 않는다(캡처 테스트).
+- **C 가 비격리 경로의 출처를 보인다** — 설정이 실리면 `settings` 출처로 한 실행 안에서도 압축한다. 사용자 전역 설정 대신 `--settings` 로 같은 값을 실은 것은 공개 저장소 캡처에 전역 hook 출력이 섞이지 않게 하려는 것이다. 판정은 합친 설정의 값 하나를 보므로 층을 가리지 않는다(코드).
+- 그래서 **D-058·D-059 의 자동 압축은 이 설정에 기댔다.** 두 실측은 격리 인자 기록이 없는 `claude -p` 였고, A 가 보이듯 이 계정의 Haiku 는 설정·env 가 없으면 출처가 `auto` 다. D-059 의 `pre_tokens` 184,573 은 200k 아래라 반응형도 아니다. 설정이 없는 환경에서는 두 실측이 그대로 재현되지 않는다(추론 — 실험값은 시간에 따라 바뀔 수 있다).
+- 곁가지: D-060 이 "본 대화 밖의 보조 호출로 본다" 고 한 새 세션 1턴의 여분 토큰은 디버그 로그의 `source=generate_session_title` 요청이다 — 세 새 실행 모두 1회씩 있었다.
+- 원본 스트림: `src/adapters/__tests__/fixtures/claude-q18-{isolated,isolated-env,settings}.jsonl`. 디버그 로그는 환경 정보가 많아 커밋하지 않았다 — 위 인용이 전부다.
+- **미검증**: `claude -p` 에서 반응형 압축(prompt-too-long 뒤)이 실제로 돌고 `compact_boundary` 를 내는지 — 200k 를 채워야 해 이번 승인 범위 밖이다. Opus 5·Fable 5.1 의 설정 없는 출처.
+- 비용: claude API 환산 합계 $0.1177 (3회, 상한 $1, 구독제 청구 없음).
+
+→ **Q18** 로 연다.
 
 **상태** 확정 — 2026-09-26 사용자 지시("Q15 권장안으로 진행해"). 결정 3 은 **D-059** 가 바꿨다.
 
@@ -1527,6 +1558,7 @@ D-058 자동 압축 실측(2026-09-26, n=1, 임계값 인위 조정)에서 압�
 **자연 압축 실측** (2026-09-26, claude 2.1.283 · Haiku low, 스크래치, n=1 · 사용자 승인 B): 임계값을 건드리지 않았다. 1턴에 코드워드 + 사실 20개 + 채움 글 약 10만 단어(맥락 153,572 토큰)를 심고, 2턴에 채움 글 약 2.5만 단어와 함께 코드워드·사실 13 을 되물었다.
 - 2턴에서 **자동 압축**: `compact_boundary` `{ trigger: "auto", pre_tokens: 184573, post_tokens: 39936, cumulative_dropped_tokens: 144637 }`. `pre_tokens` 가 1턴 맥락 + 2턴 새 메시지와 맞는다 — 새 턴이 임계값을 넘길 때 보내기 **전에** 압축한다. `post_tokens` 가 큰 것은 2턴 메시지(`preserved_segment`)를 원문으로 남기기 때문으로 본다(추론).
 - **답: `CODEWORD=ORC-103453 FACT13=NONE`** — 인위 임계값 실측과 같게 코드워드는 남고 사실 13 은 잃었다. 이 결정의 근거가 자연 임계값에서도 재현됐다(n=2, 두 번 다 같은 방식의 합성 대화).
+- **설정 의존** (Q18): 이 "자연" 임계값은 사용자 전역 `autoCompactWindow`(1,000,000 → Haiku 창 200,000 으로 잘림)에서 나왔다. 설정이 없으면 184,573 에서 압축하지 않고 200k prompt-too-long 까지 간다(추론 — D-058 **압축 창 출처 실측**).
 - 비용: claude API 환산 누적 $0.4217 (상한 $1.00, 구독제 청구 없음). 1턴 캐시 쓰기(153k × 1h)가 $0.31 로 대부분이다.
 
 **상태** 확정 — 2026-09-26 사용자 지시("ok go", 권장안 1).
@@ -1585,7 +1617,7 @@ D-058 실측에서 압축 실행의 `result.usage` 가 0 으로 와 Budget 토�
 
 - **일치한다.** 턴별 몫의 합이 세션 누적과 토큰·금액 모두 정확히 같다. 압축 없는 resume(2~4)은 차분이 그 턴의 `result.usage` 와 칸마다 같고, 금액도 그 토큰 × Haiku 정가(1시간 캐시 쓰기 $2/MTok)와 소수 8자리까지 같다 — 앞 턴을 다시 세지 않는다. 보조 호출(입력 914 · 출력 16)은 새 세션 1턴에만 있고 resume 에는 없다.
 - **자동 압축 몫이 차분에 든다.** 5의 `compact_boundary` 는 `{ trigger: "auto", pre_tokens: 20597, post_tokens: 912 }`. 차분 − `result.usage` = 압축 호출 몫 1,481 · 864 · 20,379 · 78 ($0.0079364) 이고, 그 캐시 읽기 20,379 는 4의 맥락 그대로다(`pre_tokens` 20,597 = 4의 합 20,559 + 새 메시지). 압축 호출의 캐시 쓰기는 5분 단가($1.25)로, 본 턴은 1시간 단가로 매겨야 금액이 맞는다 — 수동(#52)과 같다. 결정 2 의 "`pre_tokens` 를 따로 더하지 않는다" 가 자동 압축에도 맞다.
-- **임계값 압축은 압축 창이 명시돼야 돈다** (새로 안 것). 4는 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=8` 만 줬는데 압축하지 않았고, 5에 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000` 을 더하자 압축했다(재실행 1회). 2.1.283 바이너리를 읽으면 압축 창 출처가 `auto`(env·settings·실험값 모두 없음)이면 임계값 검사를 건너뛰고 API 의 prompt-too-long 반응형에 맡긴다. 사용자 전역 `settings.json` 에 `autoCompactWindow: 1000000` 이 있어 D-058·D-059 실측은 이 설정을 싣고 돈 것으로 본다(추론 — 격리 인자가 이 설정을 뺐다). orc 의 primary·reviewer 는 전역 설정을 싣고 뜨므로(D-032) 이 사용자에게는 영향이 없다. **이 설정이 없는 사용자는 claude 가 임계값 압축 대신 반응형 압축만 할 수 있다** — 미검증 추론이고 D-060 의 셈과는 무관하다.
+- **임계값 압축은 압축 창이 명시돼야 돈다** (새로 안 것). 4는 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=8` 만 줬는데 압축하지 않았고, 5에 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000` 을 더하자 압축했다(재실행 1회). 2.1.283 바이너리를 읽으면 압축 창 출처가 `auto`(env·settings·실험값 모두 없음)이면 임계값 검사를 건너뛰고 API 의 prompt-too-long 반응형에 맡긴다. 사용자 전역 `settings.json` 에 `autoCompactWindow: 1000000` 이 있어 D-058·D-059 실측은 이 설정을 싣고 돈 것으로 본다(추론 — 격리 인자가 이 설정을 뺐다). orc 의 primary·reviewer 는 전역 설정을 싣고 뜨므로(D-032) 이 사용자에게는 영향이 없다. **이 설정이 없는 사용자는 claude 가 임계값 압축 대신 반응형 압축만 할 수 있다** — 미검증 추론이고 D-060 의 셈과는 무관하다. → 경로별로 실측했다(D-058 **압축 창 출처 실측**): 격리한 지휘자·분류기는 이 사용자에게도 출처가 `auto` 라 임계값 압축을 하지 않는다 — **Q18**.
 - 비용: claude API 환산 누적 $0.0384 (5회, 구독제 청구 없음).
 
 **상태** 확정 — 2026-09-26 사용자 지시(작업 3→4: "들어 있으면 modelUsage 누적 차분으로 보정, actual 로 취급 · codex 는 보정하지 않고 표시").
@@ -1611,5 +1643,6 @@ D-058 실측에서 압축 실행의 `result.usage` 가 0 으로 와 Budget 토�
 | ~~Q13~~ | ~~위임된 엔진이 사용자 전역 설정을 싣고 뜬다~~ → **D-032** (지휘자만 격리, primary·reviewer 는 의도대로 유지) | — |
 | ~~Q16~~ | → **D-059** (압축이 기록된 세션은 다음 위임부터 잇지 않는다). 원래 질문: 압축된 엔진 세션을 계속 이을까 (D-058 자동 압축 실측: 압축 뒤 목록 세부를 잃었다, n=1·임계값 인위 조정). 선택지 — 압축이 기록된 세션은 다음 위임부터 잇지 않고 orc 맥락으로 새로 띄운다 / 잇되 압축 이후 첫 위임에 orc 최근 맥락을 함께 싣는다 / 그대로 둔다 | — |
 | ~~Q17~~ | → **D-060** (실측: claude `modelUsage` 누적 차분에 압축 몫이 든다 → 토큰을 그것으로 센다, codex 는 보정 없이 Budget 에 표시). 원래 질문: Budget 토큰이 엔진 압축 몫을 세지 않는다 (D-058 실측: claude 수동 압축은 `result.usage` 가 0 — 약 2.7k, codex 는 `turn.completed.usage` 누적에 안 잡힘 — 5,638). 금액은 claude 누적 `total_cost_usd` 로 들어온다(D-057). 선택지 — claude `modelUsage` 누적 차분으로 토큰을 보정한다 / 압축 1회당 추정치를 더한다 / 두지 않는다(상한 대비 작다) | — |
+| Q18 | 지휘자(격리) 실행은 claude 임계값 압축을 하지 않는다 (D-058 압축 창 출처 실측: 격리 인자가 사용자 `autoCompactWindow` 를 빼 출처가 `auto` 가 되고, 2.1.283 은 그때 임계값 판정을 건너뛴다 — env 한 줄로 판정이 켜짐을 대조 확인). **영향**: 지휘자 직접 답·요약이 한 실행 안에서 도구를 여러 라운드 써 맥락이 임계값(약 167k)을 넘으면 압축 없이 Haiku 한도 200k 의 prompt-too-long 까지 간다 — 그 뒤 반응형 압축은 코드에만 있고 미실측이라, 안 되면 실행이 실패한다. 한도에 닿은 실사용 사례는 없다. 분류 폴백은 단발이라 해당 없음. 위임(primary·reviewer)은 이 사용자에게는 설정이 실려 영향 없음 — 설정이 없는 사용자라면 Haiku 위임 resume 체인도 같고, D-059 가드가 기대는 `compact_boundary` 는 반응형에서만 나온다(미검증). 선택지 — (1) 지휘자 격리 실행에만 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000` 을 engines.json 선언으로 명시 전달한다(실측 B 로 판정이 켜짐을 확인. env 가 설정보다 우선이라 격리와 무관하게 돈다. 모델 창으로 잘리므로 창을 줄이지 않는다. 어댑터가 env 를 다루는 첫 사례다) / (2) 격리 인자에 `--settings '{"autoCompactWindow":1000000}'` 를 더한다(인자만으로 끝나지만 `--safe-mode` 아래에서 실리는지 미실측) / (3) 모든 claude 실행에 명시한다 — 설정 없는 사용자도 덮지만 사용자 설정을 이긴다 / (4) 두지 않는다 — 지휘자는 짧은 단발이다. **권장 (1)**: 확인된 수단이고 격리 경로에만 걸어 사용자 설정을 건드리지 않는다 | 없음 — 지휘자 긴 답의 신뢰성 (D-050 격리의 부작용) |
 | ~~Q15~~ | → **D-058** (`compact_boundary` 를 읽어 `result.compacted` 에 남긴다, 동작은 그대로). 원래 질문: resume 체인에서 엔진이 압축하면 orc 가 모른다. claude 는 `system`·`compact_boundary` (`compact_metadata.trigger·pre_tokens·post_tokens`) 를 흘린다 (D-031 Q10 후속 압축 탐색). 선택지 — 어댑터가 notice 로 읽어 `result` 기록에 남긴다(`cut` 과 같은 자리) / 압축된 세션은 다음부터 잇지 않는다 / 두지 않는다. 자동 압축(`trigger: "auto"`)·codex 는 미실측 | — |
 | ~~Q14~~ | → **D-057** (engines.json `resume.cumulative` 선언 + 기록의 직전 원본 보고를 빼서 과금). 원래 질문: resume 한 위임의 과금이 앞 턴들을 다시 센다 (D-031 Q10 후속 실측): claude `total_cost_usd`, codex `turn.completed.usage` 가 세션 누적이다. 고치는 방법 — 이을 세션의 직전 누적값을 `engineSession` 에 남겨 빼기 / claude 는 `usage` 로 단가 계산 / 엔진 세션 로그 읽기(D-020 과 같은 비공식 경로라 비권장) | — |
