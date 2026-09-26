@@ -82,6 +82,12 @@ export interface EngineSpec {
    * 위임 품질의 일부다. 선언이 없는 엔진에 격리를 요청하면 격리 없이 조용히 돌리지 않고 던진다.
    */
   readonly isolateArgv?: readonly string[];
+  /**
+   * 격리 실행에만 싣는 env (D-061). 격리 인자가 사용자 설정을 빼면서 함께 빠지는 값을 되돌려 놓는다 —
+   * claude 는 `autoCompactWindow` 가 빠지면 임계값 압축을 건너뛴다 (Q18 실측). 부모 env 의 같은 이름을 **덮는다** —
+   * 지휘자는 사용자 전역 설정을 싣지 않는다(D-032 B1). 격리하지 않는 실행(primary·reviewer)에는 싣지 않는다.
+   */
+  readonly isolateEnv?: Readonly<Record<string, string>>;
 }
 
 /** 해당 엔진이 그 모델을 아예 제공하지 않으면 `null` 이다 — 말없는 치환의 자리가 아니다 (D-004). */

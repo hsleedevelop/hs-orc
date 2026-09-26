@@ -14,6 +14,8 @@ export interface SpawnSpec {
   readonly cwd: string;
   readonly timeoutMs: number;
   readonly format: StreamFormat;
+  /** 부모 env 위에 덮어 실을 값 (D-061). 없으면 부모 env 를 그대로 물려준다. */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 /** SIGTERM 후 이 시간 안에 안 죽으면 그룹째 SIGKILL. */
@@ -24,6 +26,7 @@ export function runProcess(spec: SpawnSpec, onEvent?: (event: RunEvent) => void)
   const child = spawn(spec.bin, [...spec.argv], {
     cwd: spec.cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
+    ...(spec.env ? { env: { ...process.env, ...spec.env } } : {}),
     // 자기 프로세스 그룹을 갖게 해 손자까지 한 번에 종료할 수 있게 한다.
     detached: true,
   });

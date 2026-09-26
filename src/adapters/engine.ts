@@ -13,16 +13,15 @@ import type { EngineAdapter, RunEvent, RunHandle, RunRequest } from './types.ts'
 export function createAdapter(engine: EngineName, catalog: Engines = loadEngines()): EngineAdapter {
   const spec = catalog.engines[engine];
 
-  const argvFor = (req: RunRequest): string[] => [
-    ...buildInvocation(catalog, req.model, req.effort, req.prompt, {
+  const invocationFor = (req: RunRequest) =>
+    buildInvocation(catalog, req.model, req.effort, req.prompt, {
       engine,
       ...(req.write === true ? { write: true } : {}),
       ...(req.nonGit === true ? { nonGit: true } : {}),
       ...(req.isolate === true ? { isolate: true } : {}),
       ...(req.resume !== undefined ? { resume: req.resume } : {}),
-    }).argv,
-    ...spec.streamArgv,
-  ];
+    });
+  const argvFor = (req: RunRequest): string[] => [...invocationFor(req).argv, ...spec.streamArgv];
 
   return {
     id: engine,
@@ -37,9 +36,16 @@ export function createAdapter(engine: EngineName, catalog: Engines = loadEngines
 
     start(req: RunRequest, onEvent?: (event: RunEvent) => void): RunHandle {
       // effort·가용성 검증은 argv 생성이 먼저 하고, 실패하면 프로세스를 띄우기 전에 던진다.
-      const argv = argvFor(req);
+      const { argv, env } = invocationFor(req);
       return runProcess(
-        { bin: resolveBinary(spec), argv, cwd: req.cwd, timeoutMs: req.timeoutMs, format: spec.streamFormat },
+        {
+          bin: resolveBinary(spec),
+          argv: [...argv, ...spec.streamArgv],
+          cwd: req.cwd,
+          timeoutMs: req.timeoutMs,
+          format: spec.streamFormat,
+          ...(env ? { env } : {}),
+        },
         onEvent,
       );
     },
