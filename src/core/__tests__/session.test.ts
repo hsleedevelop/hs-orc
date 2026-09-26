@@ -13,6 +13,7 @@ import { Journal } from '../journal.ts';
 import type { EngineReport, SlotExecutor, SlotRun } from '../executor.ts';
 import { ConversationSession, SessionStateError } from '../session.ts';
 import { readDecisions } from '../decision-log.ts';
+import { replaySpend } from '../transcript.ts';
 
 const isolate = () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-log-'));
@@ -385,6 +386,36 @@ describe('대화 세션 — resume (SPEC §6.4.3)', () => {
     assert.match(primaryCalls[1]?.prompt ?? '', /\[최근 대화\]/, '잇지 않으면 orc 의 최근 대화를 싣는다');
   });
 
+  it('reviewer 의 압축은 기록하지 않는다 — 잇는 것은 primary 뿐이다 (D-058)', async () => {
+    isolate();
+    const exec: SlotExecutor = (slot) =>
+      Promise.resolve(slot.role === 'reviewer' ? { ...reply('PASS'), compactions: [{ trigger: 'auto' }] } : { ...reply('ran'), sessionId: 'eng-1' });
+    const { session } = make(conductSpy().exec, undefined, exec);
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    const result = session.records().findLast((x) => x.kind === 'result');
+    assert.ok(result?.kind === 'result');
+    assert.equal(result.compacted, undefined);
+  });
+
+  it('압축 뒤 새로 띄운 실행이 성공하면 다음 위임은 그 세션을 잇는다 (D-059)', async () => {
+    isolate();
+    const calls: { role: string; resume: string | undefined }[] = [];
+    let primaries = 0;
+    const exec: SlotExecutor = (slot, _prompt, options) => {
+      calls.push({ role: slot.role, resume: options?.resume });
+      if (slot.role === 'reviewer') return Promise.resolve(reply('PASS'));
+      primaries += 1;
+      return Promise.resolve({ ...reply('ran'), sessionId: `eng-${primaries}`, ...(primaries === 1 ? { compactions: [{ trigger: 'auto' }] } : {}) });
+    };
+    const { session } = make(conductSpy().exec, undefined, exec);
+    for (let i = 0; i < 3; i += 1) {
+      await session.send('이 타입 에러 고쳐줘');
+      await session.approve();
+    }
+    assert.deepEqual(calls.filter((c) => c.role === 'primary').map((c) => c.resume), [undefined, undefined, 'eng-2']);
+  });
+
   it('이을 때 직전 실행의 원본 보고를 기준으로 넘긴다 — 누적 보고를 다시 세지 않게 (D-057)', async () => {
     isolate();
     const r = resumeSpy();
@@ -462,6 +493,24 @@ describe('대화 세션 — resume (SPEC §6.4.3)', () => {
     assert.equal(primaries.length, 2);
     assert.equal(primaries[1]?.resume, undefined);
     assert.match(primaries[1]?.prompt ?? '', /^\[최근 대화\]/);
+  });
+});
+
+describe('대화 세션 — 압축 몫을 세지 못한 보고 (D-060)', () => {
+  it('선언된 엔진의 위임은 spend 에 그 횟수를 남기고, 다시 열어도 Budget 이 되살린다', async () => {
+    isolate();
+    const usage = { inputTokens: 10, outputTokens: 1, cachedInputTokens: 0, cacheWriteTokens: 0 };
+    const exec: SlotExecutor = (slot) =>
+      Promise.resolve(slot.role === 'reviewer' ? { ...reply('PASS'), usage } : { ...reply('ran'), usage, compactionUncounted: true });
+    const { session, dir } = make(conductSpy().exec, undefined, exec);
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    const spend = session.records().findLast((x) => x.kind === 'spend');
+    assert.equal(spend?.kind === 'spend' ? spend.compactionUncounted : null, 1, 'reviewer 는 선언이 없어 세지 않는다');
+
+    const reopened = new Budget(20);
+    replaySpend(reopened, make(conductSpy().exec, dir).session.records());
+    assert.match(reopened.summary(), /압축 토큰을 보고하지 않는 엔진 1회/);
   });
 });
 

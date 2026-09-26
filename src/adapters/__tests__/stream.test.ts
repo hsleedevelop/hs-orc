@@ -132,6 +132,16 @@ describe('claude 토큰은 modelUsage 합으로 읽는다 (D-060)', () => {
     });
   });
 
+  it('모델이 여럿이면 모델별 칸을 더한다 — 다른 모델의 보조 호출도 빠지지 않는다', () => {
+    const line = JSON.stringify({ ...JSON.parse(CLAUDE_RESULT), modelUsage: {
+      'claude-opus-5-5': { inputTokens: 100, outputTokens: 20, cacheReadInputTokens: 3000, cacheCreationInputTokens: 400 },
+      'claude-haiku-4-5-20251001': { inputTokens: 900, outputTokens: 10, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    } });
+    assert.deepEqual(parseLine('claude', line).flatMap((e) => (e.kind === 'usage' ? [e.usage] : [])), [
+      { inputTokens: 1000, outputTokens: 30, cachedInputTokens: 3000, cacheWriteTokens: 400 },
+    ]);
+  });
+
   it('modelUsage 가 없거나 비었으면 result.usage 로 떨어진다 (cursor)', () => {
     const empty = JSON.stringify({ ...JSON.parse(CLAUDE_RESULT), modelUsage: {} });
     for (const line of [CLAUDE_RESULT, empty]) {
