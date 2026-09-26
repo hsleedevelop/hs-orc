@@ -33,7 +33,19 @@ export type RunEvent =
   | { readonly kind: 'done'; readonly ok: boolean; readonly text: string; readonly costUsd?: number }
   /** 파싱 실패한 줄. **버리지 않는다** — 한 줄 실패가 실행 전체를 죽이지 않게 하되 침묵하지도 않는다. */
   | { readonly kind: 'unparsed'; readonly line: string; readonly reason: string }
-  | { readonly kind: 'session'; readonly id: string };
+  | { readonly kind: 'session'; readonly id: string }
+  | { readonly kind: 'compact'; readonly compaction: EngineCompaction };
+
+/**
+ * 엔진이 실행 중 맥락을 압축했다 (D-058). claude 스트림의 `system`·`compact_boundary` 에서 읽는다
+ * (2026-09-26 실측, `compact_metadata`). 토큰 칸은 엔진이 안 주면 없다 — 0 으로 채우지 않는다.
+ */
+export interface EngineCompaction {
+  /** `manual`(`/compact`) · `auto` — 엔진이 준 문자열 그대로다. */
+  readonly trigger: string;
+  readonly preTokens?: number;
+  readonly postTokens?: number;
+}
 
 export type RunOutcome = 'ok' | 'error' | 'timeout' | 'cancelled';
 
@@ -51,6 +63,8 @@ export interface RunResult {
   readonly unparsedLines: readonly string[];
   /** 스트림에서 읽은 엔진 세션 id. 못 읽으면 없다 — 지어내지 않는다. */
   readonly sessionId?: string;
+  /** 이 실행 중 엔진이 한 압축 (D-058). 없으면 필드가 없다. */
+  readonly compactions?: readonly EngineCompaction[];
 }
 
 export interface RunHandle {

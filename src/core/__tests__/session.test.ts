@@ -353,6 +353,18 @@ describe('대화 세션 — resume (SPEC §6.4.3)', () => {
     assert.equal(primaries[1]?.prompt, '이 타입 에러 고쳐줘');
   });
 
+  it('primary 실행 중 엔진이 압축했으면 결과 기록에 남긴다 (D-058)', async () => {
+    isolate();
+    const compaction = { trigger: 'auto', preTokens: 180000, postTokens: 12000 };
+    const exec: SlotExecutor = (slot) =>
+      Promise.resolve(slot.role === 'reviewer' ? reply('PASS') : { ...reply('ran'), sessionId: 'eng-1', compactions: [compaction] });
+    const { session } = make(conductSpy().exec, undefined, exec);
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    const result = session.records().findLast((x) => x.kind === 'result');
+    assert.deepEqual(result?.kind === 'result' ? result.compacted : null, [compaction]);
+  });
+
   it('이을 때 직전 실행의 원본 보고를 기준으로 넘긴다 — 누적 보고를 다시 세지 않게 (D-057)', async () => {
     isolate();
     const r = resumeSpy();

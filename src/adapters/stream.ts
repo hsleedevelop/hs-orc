@@ -20,6 +20,7 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 
 function claudeEvents(event: Record<string, unknown>): RunEvent[] {
+  if (event['type'] === 'system' && event['subtype'] === 'compact_boundary') return [compactEvent(event)];
   if (event['type'] !== 'result') return [];
 
   const out: RunEvent[] = [];
@@ -46,6 +47,21 @@ function claudeEvents(event: Record<string, unknown>): RunEvent[] {
     ...(typeof cost === 'number' ? { costUsd: cost } : {}),
   });
   return out;
+}
+
+/** D-058: resume 체인에서 엔진이 앞 맥락을 요약으로 바꿨다는 신호. orc 는 이것 없이는 모른다. */
+function compactEvent(event: Record<string, unknown>): RunEvent {
+  const meta = asRecord(event['compact_metadata']) ?? {};
+  const pre = meta['pre_tokens'];
+  const post = meta['post_tokens'];
+  return {
+    kind: 'compact',
+    compaction: {
+      trigger: typeof meta['trigger'] === 'string' ? meta['trigger'] : 'unknown',
+      ...(typeof pre === 'number' ? { preTokens: pre } : {}),
+      ...(typeof post === 'number' ? { postTokens: post } : {}),
+    },
+  };
 }
 
 function codexEvents(event: Record<string, unknown>): RunEvent[] {

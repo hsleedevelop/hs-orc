@@ -39,6 +39,7 @@ export function renderRecord(r: TranscriptRecord): string[] {
         r.text,
         ...(r.review ? [`검증   ${r.review.slice(0, 600)}`] : []),
         ...cutLine(r.cut),
+        ...(r.compacted ?? []).map((c) => `압축   엔진이 앞 맥락을 요약으로 바꿨다 (${c.trigger}${c.preTokens !== undefined && c.postTokens !== undefined ? ` ${c.preTokens}→${c.postTokens} 토큰` : ''})`),
       ];
     case 'summary':
       return [...(r.text ? [r.text] : []), `다음   ${r.next}`];

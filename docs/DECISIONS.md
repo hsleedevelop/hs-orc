@@ -1475,6 +1475,26 @@ D-031 Q10 후속 실측(2026-09-26)에서 resume 한 실행의 보고가 **세�
 
 ---
 
+## D-058 — 엔진이 압축하면 결과 기록에 남긴다 (Q15)
+
+**배경**
+resume 체인(D-031 결정 4)에서 orc 는 이을 때 그 실행 **이후**의 대화만 싣는다 — 앞 맥락은 엔진이 가진다고 믿는다. 엔진이 압축하면 그 믿음이 조용히 깨진다. 2026-09-26 압축 탐색(D-031 Q10 후속)에서 claude 가 `system`·`compact_boundary`(`compact_metadata.trigger·pre_tokens·post_tokens`)를 흘리는 것을 확인했다.
+
+**결정**
+1. 어댑터가 claude 형식 스트림의 `compact_boundary` 를 `compact` 이벤트로 읽는다. 토큰 칸은 엔진이 줄 때만 싣고, 메타데이터가 없어도 압축 사실은 남긴다(`trigger: "unknown"`).
+2. `RunResult.compactions` → `SlotRun` → `Delegated` → 대화 기록 `result.compacted` 로 흐른다. primary 만 — reviewer 는 resume 하지 않는다.
+3. CLI `chat` 은 결과 아래 `압축` 줄을 찍는다. **동작은 바꾸지 않는다** — 압축된 세션도 계속 잇는다. 기록은 맥락 신뢰도를 판단할 재료다(D-053 의 `cut` 과 같은 자리).
+
+**기각**
+- *압축된 세션은 다음부터 잇지 않는다* — 압축 뒤 맥락이 orc 의 최근 N턴 자르기보다 나쁘다는 근거가 없다. 잇기를 끊으면 캐시·맥락 비용만 는다.
+- *두지 않는다* — resume 체인의 맥락이 요약으로 바뀐 사실을 사용자와 orc 가 모두 모른다.
+
+**검증** 실측 줄로 파싱 테스트, 세션 테스트(기록에 남는지 — 배선을 끊으면 실패함을 확인), chat 렌더 테스트. **미검증**: 자동 압축(`trigger: "auto"`)의 실제 줄 모양, codex·cursor 의 압축 신호(codex `exec` 스트림에서 본 적 없다). GUI 는 `cut` 과 마찬가지로 아직 그리지 않는다.
+
+**상태** 확정 — 2026-09-26 사용자 지시("Q15 권장안으로 진행해").
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |
@@ -1492,5 +1512,5 @@ D-031 Q10 후속 실측(2026-09-26)에서 resume 한 실행의 보고가 **세�
 | ~~Q11~~ | ~~직접 답 모델·effort~~ → **Haiku·low** (2026-09-23 사용자 결정 — 분류 폴백과 같은 계층). 경계는 SPEC §6.4.2: 읽기 전용, 결과를 지어내지 않는다, 행은 `SUGGEST` 로 제안만 | — |
 | ~~Q12~~ | ~~스크래치 세션 보존·정리 정책~~ → **자동 정리 없음** (2026-09-25 사용자 결정). 자동 삭제는 되돌릴 수 없고 증거를 지울 수 있다(D-028). 당시 2개·68K 로 정책 근거가 없다. 재검토: 약 50개를 넘거나 실사용 불편이 생기면 GUI 목록에 수동 삭제 | — |
 | ~~Q13~~ | ~~위임된 엔진이 사용자 전역 설정을 싣고 뜬다~~ → **D-032** (지휘자만 격리, primary·reviewer 는 의도대로 유지) | — |
-| Q15 | resume 체인에서 엔진이 압축하면 orc 가 모른다. claude 는 `system`·`compact_boundary` (`compact_metadata.trigger·pre_tokens·post_tokens`) 를 흘린다 (D-031 Q10 후속 압축 탐색). 선택지 — 어댑터가 notice 로 읽어 `result` 기록에 남긴다(`cut` 과 같은 자리) / 압축된 세션은 다음부터 잇지 않는다 / 두지 않는다. 자동 압축(`trigger: "auto"`)·codex 는 미실측 | 긴 세션의 맥락 신뢰도 |
+| ~~Q15~~ | → **D-058** (`compact_boundary` 를 읽어 `result.compacted` 에 남긴다, 동작은 그대로). 원래 질문: resume 체인에서 엔진이 압축하면 orc 가 모른다. claude 는 `system`·`compact_boundary` (`compact_metadata.trigger·pre_tokens·post_tokens`) 를 흘린다 (D-031 Q10 후속 압축 탐색). 선택지 — 어댑터가 notice 로 읽어 `result` 기록에 남긴다(`cut` 과 같은 자리) / 압축된 세션은 다음부터 잇지 않는다 / 두지 않는다. 자동 압축(`trigger: "auto"`)·codex 는 미실측 | — |
 | ~~Q14~~ | → **D-057** (engines.json `resume.cumulative` 선언 + 기록의 직전 원본 보고를 빼서 과금). 원래 질문: resume 한 위임의 과금이 앞 턴들을 다시 센다 (D-031 Q10 후속 실측): claude `total_cost_usd`, codex `turn.completed.usage` 가 세션 누적이다. 고치는 방법 — 이을 세션의 직전 누적값을 `engineSession` 에 남겨 빼기 / claude 는 `usage` 로 단가 계산 / 엔진 세션 로그 읽기(D-020 과 같은 비공식 경로라 비권장) | — |

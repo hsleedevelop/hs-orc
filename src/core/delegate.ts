@@ -19,6 +19,7 @@ import type { Journal } from './journal.ts';
 import { reportError } from './report.ts';
 import { runStoreRoot, storeRun } from './run-store.ts';
 import type { EngineSessionRef } from './transcript.ts';
+import type { EngineCompaction } from '../adapters/types.ts';
 
 export interface DelegateInput {
   readonly matrix: Matrix;
@@ -50,6 +51,8 @@ export interface Delegated {
   readonly review?: string;
   readonly decisionId: string;
   readonly primarySession?: EngineSessionRef;
+  /** primary 실행 중 엔진이 한 압축 (D-058). */
+  readonly compactions?: readonly EngineCompaction[];
 }
 
 export async function delegate(input: DelegateInput): Promise<Delegated> {
@@ -122,6 +125,7 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
     verdict: duo.verdict,
     ...(duo.review ? { review: duo.review.text.slice(0, 2000) } : {}),
     decisionId: decision.id,
+    ...(run.compactions ? { compactions: run.compactions } : {}),
     // 성공한 primary 만 이을 수 있다 — 실패한 세션을 다음에 이으면 실패를 물려받는다.
     ...(run.ok && run.sessionId
       ? { primarySession: { engine: slot.engine, modelId: slot.modelId, effort: slot.effort, id: run.sessionId, ...(run.reported ? { reported: run.reported } : {}) } }

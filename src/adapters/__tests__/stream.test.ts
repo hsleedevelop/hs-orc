@@ -97,6 +97,12 @@ describe('엔진 세션 id (SPEC §3.8)', () => {
     const line = JSON.stringify({ type: 'thread.started', thread_id: '01a0cdb0-2134-7742-932e-ffeb293f61c1' });
     assert.deepEqual(parseLine('codex', line), [{ kind: 'session', id: '01a0cdb0-2134-7742-932e-ffeb293f61c1' }]);
   });
+  it('claude 의 compact_boundary 는 압축 이벤트다 — 2026-09-26 실측 줄 (D-058)', () => {
+    const line = JSON.stringify({ type: 'system', subtype: 'compact_boundary', session_id: 'S', compact_metadata: { trigger: 'manual', pre_tokens: 43869, post_tokens: 9340, cumulative_dropped_tokens: 34529, duration_ms: 16770 } });
+    assert.deepEqual(parseLine('claude', line), [{ kind: 'compact', compaction: { trigger: 'manual', preTokens: 43869, postTokens: 9340 } }]);
+    // 메타데이터가 없어도 압축 사실은 남긴다 — 토큰 칸은 지어내지 않는다.
+    assert.deepEqual(parseLine('claude', JSON.stringify({ type: 'system', subtype: 'compact_boundary' })), [{ kind: 'compact', compaction: { trigger: 'unknown' } }]);
+  });
   it('id 가 문자열이 아니면 내지 않는다 — 지어내지 않는다', () => {
     const line = JSON.stringify({ type: 'result', result: 'ok', session_id: 42 });
     assert.ok(!parseLine('claude', line).some((e) => e.kind === 'session'));
