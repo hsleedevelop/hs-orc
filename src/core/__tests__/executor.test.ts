@@ -8,6 +8,7 @@ import { loadMatrix } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
 import { assign } from '../assign.ts';
 import { Budget } from '../budget.ts';
+import { conductorSlot } from '../conductor.ts';
 import { createExecutor, sinceBaseline, type SlotRun } from '../executor.ts';
 
 /**
@@ -234,5 +235,55 @@ describe('압축 몫은 modelUsage 누적 차분으로 센다 — 두 번 세지
 
   it('cursor 는 선언하지 않는다 — 압축 실측이 없다 (결정 4)', () => {
     assert.equal(catalog.engines.cursor.compactionUncounted, undefined);
+  });
+});
+
+/**
+ * D-061 — 압축 창 env 는 격리 실행(지휘자)만 받는다. 어댑터의 반환값이 아니라 **실제로 뜬 프로세스의 env** 를 읽는다.
+ * 부모 env 에 같은 이름이 있으면 지휘자에서만 덮고, primary·reviewer 는 사용자 환경을 그대로 물려받는다.
+ */
+describe('압축 창 env 는 지휘자 실행에만 싣는다 (D-061)', () => {
+  const KEY = 'CLAUDE_CODE_AUTO_COMPACT_WINDOW';
+  const r08 = matrix.assignments.find((a) => a.id === 'R08');
+  if (!r08) throw new Error('R08 이 매트릭스에 없다.');
+  const claudePrimary = assign(matrix, catalog, r08).slots.primary;
+
+  /** 받은 env 값을 남기는 가짜 claude. 없으면 `<unset>` 이라 빈 문자열과 갈린다. */
+  const envOf = async (execute: ReturnType<typeof createExecutor>, slot: Parameters<ReturnType<typeof createExecutor>>[0]): Promise<string> => {
+    const file = path.join(fakeDir, 'claude');
+    writeFileSync(file, `#!/bin/sh\nprintf '%s' "\${${KEY}-<unset>}" > "${file}.env"\nexit 0\n`, 'utf8');
+    chmodSync(file, 0o755);
+    await execute(slot, 'X');
+    return readFileSync(`${file}.env`, 'utf8');
+  };
+
+  const withParentEnv = async (value: string | undefined, body: () => Promise<void>): Promise<void> => {
+    const saved = process.env[KEY];
+    if (value === undefined) delete process.env[KEY];
+    else process.env[KEY] = value;
+    try {
+      await body();
+    } finally {
+      if (saved === undefined) delete process.env[KEY];
+      else process.env[KEY] = saved;
+    }
+  };
+
+  it('지휘자는 1000000 을 받고, 같은 claude 라도 primary·reviewer 는 받지 않는다', async () => {
+    await withParentEnv(undefined, async () => {
+      assert.equal(claudePrimary.engine, 'claude');
+      assert.equal(plan.slots.reviewer.engine, 'claude');
+      assert.equal(await envOf(createExecutor(catalog, fakeDir, 10_000, { isolate: true }), conductorSlot(catalog)), '1000000');
+      const delegated = createExecutor(catalog, fakeDir, 10_000);
+      assert.equal(await envOf(delegated, claudePrimary), '<unset>', 'primary 에 실리면 사용자 설정(autoCompactWindow)을 덮는다');
+      assert.equal(await envOf(delegated, plan.slots.reviewer), '<unset>');
+    });
+  });
+
+  it('부모 env 에 같은 이름이 있으면 지휘자만 덮고, 위임은 사용자 값을 그대로 물려받는다', async () => {
+    await withParentEnv('300000', async () => {
+      assert.equal(await envOf(createExecutor(catalog, fakeDir, 10_000, { isolate: true }), conductorSlot(catalog)), '1000000');
+      assert.equal(await envOf(createExecutor(catalog, fakeDir, 10_000), claudePrimary), '300000');
+    });
   });
 });

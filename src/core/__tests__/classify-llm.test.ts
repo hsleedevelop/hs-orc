@@ -99,6 +99,28 @@ describe('분류 폴백', () => {
     }
   });
 
+  /** D-061: 분류 폴백도 지휘자와 같은 격리 경로라 압축 창 env 를 받는다 — 뜬 프로세스의 env 로 id 를 가른다. */
+  it('분류기도 격리 실행이라 압축 창 env 를 받는다', async () => {
+    const here = mkdtempSync(path.join(os.tmpdir(), 'hs-classify-env-'));
+    const bin = path.join(here, 'claude');
+    writeFileSync(
+      bin,
+      ['#!/bin/sh', 'if [ "${CLAUDE_CODE_AUTO_COMPACT_WINDOW-}" = "1000000" ]; then id=R05; else id=R01; fi',
+       `printf '{"type":"result","is_error":false,"result":"%s"}\\n' "$id"`, ''].join('\n'),
+      'utf8',
+    );
+    chmodSync(bin, 0o755);
+
+    const realPath = process.env['PATH'];
+    process.env['PATH'] = `${here}${path.delimiter}${realPath ?? ''}`;
+    try {
+      const outcome = await classifyWithModel(matrix, loadEngines(), '아무거나');
+      assert.equal(outcome.assignment?.id, 'R05', '분류기 프로세스에 압축 창 env 가 없다');
+    } finally {
+      process.env['PATH'] = realPath;
+    }
+  });
+
   it('엔진이 실패해도 성공 여부·비용은 돌려준다 — 쓴 것은 과금 대상이다', async () => {
     const here = mkdtempSync(path.join(os.tmpdir(), 'hs-classify-outcome-fail-'));
     const bin = path.join(here, 'claude');

@@ -55,6 +55,8 @@ export interface Invocation {
   readonly argv: readonly string[];
   readonly modelId: string;
   readonly effort: Effort;
+  /** 부모 env 위에 덮어 실을 값 (D-061). 격리 실행에서 엔진이 `isolateEnv` 를 선언했을 때만 있다. */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -174,6 +176,8 @@ export function buildInvocation(
     }
     argv.push(...spec.isolateArgv);
   }
+  // 격리 인자가 사용자 설정과 함께 빼 버린 값을 env 로 되돌린다 (D-061) — 격리 실행에만 싣는다.
+  const env = options.isolate === true ? spec.isolateEnv : undefined;
 
-  return { engine: target, argv, modelId, effort };
+  return { engine: target, argv, modelId, effort, ...(env ? { env } : {}) };
 }
