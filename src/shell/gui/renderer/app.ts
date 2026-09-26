@@ -382,7 +382,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
           h('div', { className: r.outcome === 'ok' ? 'good mono' : 'warn mono' }, r.evidence),
           h('pre', { style: { marginTop: 10 } }, r.text || '(빈 출력)'),
           r.review ? h('pre', { style: { marginTop: 10 } }, r.review) : null,
-          ...[...cutLine(r.cut), ...compactLines(r.compacted)].map((l, j) => h('div', { key: `c${j}`, className: 'hint' }, l)));
+          // 카드는 말풍선(pre-wrap)과 달리 공백을 접는다 — 같은 문구(`맥락   …`)가 두 자리에서 달라 보이지 않게 맞춘다.
+          ...[...cutLine(r.cut), ...compactLines(r.compacted)].map((l, j) => h('div', { key: `c${j}`, className: 'hint', style: { whiteSpace: 'pre-wrap' } }, l)));
       case 'summary':
         return h('div', { key: i, className: 'bubble orc' },
           r.text ? h('div', null, r.text) : null,
