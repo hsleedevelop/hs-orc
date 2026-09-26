@@ -365,6 +365,26 @@ describe('대화 세션 — resume (SPEC §6.4.3)', () => {
     assert.deepEqual(result?.kind === 'result' ? result.compacted : null, [compaction]);
   });
 
+  it('직전 실행 중 엔진이 압축했으면 잇지 않고 맥락을 실어 새로 띄운다 (D-059)', async () => {
+    isolate();
+    const calls: { role: string; prompt: string; resume: string | undefined }[] = [];
+    let primaries = 0;
+    const exec: SlotExecutor = (slot, prompt, options) => {
+      calls.push({ role: slot.role, prompt, resume: options?.resume });
+      if (slot.role === 'reviewer') return Promise.resolve(reply('PASS'));
+      primaries += 1;
+      return Promise.resolve({ ...reply('ran'), sessionId: `eng-${primaries}`, ...(primaries === 1 ? { compactions: [{ trigger: 'auto' }] } : {}) });
+    };
+    const { session } = make(conductSpy().exec, undefined, exec);
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    const primaryCalls = calls.filter((c) => c.role === 'primary');
+    assert.deepEqual(primaryCalls.map((c) => c.resume), [undefined, undefined]);
+    assert.match(primaryCalls[1]?.prompt ?? '', /\[최근 대화\]/, '잇지 않으면 orc 의 최근 대화를 싣는다');
+  });
+
   it('이을 때 직전 실행의 원본 보고를 기준으로 넘긴다 — 누적 보고를 다시 세지 않게 (D-057)', async () => {
     isolate();
     const r = resumeSpy();
