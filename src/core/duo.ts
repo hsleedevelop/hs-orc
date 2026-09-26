@@ -10,7 +10,7 @@
  */
 import type { Matrix } from '../data/matrix.ts';
 import type { AssignmentPlan } from './assign.ts';
-import { estimateUsd, type SlotExecutor, type SlotRun } from './executor.ts';
+import { estimateUsd, type EngineReport, type SlotExecutor, type SlotRun } from './executor.ts';
 import type { Budget, Charge } from './budget.ts';
 import type { Evidence } from './evidence.ts';
 
@@ -78,6 +78,8 @@ export interface DuoOptions {
   readonly skipReviewer?: boolean;
   /** primary 가 이어 붙일 엔진 세션 (SPEC §6.4.3). reviewer 에는 절대 가지 않는다. */
   readonly resumePrimary?: string;
+  /** 이어 붙일 세션의 직전 원본 보고 (D-057). */
+  readonly resumeBaseline?: EngineReport;
 }
 
 export async function runDuo(
@@ -93,7 +95,9 @@ export async function runDuo(
   const primary = await execute(
     primarySlot,
     task,
-    options.resumePrimary !== undefined ? { resume: options.resumePrimary } : undefined,
+    options.resumePrimary !== undefined
+      ? { resume: options.resumePrimary, ...(options.resumeBaseline ? { baseline: options.resumeBaseline } : {}) }
+      : undefined,
   );
   const primaryCharge = budget.charge(`${primarySlot.label}·${primarySlot.effort}`, primary.actualUsd, estimateUsd(matrix, primarySlot), primary.meteredUsd, primarySlot.plan);
   // 금액과 토큰은 **같은 자리**에서 센다. 한쪽만 세면 구독제에서 상한이 통째로 비어 버린다 (D-030).

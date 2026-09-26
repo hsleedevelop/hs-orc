@@ -14,7 +14,7 @@ import { runDuo, type Verdict } from './duo.ts';
 import { collect, outcomeOf, type Evidence, type EvidenceReport, type SettledOutcome } from './evidence.ts';
 import { changedFiles, runCommand, snapshotTests, testChanges } from './evidence-gather.ts';
 import { declaredTests } from '../data/verify.ts';
-import type { SlotExecutor } from './executor.ts';
+import type { EngineReport, SlotExecutor } from './executor.ts';
 import type { Journal } from './journal.ts';
 import { reportError } from './report.ts';
 import { runStoreRoot, storeRun } from './run-store.ts';
@@ -37,6 +37,8 @@ export interface DelegateInput {
   readonly note?: string;
   /** primary 가 이어 붙일 엔진 세션 (SPEC §6.4.3). reviewer 에는 절대 가지 않는다. */
   readonly resumePrimary?: string;
+  /** 이어 붙일 세션의 직전 원본 보고 (D-057). */
+  readonly resumeBaseline?: EngineReport;
 }
 
 export interface Delegated {
@@ -66,7 +68,9 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
   let duo;
   try {
     duo = await runDuo(matrix, plan, input.execute, input.prompt, budget,
-      input.resumePrimary !== undefined ? { resumePrimary: input.resumePrimary } : {});
+      input.resumePrimary !== undefined
+        ? { resumePrimary: input.resumePrimary, ...(input.resumeBaseline ? { resumeBaseline: input.resumeBaseline } : {}) }
+        : {});
   } catch (error) {
     // 1차 줄을 pending 으로 버려두지 않는다 — 실행을 시작했고 끝나지 못했다.
     appendDecision(secondLine(decision, 'wrong', `실행 중 예외: ${error instanceof Error ? error.message : String(error)}`));
@@ -120,7 +124,7 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
     decisionId: decision.id,
     // 성공한 primary 만 이을 수 있다 — 실패한 세션을 다음에 이으면 실패를 물려받는다.
     ...(run.ok && run.sessionId
-      ? { primarySession: { engine: slot.engine, modelId: slot.modelId, effort: slot.effort, id: run.sessionId } }
+      ? { primarySession: { engine: slot.engine, modelId: slot.modelId, effort: slot.effort, id: run.sessionId, ...(run.reported ? { reported: run.reported } : {}) } }
       : {}),
   };
 }
