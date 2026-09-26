@@ -312,7 +312,7 @@ export class ConversationSession {
   /**
    * 이을 엔진 세션 (SPEC §6.4.3): **가장 최근 위임**이 성공해 엔진 세션을 남겼고, 그 primary 가
    * 이번 primary 와 엔진·모델·effort 가 모두 같을 때만. 최근 위임이 실패했으면 더 앞을 찾지 않는다.
-   * 세션 폴더는 이 세션이 늘 같다 (codex 는 cwd 로 세션을 거른다).
+   * 세션 폴더는 이 세션이 늘 같다 (엔진은 다른 cwd 에서도 id 로 잇지만 앞 턴의 경로가 옛 폴더를 가리킨다 — D-031 Q10 후속).
    *
    * 쓰기가 켜져 있고 그 엔진의 resume 경로가 쓰기를 못 받으면(`resume?.write === false`) 잇지 않는다 —
    * `buildInvocation` 이 던지게 두지 않고 여기서 미리 새 실행으로 돌린다(맥락은 그대로 싣는다, final-review #1).

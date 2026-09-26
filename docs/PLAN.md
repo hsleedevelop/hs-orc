@@ -317,7 +317,7 @@ PRD §7 은 v1 을 **"실제 작업 1건이 분류→배정→실행→증거 �
 - ~~분류 폴백의 metered 경로 테스트 없음 (D-034 리뷰 Minor)~~ → **D-037** 로 닫음: luna(codex)는 지휘자 격리 수단이 없어 분류기 후보에서 뺐다. Haiku 는 claude 가 실제 금액을 주므로 해당 경로가 없다.
 - ~~`delegate()` 의 journal `charge` 는 reviewer 가 돌면 reviewer 의 charge 다 (`GuiService.run` 때부터).~~ → 해결 (2026-09-25): `runDuo` 가 `primaryCharge` 를 돌려주고 GUI(`delegate`)·TUI 의 journal 실행 줄이 그것을 싣는다. TUI 에도 같은 결함이 있었다.
 - ~~git 이 아닌 **project** 폴더에서 codex 위임은 여전히 거절된다 (nonGit 은 스크래치에만).~~ → **D-055** (읽기 전용만 허용, 쓰기 켠 위임은 그대로 거절).
-- 다른 cwd resume, resume 중 모델 변경, 긴 세션 압축 — 미실측. codex 는 resume 에 쓰기를 실을 수 없어 쓰기 켠 후속은 잇지 않는다 (최종 리뷰 #1).
+- ~~다른 cwd resume~~ → 2026-09-26 실측 (D-031 Q10 후속): claude·codex 모두 id 로 이어지고 모르는 id 는 exit 1 — 조용한 폴백 없음, 코드 변경 없음. **새로 연 결함:** resume 한 실행의 과금이 세션 누적이라 앞 턴을 다시 센다 → **Q14**. resume 중 모델 변경은 `resumable()` 이 막아 닿지 않으므로 실측하지 않는다(가드를 풀 때 다시 본다). **긴 세션 압축은 미실측** — 닿는 경계다(같은 슬롯 후속이 쌓인다). 싼 첫 단계는 claude `-p --resume <id> "/compact"` 로 압축 이벤트 모양과 코드워드 보존을 보는 것. codex 는 resume 에 쓰기를 실을 수 없어 쓰기 켠 후속은 잇지 않는다 (최종 리뷰 #1).
 - GuiService 는 활성 세션 하나. CLI 는 `hs-orc chat` 이 세션을 쓴다 (D-056). TUI 는 아직 쓰지 않는다 — CLI 실사용 뒤에 정한다.
   - 2026-09-26 실측 (`hs-orc chat --scratch`, 격리 Haiku·low): "넌 누구니" 직접 답 1회 $0.0642 API 환산(구독제, 청구 없음)·토큰 31,519 → `--resume` 이 기록과 누적을 그대로 되살렸다. 비용이 S10 GUI 실측($0.0111)의 약 6배지만 **토큰 양은 같다**(engines.json 격리 재실측 2026-09-25: $0.0116/32,385 tok) — chat 경로의 문제가 아니라 엔진 프롬프트 캐시 상태 차이로 본다: 31.5k 전부 1시간 캐시 쓰기(Haiku 입력 $1/MTok × 2) ≈ $0.063 으로 실측과 맞고, 캐시 적중이면 약 $0.01 이다. 추론이다 — 엔진 usage 의 `cache_creation` 내역은 저장되지 않아(safe-mode 실행은 claude 세션 기록도 없다) 직접 확인하지 못했다.
 - 최종 리뷰 Minor (2026-09-24 `final-review.md` 에서 옮김, 코드 대조로 미해결 확인. #12 `$evidence.resume` 기록은 반영됨):
