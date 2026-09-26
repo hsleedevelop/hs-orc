@@ -42,6 +42,8 @@ export interface SlotRun {
   readonly reported?: EngineReport;
   /** 이 실행 중 엔진이 한 압축 (D-058). 없으면 필드가 없다. */
   readonly compactions?: readonly EngineCompaction[];
+  /** `usage` 에 압축 몫이 빠졌을 수 있다 — 엔진 선언 (D-060, codex). `Budget.countTokens` 에 그대로 넘긴다. */
+  readonly compactionUncounted?: boolean;
 }
 
 /** 엔진이 보고한 그대로의 금액·토큰. 보고가 없던 칸은 없다. */
@@ -145,6 +147,7 @@ export function createExecutor(
       ...(result.sessionId !== undefined ? { sessionId: result.sessionId } : {}),
       reported,
       ...(result.compactions ? { compactions: result.compactions } : {}),
+      ...(catalog.engines[slot.engine].compactionUncounted === true ? { compactionUncounted: true } : {}),
     };
   };
 }

@@ -30,7 +30,7 @@ export interface Verdict {
    * 판정에 쓴 reviewer 실행의 비용·토큰 (D-036). 주면 Executor 와 같은 우선순위로 과금하고 토큰을 센다.
    * 없으면 추정 금액만 적는다 — 토큰 상한이 reviewer 몫을 세지 못한다.
    */
-  readonly cost?: Pick<SlotRun, 'actualUsd' | 'meteredUsd' | 'usage'>;
+  readonly cost?: Pick<SlotRun, 'actualUsd' | 'meteredUsd' | 'usage' | 'compactionUncounted'>;
   /**
    * reviewer 를 돌리지 않고 판정했다 — 예: Core 검증 명령이 이미 실패했다 (D-041).
    * 과금도 토큰 집계도 하지 않는다. 추정 금액이나 "미보고" 로 세면 돌지 않은 실행이 기록에 생긴다.
@@ -134,7 +134,7 @@ export async function runLoop(
       run.meteredUsd,
       plan.slots.primary.plan,
     );
-    budget.countTokens(run.usage);
+    budget.countTokens(run.usage, run.compactionUncounted);
 
     // 재시도 작업에는 직전 지적(최대 4000자)이 붙는다 — 기록에는 change 와 같이 앞 200자만 남긴다 (D-036 리뷰).
     const summary = task.slice(0, 200);
@@ -169,7 +169,7 @@ export async function runLoop(
         plan.slots.reviewer.plan,
       );
       // cost 가 없으면 reviewer 토큰을 못 본 것이다 — 0 으로 치지 않고 미보고로 센다 (D-030).
-      budget.countTokens(verdict.cost?.usage);
+      budget.countTokens(verdict.cost?.usage, verdict.cost?.compactionUncounted);
     }
 
     const critique = components.critique ? await components.critique(ctx, run.text) : '';

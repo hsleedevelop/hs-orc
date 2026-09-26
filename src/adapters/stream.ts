@@ -26,8 +26,11 @@ function claudeEvents(event: Record<string, unknown>): RunEvent[] {
   const out: RunEvent[] = [];
   // Q10 실측: claude·cursor 모두 result 줄에 session_id 를 싣는다. 한 번만 내도록 result 줄에서만 읽는다.
   if (typeof event['session_id'] === 'string') out.push({ kind: 'session', id: event['session_id'] });
+  const models = modelUsageTotal(event['modelUsage']);
   const usage = asRecord(event['usage']);
-  if (usage) {
+  // D-060: `modelUsage` 가 있으면 그것만 쓴다. `usage` 와 더하면 같은 토큰을 두 번 센다.
+  if (models) out.push({ kind: 'usage', usage: models });
+  else if (usage) {
     // claude 는 snake_case, cursor 는 camelCase 로 같은 자리를 채운다.
     const normalized: Usage = {
       inputTokens: num(usage['input_tokens'] ?? usage['inputTokens']),
@@ -47,6 +50,26 @@ function claudeEvents(event: Record<string, unknown>): RunEvent[] {
     ...(typeof cost === 'number' ? { costUsd: cost } : {}),
   });
   return out;
+}
+
+/**
+ * D-060: claude `modelUsage` 의 모델별 합. `total_cost_usd` 와 같은 범위라 압축·보조 호출 토큰까지 든다 —
+ * `result.usage` 는 본 대화 턴 몫뿐이고 압축 실행에서는 0 이다 (2026-09-26 실측, fixtures/claude-q17-*).
+ * `outputTokens` 는 thinking 을 이미 포함한다(실측 금액이 thinking 을 따로 더하지 않아야 맞는다).
+ * 없거나 비었으면(cursor) undefined — 호출자가 `usage` 로 떨어진다.
+ */
+function modelUsageTotal(value: unknown): Usage | undefined {
+  const models = Object.values(asRecord(value) ?? {})
+    .map(asRecord)
+    .filter((m): m is Record<string, unknown> => m !== null);
+  if (models.length === 0) return undefined;
+  const sum = (key: string): number => models.reduce((total, m) => total + num(m[key]), 0);
+  return {
+    inputTokens: sum('inputTokens'),
+    outputTokens: sum('outputTokens'),
+    cachedInputTokens: sum('cacheReadInputTokens'),
+    cacheWriteTokens: sum('cacheCreationInputTokens'),
+  };
 }
 
 /** D-058: resume 체인에서 엔진이 앞 맥락을 요약으로 바꿨다는 신호. orc 는 이것 없이는 모른다. */

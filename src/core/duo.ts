@@ -101,7 +101,7 @@ export async function runDuo(
   );
   const primaryCharge = budget.charge(`${primarySlot.label}·${primarySlot.effort}`, primary.actualUsd, estimateUsd(matrix, primarySlot), primary.meteredUsd, primarySlot.plan);
   // 금액과 토큰은 **같은 자리**에서 센다. 한쪽만 세면 구독제에서 상한이 통째로 비어 버린다 (D-030).
-  budget.countTokens(primary.usage);
+  budget.countTokens(primary.usage, primary.compactionUncounted);
 
   if (options.skipReviewer === true || !primary.ok) {
     // primary 가 실패했으면 검증할 산출물이 없다. reviewer 를 돌려 돈만 쓰지 않는다.
@@ -113,7 +113,7 @@ export async function runDuo(
 
   const review = await execute(reviewerSlot, reviewPrompt(plan, task, primary.text));
   budget.charge(`${reviewerSlot.label}·${reviewerSlot.effort}`, review.actualUsd, estimateUsd(matrix, reviewerSlot), review.meteredUsd, reviewerSlot.plan);
-  budget.countTokens(review.usage);
+  budget.countTokens(review.usage, review.compactionUncounted);
 
   const verdict = review.ok ? parseVerdict(review.text) : 'unknown';
   const evidence: Evidence[] =

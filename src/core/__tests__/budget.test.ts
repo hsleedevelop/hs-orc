@@ -29,3 +29,31 @@ describe('출처를 섞어 표시하지 않는다', () => {
     assert.match(b.summary(), /추정/);
   });
 });
+
+describe('압축 몫을 세지 못한 토큰 보고는 숨기지 않는다 (D-060)', () => {
+  const usage = { inputTokens: 10, outputTokens: 1, cachedInputTokens: 0, cacheWriteTokens: 0 };
+
+  it('선언된 엔진의 보고만 표시한다 — 토큰은 보고된 만큼만 더한다', () => {
+    const b = new Budget(100, 1000);
+    b.countTokens(usage);
+    assert.doesNotMatch(b.summary(), /압축 토큰/);
+    b.countTokens(usage, true);
+    assert.equal(b.spentTokens, 22);
+    assert.match(b.summary(), /압축 토큰을 보고하지 않는 엔진 1회/);
+  });
+
+  it('구간 기록(spend)에 실려 다시 열어도 남는다 — 옛 기록(칸 없음)은 0 이다 (D-054)', () => {
+    const b = new Budget(100);
+    const mark = b.mark();
+    b.countTokens(usage);
+    assert.equal(b.since(mark).compactionUncounted, undefined, '0 이면 기록에 쓰지 않는다');
+    b.countTokens(usage, true);
+    const spend = b.since(mark);
+    assert.equal(spend.compactionUncounted, 1);
+
+    const reopened = new Budget(100);
+    reopened.absorb({ charges: [], tokens: 5, unreported: 0 });
+    reopened.absorb(spend);
+    assert.match(reopened.summary(), /압축 토큰을 보고하지 않는 엔진 1회/);
+  });
+});
