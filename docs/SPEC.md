@@ -262,7 +262,9 @@ cursor  -p "<prompt>" --model gpt-5.6-sol-xhigh --output-format stream-json
 | cursor | stream-json `system init` 부터의 `session_id` | `-p --resume <id>` + 기존 인자 |
 
 - 세 엔진 모두 2026-09-23 에 무작위 코드워드 회수로 확인했다. resume 뒤에도 id 는 같다.
-- **같은 세션 폴더(cwd)에서만 resume 한다.** codex 는 세션 목록을 cwd 로 거른다. 다른 cwd 에서의 resume 은 실측하지 않았다.
+- **같은 세션 폴더(cwd)에서만 resume 한다.** 엔진 제약은 아니다 — 2026-09-26 실측에서 claude·codex 모두 다른 cwd 에서도 id 로 이어졌고, 새 턴은 새 cwd 에서 돈다(codex 가 cwd 로 거르는 것은 세션 목록뿐). 앞 턴이 본 경로가 옛 폴더를 가리키므로 의미 보호로 둔다 (D-031 Q10 후속).
+- 모르는 id 로 resume 하면 claude·codex 모두 모델 호출 전에 exit 1 로 실패한다 — 엔진이 조용히 새 세션을 열지 않는다 (같은 실측).
+- resume 한 실행의 비용 보고는 **세션 누적**이다: claude `total_cost_usd`·`modelUsage`, codex `turn.completed.usage`. 현재 어댑터는 이것을 이번 실행 몫으로 센다 — 미해결 Q14.
 - resume 이 실패하면(비정상 종료·id 없음) **새 세션으로 조용히 바꾸지 않는다.** 실패를 올리고, 재시도는 맥락을 실은 새 실행으로 사용자가 고른다 — 조용히 맥락 없는 실행으로 떨어지면 답이 그럴듯하게 틀린다.
 
 ## 4. 라우팅 파이프라인
