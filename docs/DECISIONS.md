@@ -1570,7 +1570,23 @@ D-058 실측에서 압축 실행의 `result.usage` 가 0 으로 와 Budget 토�
 - 이 결정 전 기록의 기준(`engineSession.reported.usage`)은 그 턴의 `usage` 다. 그 뒤 첫 resume 은 누적에서 한 턴 몫만 빼므로 **한 번 많이 센다**(D-057 결정 3 의 안전한 쪽). 빼서 음수인 칸이 있으면 원본을 센다.
 - claude 금액 표시는 그대로다(`total_cost_usd` 차분).
 
-**검증** 캡처 원본으로 파싱 테스트(1턴·압축 실행 모두 `modelUsage` 합, `unparsed` 0, `usage` 이벤트 1개), 실행기 테스트(가짜 claude 가 캡처를 흘린다: 압축 resume 의 토큰 = 차분 23,016, 금액 = $0.00913905, Budget 합 = 세션 누적 44,501 — 1턴 재집계도 `pre_tokens` 가산도 없다), codex 표시·`spend` 왕복 테스트. `cumulative` 의 `usage` 선언이나 `modelUsage` 파싱을 되돌리면 테스트가 실패함을 확인했다. **미검증**: 실제 엔진 resume 체인에서 Budget 대조(D-057 과 같다), 자동 압축에서의 `modelUsage`(수동과 같은 경로로 본다 — 추론), 여러 모델이 섞인 `modelUsage`(합으로 읽는다), cursor.
+**검증** 캡처 원본으로 파싱 테스트(1턴·압축 실행 모두 `modelUsage` 합, `unparsed` 0, `usage` 이벤트 1개), 실행기 테스트(가짜 claude 가 캡처를 흘린다: 압축 resume 의 토큰 = 차분 23,016, 금액 = $0.00913905, Budget 합 = 세션 누적 44,501 — 1턴 재집계도 `pre_tokens` 가산도 없다), codex 표시·`spend` 왕복 테스트. `cumulative` 의 `usage` 선언이나 `modelUsage` 파싱을 되돌리면 테스트가 실패함을 확인했다. **미검증**: 여러 모델이 섞인 `modelUsage`(합으로 읽는다 — 합성 줄로만 테스트), cursor. resume 체인·자동 압축은 아래 실엔진 검증으로 닫았다.
+
+**실엔진 검증** (2026-09-26, claude 2.1.283 · Haiku low, 스크래치, n=1 · 사용자 승인): orc 실행기(`createExecutor`, primary·reviewer 와 같은 비격리 경로)로 실제 claude 를 돌려 한 세션을 다섯 번 이었다 — 1턴 → resume 3번 → 자동 압축 resume 1번. 캡처에 사용자 전역 hook 이 섞이지 않게 PATH 앞의 shim 이 `--setting-sources project,local --strict-mcp-config` 만 앞에 붙였다(#52 와 같은 격리). 원본 스트림은 `src/adapters/__tests__/fixtures/claude-d060-chain-{1..5}.jsonl`.
+
+| 실행 | `result.usage` (입력·출력·캐시 읽기·캐시 쓰기) | orc 가 매긴 몫 (`modelUsage` 차분) | 금액 (차분) |
+|---|---|---|---|
+| 1 (새 세션) | 10 · 68 · 12,972 · 7,138 | 924 · 84 · 12,972 · 7,138 | $0.0169172 |
+| 2 (resume) | 10 · 95 · 20,110 · 122 | 같다 | $0.00274 |
+| 3 (resume) | 10 · 71 · 20,232 · 147 | 같다 | $0.0026822 |
+| 4 (resume, 압축 안 됨 — 아래) | 10 · 45 · 20,379 · 125 | 같다 | $0.0025229 |
+| 5 (resume, **자동 압축**) | 10 · 70 · 16,950 · 1,792 | 1,491 · 934 · 37,329 · 1,870 | $0.0135754 |
+| **합** | | **124,098** = 마지막 `modelUsage` 누적 | **$0.0384377** = 마지막 `total_cost_usd` |
+
+- **일치한다.** 턴별 몫의 합이 세션 누적과 토큰·금액 모두 정확히 같다. 압축 없는 resume(2~4)은 차분이 그 턴의 `result.usage` 와 칸마다 같고, 금액도 그 토큰 × Haiku 정가(1시간 캐시 쓰기 $2/MTok)와 소수 8자리까지 같다 — 앞 턴을 다시 세지 않는다. 보조 호출(입력 914 · 출력 16)은 새 세션 1턴에만 있고 resume 에는 없다.
+- **자동 압축 몫이 차분에 든다.** 5의 `compact_boundary` 는 `{ trigger: "auto", pre_tokens: 20597, post_tokens: 912 }`. 차분 − `result.usage` = 압축 호출 몫 1,481 · 864 · 20,379 · 78 ($0.0079364) 이고, 그 캐시 읽기 20,379 는 4의 맥락 그대로다(`pre_tokens` 20,597 = 4의 합 20,559 + 새 메시지). 압축 호출의 캐시 쓰기는 5분 단가($1.25)로, 본 턴은 1시간 단가로 매겨야 금액이 맞는다 — 수동(#52)과 같다. 결정 2 의 "`pre_tokens` 를 따로 더하지 않는다" 가 자동 압축에도 맞다.
+- **임계값 압축은 압축 창이 명시돼야 돈다** (새로 안 것). 4는 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=8` 만 줬는데 압축하지 않았고, 5에 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000` 을 더하자 압축했다(재실행 1회). 2.1.283 바이너리를 읽으면 압축 창 출처가 `auto`(env·settings·실험값 모두 없음)이면 임계값 검사를 건너뛰고 API 의 prompt-too-long 반응형에 맡긴다. 사용자 전역 `settings.json` 에 `autoCompactWindow: 1000000` 이 있어 D-058·D-059 실측은 이 설정을 싣고 돈 것으로 본다(추론 — 격리 인자가 이 설정을 뺐다). orc 의 primary·reviewer 는 전역 설정을 싣고 뜨므로(D-032) 이 사용자에게는 영향이 없다. **이 설정이 없는 사용자는 claude 가 임계값 압축 대신 반응형 압축만 할 수 있다** — 미검증 추론이고 D-060 의 셈과는 무관하다.
+- 비용: claude API 환산 누적 $0.0384 (5회, 구독제 청구 없음).
 
 **상태** 확정 — 2026-09-26 사용자 지시(작업 3→4: "들어 있으면 modelUsage 누적 차분으로 보정, actual 로 취급 · codex 는 보정하지 않고 표시").
 
