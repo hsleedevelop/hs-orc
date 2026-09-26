@@ -1489,7 +1489,7 @@ resume 체인(D-031 결정 4)에서 orc 는 이을 때 그 실행 **이후**의 
 - *압축된 세션은 다음부터 잇지 않는다* — 압축 뒤 맥락이 orc 의 최근 N턴 자르기보다 나쁘다는 근거가 없다. 잇기를 끊으면 캐시·맥락 비용만 는다.
 - *두지 않는다* — resume 체인의 맥락이 요약으로 바뀐 사실을 사용자와 orc 가 모두 모른다.
 
-**검증** 실측 줄로 파싱 테스트, 세션 테스트(기록에 남는지 — 배선을 끊으면 실패함을 확인), chat 렌더 테스트. **미검증**: codex·cursor 의 압축 신호(codex `exec` 스트림에서 본 적 없다). GUI 는 `cut` 과 마찬가지로 아직 그리지 않는다.
+**검증** 실측 줄로 파싱 테스트, 세션 테스트(기록에 남는지 — 배선을 끊으면 실패함을 확인), chat 렌더 테스트. **미검증**: cursor 의 압축 신호(보류 중). codex 는 압축하지만 `exec --json` 에 신호를 내지 않는다 — 아래 codex 압축 실측. GUI 는 `cut` 과 마찬가지로 아직 그리지 않는다.
 
 **자동 압축 실측** (2026-09-26, claude 2.1.283 · Haiku low, 스크래치, n=1 · 사용자 승인): 1턴에 코드워드 + 번호 붙인 사실 20개를 심고, 2턴을 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=20` 으로 resume 해 코드워드와 "사실 13 의 사물함 코드" 를 되물었다. 임계값을 낮춘 것은 200k 를 채우지 않으려는 것이다 — 변수는 바이너리 문자열로 찾았고, 이름대로 동작함을 이 실측이 보였다.
 - 2턴 안에서 **자동 압축이 일어났다**: `compact_boundary` 의 `compact_metadata` = `{ trigger: "auto", pre_tokens: 46382, post_tokens: 9763, cumulative_dropped_tokens: 36619, … , preserved_segment: {…} }`. 캡처한 스트림을 `parseLine` 에 그대로 넣으면 `compact` 이벤트가 `{ trigger: "auto", preTokens: 46382, postTokens: 9763 }` 로 나오고 `unparsed` 는 0 이다 — 이 결정의 경로가 실제 자동 압축 줄에서 동작한다.
@@ -1497,6 +1497,12 @@ resume 체인(D-031 결정 4)에서 orc 는 이을 때 그 실행 **이후**의 
 - 결정 3(압축돼도 잇는다)과 기각한 "*압축된 세션은 다음부터 잇지 않는다*" 의 근거("압축이 orc 의 자르기보다 나쁘다는 근거가 없다")가 **n=1 로 흔들린다.** 정책을 바꿀지는 Q16.
 - 2.1.283 부터 `result` 뒤에 `system`·`task_summary` 줄이 하나 더 온다. 파서는 줄마다 읽으므로 영향이 없다.
 - 비용: claude API 환산 누적 $0.1496 (상한 $0.40, 구독제 청구 없음).
+
+**codex 압축 실측** (2026-09-26, codex 0.154.0 · Luna low, 스크래치, n=1 · 사용자 승인 A): 같은 방법(코드워드 + 사실 20개)을 `exec resume … -c model_auto_compact_token_limit=20000` 으로 되물었다. Luna 의 `model_context_window` 는 828,400 이라 자연 압축은 멀다.
+- **압축은 일어났다** — 세션 로그(`~/.codex/sessions/…/rollout-*.jsonl`)에 `compacted` 줄과 `event_msg`·`item_completed` 의 `ContextCompaction` 항목이 있다. **그러나 `exec --json` stdout 에는 아무 신호도 없다**(`item.completed` 는 경고성 `error` 둘과 `agent_message` 뿐). orc 가 공식 스트림으로 codex 압축을 알 길은 없다 — 세션 로그를 읽는 것은 D-020 과 같은 비공식 경로라 하지 않는다. **그래서 codex 위임에는 `compacted` 가 남지 않고 D-059 가드도 걸리지 않는다.**
+- **압축 뒤 답: 코드워드·사실 13 모두 맞았다.** `compacted.replacement_history` 는 **사용자 메시지 원문**(1,320자, 두 값 포함)과 본문이 비어 있는 `compaction` 항목 하나다 — 시스템·스킬 맥락과 모델 답은 불투명한 요약으로 바뀐다. claude 가 사용자 메시지까지 요약해 세부를 잃은 것과 다르다. orc 의 위임 프롬프트는 사용자 메시지이므로 codex 쪽 손실 위험은 더 작다(n=1, 추론).
+- 압축에 든 토큰(세션 로그 `last_token_usage.total_tokens` 5,638, 입력·출력 칸은 0)은 `turn.completed.usage` 누적(40,419 → 86,886)에 들어가지 않았다 — claude 와 마찬가지로 Budget 토큰이 압축 몫을 세지 않는다.
+- 토큰: 약 92.6k (상한 250k, 구독제).
 
 **상태** 확정 — 2026-09-26 사용자 지시("Q15 권장안으로 진행해"). 결정 3 은 **D-059** 가 바꿨다.
 
