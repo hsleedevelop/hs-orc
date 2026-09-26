@@ -190,4 +190,8 @@ describe('압축 몫은 modelUsage 누적 차분으로 센다 — 두 번 세지
     assert.equal(budget.spentTokens, 40429, '보고된 토큰만 센다 — 추정치를 더하지 않는다');
     assert.match(budget.summary(), /압축 토큰을 보고하지 않는 엔진 1회/);
   });
+
+  it('cursor 는 선언하지 않는다 — 압축 실측이 없다 (결정 4)', () => {
+    assert.equal(catalog.engines.cursor.compactionUncounted, undefined);
+  });
 });
