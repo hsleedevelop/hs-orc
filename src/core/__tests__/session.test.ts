@@ -10,7 +10,7 @@ import { loadMatrix } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
 import { Budget } from '../budget.ts';
 import { Journal } from '../journal.ts';
-import type { SlotExecutor, SlotRun } from '../executor.ts';
+import type { EngineReport, SlotExecutor, SlotRun } from '../executor.ts';
 import { ConversationSession, SessionStateError } from '../session.ts';
 import { readDecisions } from '../decision-log.ts';
 
@@ -51,14 +51,14 @@ const delegateSpy = () => {
  * label 로 가르면 reviewer 를 primary 로 잘못 센다.
  */
 const resumeSpy = (secondOk = true) => {
-  const calls: { label: string; role: string; prompt: string; resume: string | undefined }[] = [];
+  const calls: { label: string; role: string; prompt: string; resume: string | undefined; baseline?: EngineReport | undefined }[] = [];
   let primaries = 0;
   const exec: SlotExecutor = (slot, prompt, options) => {
-    calls.push({ label: slot.label, role: slot.role, prompt, resume: options?.resume });
+    calls.push({ label: slot.label, role: slot.role, prompt, resume: options?.resume, baseline: options?.baseline });
     if (slot.role === 'reviewer') return Promise.resolve(reply('PASS'));
     primaries += 1;
     const ok = primaries === 1 || secondOk;
-    return Promise.resolve({ ...reply(ok ? 'ran' : '', ok), sessionId: `eng-${primaries}` });
+    return Promise.resolve({ ...reply(ok ? 'ran' : '', ok), sessionId: `eng-${primaries}`, reported: { costUsd: primaries / 10 } });
   };
   return { exec, calls };
 };
@@ -351,6 +351,20 @@ describe('대화 세션 — resume (SPEC §6.4.3)', () => {
     const primaries = r.calls.filter((c) => c.label !== 'Haiku');
     assert.deepEqual(primaries.map((c) => c.resume), [undefined, 'eng-1']);
     assert.equal(primaries[1]?.prompt, '이 타입 에러 고쳐줘');
+  });
+
+  it('이을 때 직전 실행의 원본 보고를 기준으로 넘긴다 — 누적 보고를 다시 세지 않게 (D-057)', async () => {
+    isolate();
+    const r = resumeSpy();
+    const { session } = make(conductSpy().exec, undefined, r.exec);
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    const primaries = r.calls.filter((c) => c.role === 'primary');
+    assert.deepEqual(primaries.map((c) => c.baseline), [undefined, { costUsd: 0.1 }]);
+    const last = session.records().findLast((x) => x.kind === 'result');
+    assert.deepEqual(last?.kind === 'result' ? last.engineSession?.reported : null, { costUsd: 0.2 }, '다음 기준은 기록에 남는다');
   });
 
   it('reviewer 는 한 번도 잇지 않는다', async () => {

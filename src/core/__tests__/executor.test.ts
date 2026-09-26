@@ -6,7 +6,7 @@ import path from 'node:path';
 import { loadMatrix } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
 import { assign } from '../assign.ts';
-import { createExecutor } from '../executor.ts';
+import { createExecutor, sinceBaseline } from '../executor.ts';
 
 /**
  * 쓰기 권한 부여 지점은 `createExecutor` **한 곳**이고, 거기서 reviewer 가 구조적으로 배제된다 (D-025).
@@ -100,5 +100,44 @@ describe('원시 출력은 파싱과 무관하게 보존된다 (SPEC §3.7)', ()
     assert.equal(run.text, 'ok');
     assert.match(run.rawStdout, /input_tokens/, '사용량이 raw 에 없으면 단가 선언(D-027)이 소급 계산될 수 없다');
     assert.notEqual(run.rawStdout, run.text);
+  });
+});
+
+describe('resume 한 실행의 누적 보고는 직전 보고를 빼서 센다 (D-057)', () => {
+  // 수치는 2026-09-26 실측 원본이다 (DECISIONS D-031 Q10 후속).
+  it('claude 는 total_cost_usd 가 누적이다 — 금액만 빼고 토큰은 그대로 둔다', async () => {
+    const line = JSON.stringify({ type: 'result', is_error: false, result: 'ORC', session_id: 'S1', total_cost_usd: 0.0938752, usage: { input_tokens: 10, output_tokens: 105, cache_read_input_tokens: 43642, cache_creation_input_tokens: 671 } });
+    const file = path.join(fakeDir, 'claude');
+    writeFileSync(file, `#!/bin/sh\ncat <<'JSONL'\n${line}\nJSONL\n`, 'utf8');
+    chmodSync(file, 0o755);
+
+    const run = await createExecutor(catalog, fakeDir, 10_000)(plan.slots.reviewer, 'R', { resume: 'S1', baseline: { costUsd: 0.087634 } });
+    assert.ok(Math.abs((run.actualUsd ?? 0) - 0.0062412) < 1e-9, `이번 몫만 센다: ${run.actualUsd}`);
+    assert.equal(run.usage?.cachedInputTokens, 43642, 'claude 의 usage 는 이미 이번 턴 몫이다');
+    assert.equal(run.reported?.costUsd, 0.0938752, '다음 resume 의 기준은 원본이다');
+  });
+
+  it('codex 는 turn.completed.usage 가 누적이다 — 네 칸을 빼서 이번 턴 몫이 된다', async () => {
+    const lines = [
+      JSON.stringify({ type: 'thread.started', thread_id: 'T1' }),
+      JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'ORC' } }),
+      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 103616, cached_input_tokens: 50688, output_tokens: 40 } }),
+    ].join('\n');
+    const file = path.join(fakeDir, 'codex');
+    writeFileSync(file, `#!/bin/sh\ncat <<'JSONL'\n${lines}\nJSONL\n`, 'utf8');
+    chmodSync(file, 0o755);
+
+    const baseline = { usage: { inputTokens: 29147, outputTokens: 7, cachedInputTokens: 11008, cacheWriteTokens: 0 } };
+    const run = await createExecutor(catalog, fakeDir, 10_000)(plan.slots.primary, 'P', { resume: 'T1', baseline });
+    // 세션 로그의 last_token_usage (input 63,461 · cached 39,680 · output 33) 와 같아야 한다.
+    assert.deepEqual(run.usage, { inputTokens: 63461 - 39680, outputTokens: 33, cachedInputTokens: 39680, cacheWriteTokens: 0 });
+    assert.equal(run.reported?.usage?.cachedInputTokens, 50688);
+  });
+
+  it('기준이 없거나 빼서 음수가 되면 원본을 센다 — 적게 세면 상한이 거짓이 된다', () => {
+    const raw = { costUsd: 0.05, usage: { inputTokens: 10, outputTokens: 1, cachedInputTokens: 0, cacheWriteTokens: 0 } };
+    assert.deepEqual(sinceBaseline(raw, undefined, ['cost', 'usage']), raw);
+    assert.deepEqual(sinceBaseline(raw, { costUsd: 0.08, usage: { ...raw.usage, inputTokens: 20 } }, ['cost', 'usage']), raw);
+    assert.deepEqual(sinceBaseline(raw, { costUsd: 0.01 }, []), raw, '선언이 없는 엔진(cursor)은 빼지 않는다');
   });
 });

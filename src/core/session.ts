@@ -15,7 +15,7 @@ import { buildContext, type ContextLimits } from './context.ts';
 import { appendDecision } from './decision-log.ts';
 import { firstLine, unexecutedLine } from './decide.ts';
 import { delegate, type Delegated } from './delegate.ts';
-import { estimateUsd, type SlotExecutor } from './executor.ts';
+import { estimateUsd, type EngineReport, type SlotExecutor } from './executor.ts';
 import type { Journal } from './journal.ts';
 import { routeWithFallback } from './pipeline.ts';
 import {
@@ -268,7 +268,7 @@ export class ConversationSession {
         budget,
         journal,
         note: `session ${this.deps.id}`,
-        ...(ref ? { resumePrimary: ref.id } : {}),
+        ...(ref ? { resumePrimary: ref.id, ...(ref.baseline ? { resumeBaseline: ref.baseline } : {}) } : {}),
       });
       out.push(
         this.append({
@@ -317,14 +317,14 @@ export class ConversationSession {
    * 쓰기가 켜져 있고 그 엔진의 resume 경로가 쓰기를 못 받으면(`resume?.write === false`) 잇지 않는다 —
    * `buildInvocation` 이 던지게 두지 않고 여기서 미리 새 실행으로 돌린다(맥락은 그대로 싣는다, final-review #1).
    */
-  private resumable(plan: AssignmentPlan, write: boolean): { id: string; turn: number } | null {
+  private resumable(plan: AssignmentPlan, write: boolean): { id: string; turn: number; baseline?: EngineReport } | null {
     const last = this.records().findLast((r) => r.kind === 'result');
     if (last?.kind !== 'result' || !last.engineSession) return null;
     const p = plan.slots.primary;
     const s = last.engineSession;
     if (s.engine !== p.engine || s.modelId !== p.modelId || s.effort !== p.effort) return null;
     if (write && this.deps.catalog.engines[p.engine].resume?.write === false) return null;
-    return { id: s.id, turn: last.turn };
+    return { id: s.id, turn: last.turn, ...(s.reported ? { baseline: s.reported } : {}) };
   }
 
   reject(): TranscriptRecord[] {

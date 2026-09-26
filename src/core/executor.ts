@@ -5,7 +5,7 @@
  * 하기 때문이다(상한 테스트가 돈을 쓰면 아무도 안 돌린다).
  */
 import type { Matrix } from '../data/matrix.ts';
-import type { Engines } from '../data/engines.ts';
+import type { Engines, ResumeCumulative } from '../data/engines.ts';
 import { createAdapter } from '../adapters/engine.ts';
 import { meteredUsd, type TokenCounts } from '../data/pricing.ts';
 import type { ResolvedSlot } from './assign.ts';
@@ -34,11 +34,51 @@ export interface SlotRun {
   readonly durationMs: number;
   /** 엔진 세션 id (SPEC §3.8). 못 읽었으면 없다. */
   readonly sessionId?: string;
+  /**
+   * 엔진이 보고한 **원본** 금액·토큰 (D-057). resume 했으면 세션 누적일 수 있어 `actualUsd`·`usage` 와 다르다.
+   * 다음 resume 이 뺄 기준이라 엔진 세션과 함께 기록에 남긴다.
+   */
+  readonly reported?: EngineReport;
+}
+
+/** 엔진이 보고한 그대로의 금액·토큰. 보고가 없던 칸은 없다. */
+export interface EngineReport {
+  readonly costUsd?: number;
+  readonly usage?: TokenCounts;
 }
 
 export interface SlotRunOptions {
   /** 이어 붙일 엔진 세션 id. **primary 에만** 온다 — reviewer 는 잇지 않는다 (SPEC §6.4.3). */
   readonly resume?: string;
+  /** 이어 붙일 세션의 직전 원본 보고 (D-057). 누적 칸은 이것을 빼서 센다. */
+  readonly baseline?: EngineReport;
+}
+
+/**
+ * resume 한 실행의 보고를 **이번 실행 몫**으로 되돌린다 (D-057). `cumulative` 로 선언된 칸만 뺀다.
+ * 빼서 음수가 나오는 칸이 있으면 그 칸은 누적이 아니었던 것이다 — 원본을 그대로 센다. 적게 세면 상한이
+ * 거짓이 되고, 많이 세면 일찍 멈출 뿐이다.
+ */
+export function sinceBaseline(
+  raw: EngineReport,
+  baseline: EngineReport | undefined,
+  cumulative: readonly ResumeCumulative[],
+): EngineReport {
+  let { costUsd, usage } = raw;
+  if (cumulative.includes('cost') && costUsd !== undefined && baseline?.costUsd !== undefined && costUsd >= baseline.costUsd) {
+    costUsd -= baseline.costUsd;
+  }
+  const base = baseline?.usage;
+  if (cumulative.includes('usage') && usage !== undefined && base !== undefined) {
+    const delta: TokenCounts = {
+      inputTokens: usage.inputTokens - base.inputTokens,
+      outputTokens: usage.outputTokens - base.outputTokens,
+      cachedInputTokens: usage.cachedInputTokens - base.cachedInputTokens,
+      cacheWriteTokens: usage.cacheWriteTokens - base.cacheWriteTokens,
+    };
+    if (Object.values(delta).every((n) => n >= 0)) usage = delta;
+  }
+  return { ...(costUsd !== undefined ? { costUsd } : {}), ...(usage !== undefined ? { usage } : {}) };
 }
 
 export type SlotExecutor = (slot: ResolvedSlot, prompt: string, options?: SlotRunOptions) => Promise<SlotRun>;
@@ -81,18 +121,26 @@ export function createExecutor(
       ...(runOptions?.resume !== undefined ? { resume: runOptions.resume } : {}),
     });
     const result = await handle.result;
+    const reported: EngineReport = {
+      ...(result.costUsd !== undefined ? { costUsd: result.costUsd } : {}),
+      ...(result.usage !== undefined ? { usage: result.usage } : {}),
+    };
+    const { costUsd, usage } = runOptions?.resume !== undefined
+      ? sinceBaseline(reported, runOptions.baseline, catalog.engines[slot.engine].resume?.cumulative ?? [])
+      : reported;
     // 엔진이 비용을 안 주면 토큰으로 계산해 본다 — 단가 선언이 없으면 undefined 로 남는다.
-    const metered = result.costUsd === undefined ? meteredUsd(slot.modelId, result.usage) : undefined;
+    const metered = costUsd === undefined ? meteredUsd(slot.modelId, usage) : undefined;
     return {
       ok: result.outcome === 'ok',
       text: result.text,
       rawStdout: result.rawStdout,
       rawStderr: result.rawStderr,
-      ...(result.costUsd !== undefined ? { actualUsd: result.costUsd } : {}),
+      ...(costUsd !== undefined ? { actualUsd: costUsd } : {}),
       ...(metered !== undefined ? { meteredUsd: metered } : {}),
-      ...(result.usage !== undefined ? { usage: result.usage } : {}),
+      ...(usage !== undefined ? { usage } : {}),
       durationMs: result.durationMs,
       ...(result.sessionId !== undefined ? { sessionId: result.sessionId } : {}),
+      reported,
     };
   };
 }

@@ -12,6 +12,7 @@ import { newDecisionId } from './decision-log.ts';
 import type { Budget, Spend } from './budget.ts';
 import type { ContextCut } from './context.ts';
 import type { SettledOutcome } from './evidence.ts';
+import type { EngineReport } from './executor.ts';
 
 export type SessionKind = 'project' | 'scratch';
 /** AO 어휘 (D-031). `blocked` 는 위임 승인 대기다 — 그 상태에서는 아무것도 자동으로 진행하지 않는다. */
@@ -23,6 +24,8 @@ export interface EngineSessionRef {
   readonly modelId: string;
   readonly effort: string;
   readonly id: string;
+  /** 그 실행의 원본 보고 (D-057) — 다음 resume 이 누적 칸에서 뺄 기준이다. 없으면 원본 그대로 센다. */
+  readonly reported?: EngineReport;
 }
 
 export type TranscriptEntry =

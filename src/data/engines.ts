@@ -22,6 +22,9 @@ export type EffortStyle =
  */
 export type BillingPlan = 'subscription' | 'api';
 
+/** resume 한 실행에서 세션 누적으로 오는 보고 칸 (D-057). `cost` = 엔진 실제 금액, `usage` = 토큰. */
+export type ResumeCumulative = 'cost' | 'usage';
+
 export interface EngineSpec {
   /** 앞에서부터 탐색한다. cursor 는 `cursor-cli` → `cursor-agent` 폴백 (D-005). */
   readonly binaries: readonly string[];
@@ -61,10 +64,12 @@ export interface EngineSpec {
    * 선언이 없는 엔진에 resume 을 요청하면 **던진다** — 맥락 없는 새 실행으로 조용히 떨어지지 않는다.
    * `write: false` 면 이 엔진의 resume 경로는 쓰기 인자를 받지 못한다는 뜻이다 (실측 근거는 `$evidence.resume`).
    * resume·write 를 동시에 요청하면 **던진다** — 쓰기를 조용히 빼고 읽기 전용으로 잇지 않는다.
+   * `cumulative` 는 resume 한 실행에서 엔진이 **세션 누적**으로 보고하는 칸이다 (D-057, 2026-09-26 실측) —
+   * 과금은 직전 보고를 빼서 센다. 선언이 없으면 보고를 이번 실행 몫으로 본다.
    */
   readonly resume?:
-    | { readonly kind: 'flag'; readonly flag: string; readonly write?: false }
-    | { readonly kind: 'subcommand'; readonly argv: readonly string[]; readonly write?: false };
+    | { readonly kind: 'flag'; readonly flag: string; readonly write?: false; readonly cumulative?: readonly ResumeCumulative[] }
+    | { readonly kind: 'subcommand'; readonly argv: readonly string[]; readonly write?: false; readonly cumulative?: readonly ResumeCumulative[] };
   /**
    * 사용자 전역 hook·설정·MCP·skills 를 싣지 않게 막는 argv (D-032 B1). **지휘자 역할에만** 쓴다
    * (직접 답·요약·분류 폴백) — primary·reviewer 는 격리하지 않는다, 사용자의 작업 규칙이
