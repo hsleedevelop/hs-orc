@@ -317,10 +317,13 @@ export class ConversationSession {
    *
    * 쓰기가 켜져 있고 그 엔진의 resume 경로가 쓰기를 못 받으면(`resume?.write === false`) 잇지 않는다 —
    * `buildInvocation` 이 던지게 두지 않고 여기서 미리 새 실행으로 돌린다(맥락은 그대로 싣는다, final-review #1).
+   *
+   * 그 실행 중 엔진이 맥락을 압축했으면(`compacted`) 잇지 않는다 — 요약이 세부를 버린다(D-058 자동 압축 실측).
+   * 새 실행이면 orc 의 최근 대화가 원문으로 실린다 (D-059).
    */
   private resumable(plan: AssignmentPlan, write: boolean): { id: string; turn: number; baseline?: EngineReport } | null {
     const last = this.records().findLast((r) => r.kind === 'result');
-    if (last?.kind !== 'result' || !last.engineSession) return null;
+    if (last?.kind !== 'result' || !last.engineSession || last.compacted) return null;
     const p = plan.slots.primary;
     const s = last.engineSession;
     if (s.engine !== p.engine || s.modelId !== p.modelId || s.effort !== p.effort) return null;
