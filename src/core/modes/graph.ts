@@ -219,7 +219,7 @@ export async function runGraph(
           run.meteredUsd,
           node.plan.slots.primary.plan,
         );
-        budget.countTokens(run.usage);
+        budget.countTokens(run.usage, run.compactionUncounted);
         journal.append({
           index: (index += 1), unit: '노드', model: node.plan.slots.primary.label,
           effort: node.plan.slots.primary.effort, outcome: run.ok ? 'ok' : 'failed',

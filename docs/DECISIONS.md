@@ -1533,6 +1533,49 @@ D-058 자동 압축 실측(2026-09-26, n=1, 임계값 인위 조정)에서 압�
 
 ---
 
+## D-060 — claude 토큰은 `modelUsage` 누적 차분으로 센다, codex 는 표시만 한다 (Q17)
+
+**배경**
+D-058 실측에서 압축 실행의 `result.usage` 가 0 으로 와 Budget 토큰(D-030)이 압축 몫을 세지 못했다. 금액은 누적 `total_cost_usd` 로 들어오므로(D-057) 토큰만 비었다. codex 는 압축 토큰(세션 로그 5,638)이 `turn.completed.usage` 누적에 안 잡힌다 (Q17).
+
+**실측** (2026-09-26, claude 2.1.283 · Haiku low, 스크래치, n=1 · 사용자 승인): 1턴 → 같은 세션을 `claude -p "/compact" --resume <id>`. 두 원본 스트림을 `src/adapters/__tests__/fixtures/claude-q17-turn1.jsonl`·`claude-q17-compact.jsonl` 에 그대로 남겼다. 저장소가 공개라 캡처에 사용자 전역 hook 출력이 섞이지 않게 `--setting-sources project,local --strict-mcp-config` 로 띄웠다(`/compact` 가 막히지 않게 `--disable-slash-commands`·`--safe-mode` 는 뺐다) — 과금 회계와는 무관하다고 본다(추론).
+
+| | `result.usage` (입력·출력·캐시 읽기·캐시 쓰기) | `modelUsage` 합 | `total_cost_usd` |
+|---|---|---|---|
+| 1턴 | 10 · 392 · 12,972 · 7,171 | 937 · 405 · 12,972 · 7,171 | $0.0186012 |
+| `/compact` (resume) | 0 · 0 · 0 · 0 | 2,373 · 1,443 · 33,115 · 7,570 | $0.02774025 |
+| 차분 | — | **1,436 · 1,038 · 20,143 · 399** (23,016) | **$0.00913905** |
+
+`compact_boundary` 는 `{ trigger: "manual", pre_tokens: 20546, post_tokens: 1362 }`.
+
+- **누적 차분에 압축 몫이 들어 있다.** 근거 셋: (1) 캐시 읽기+쓰기 차분 20,542 가 `pre_tokens` 20,546 과 맞는다 — 압축 호출이 압축 전 맥락을 읽은 몫이다. (2) 차분 금액이 차분 토큰 × Haiku 4.5 공시 단가(입력 $1 · 출력 $5 · 캐시 읽기 $0.10 · 5분 캐시 쓰기 $1.25 /MTok)와 소수 8자리까지 같다 — `modelUsage` 와 `total_cost_usd` 는 같은 범위다. (3) 네 칸 모두 늘기만 했다 — 세션 누적이다.
+- **압축이 없어도 `usage` 는 모자란다.** 1턴 `modelUsage` 가 `usage` 보다 입력 927 · 출력 13 많고, `total_cost_usd` 는 `modelUsage` 쪽과 정확히 맞는다(1h 캐시 쓰기 $2/MTok). 본 대화 밖의 보조 호출로 본다(추론 — 스트림에 그 호출이 드러나지 않는다).
+- `modelUsage.outputTokens` 는 thinking 을 포함한다 — thinking 을 따로 더하면 금액이 안 맞는다.
+- D-031 의 "수동 압축 1회에 약 2.7k" 는 입력·출력만 본 값이다(이번 2,474). 캐시 읽기까지 치면 한 회에 압축 전 맥락 크기만큼(이번 약 23k, 자연 압축이면 18만대 — D-059) 든다.
+- 비용: claude API 환산 누적 $0.0277 (구독제, 청구 없음).
+
+**결정**
+1. **(claude) 토큰은 `result` 줄의 `modelUsage` 모델별 합으로 읽는다.** 엔진이 준 값이고 `total_cost_usd` 와 같은 범위라 금액과 같은 `actual` 등급이다 — 추정 칸은 만들지 않는다. `modelUsage` 가 없거나 비면(cursor) 예전처럼 `usage` 를 쓴다. **둘을 더하지 않는다.**
+2. `modelUsage` 는 세션 누적이므로 `engines.json` claude `resume.cumulative` 에 `usage` 를 더한다 — D-057 의 빼기가 금액과 토큰에 똑같이 걸린다. 압축 몫은 이 차분으로 들어오므로 `compact` 이벤트의 `pre_tokens` 를 따로 더하지 않는다(더하면 두 번 센다).
+3. **(codex) 보정하지 않는다.** 압축 신호도 압축 토큰도 `exec --json` 에 없다(D-058) — 셀 값이 없고, 세션 로그를 읽는 것은 D-020 과 같은 비공식 경로다. 대신 `engines.json` 에 `compactionUncounted: true` 로 선언하고, Budget 이 그 엔진의 토큰 보고 수를 따로 세어 `(압축 토큰을 보고하지 않는 엔진 N회 — 압축했다면 상한이 그만큼 못 본다)` 로 드러낸다. `unreported` 와 같은 자리이고, 구간 기록(`spend`)에 실려 세션을 다시 열어도 남는다(D-054).
+4. cursor 는 실측이 없어 선언하지 않는다.
+
+**기각**
+- *압축 1회당 `pre_tokens`(+`post_tokens`)를 추정치로 더한다* — 실측이 엔진 값으로 이미 들어옴을 보였다. 더하면 두 번 센다.
+- *두지 않는다(상한 대비 작다)* — 압축 한 번이 압축 전 맥락 크기만큼 들어 작지 않다.
+- *codex 에 추정치를 더한다* — 압축이 일어났는지조차 모른다. 매 실행에 더하면 지어낸 값이다.
+
+**트레이드오프 / 영향**
+- claude 토큰 집계가 보조 호출만큼 는다(이번 1턴 +940, 약 4%). 상한에 조금 일찍 닿는다 — 안전한 쪽이다.
+- 이 결정 전 기록의 기준(`engineSession.reported.usage`)은 그 턴의 `usage` 다. 그 뒤 첫 resume 은 누적에서 한 턴 몫만 빼므로 **한 번 많이 센다**(D-057 결정 3 의 안전한 쪽). 빼서 음수인 칸이 있으면 원본을 센다.
+- claude 금액 표시는 그대로다(`total_cost_usd` 차분).
+
+**검증** 캡처 원본으로 파싱 테스트(1턴·압축 실행 모두 `modelUsage` 합, `unparsed` 0, `usage` 이벤트 1개), 실행기 테스트(가짜 claude 가 캡처를 흘린다: 압축 resume 의 토큰 = 차분 23,016, 금액 = $0.00913905, Budget 합 = 세션 누적 44,501 — 1턴 재집계도 `pre_tokens` 가산도 없다), codex 표시·`spend` 왕복 테스트. `cumulative` 의 `usage` 선언이나 `modelUsage` 파싱을 되돌리면 테스트가 실패함을 확인했다. **미검증**: 실제 엔진 resume 체인에서 Budget 대조(D-057 과 같다), 자동 압축에서의 `modelUsage`(수동과 같은 경로로 본다 — 추론), 여러 모델이 섞인 `modelUsage`(합으로 읽는다), cursor.
+
+**상태** 확정 — 2026-09-26 사용자 지시(작업 3→4: "들어 있으면 modelUsage 누적 차분으로 보정, actual 로 취급 · codex 는 보정하지 않고 표시").
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |
@@ -1551,6 +1594,6 @@ D-058 자동 압축 실측(2026-09-26, n=1, 임계값 인위 조정)에서 압�
 | ~~Q12~~ | ~~스크래치 세션 보존·정리 정책~~ → **자동 정리 없음** (2026-09-25 사용자 결정). 자동 삭제는 되돌릴 수 없고 증거를 지울 수 있다(D-028). 당시 2개·68K 로 정책 근거가 없다. 재검토: 약 50개를 넘거나 실사용 불편이 생기면 GUI 목록에 수동 삭제 | — |
 | ~~Q13~~ | ~~위임된 엔진이 사용자 전역 설정을 싣고 뜬다~~ → **D-032** (지휘자만 격리, primary·reviewer 는 의도대로 유지) | — |
 | ~~Q16~~ | → **D-059** (압축이 기록된 세션은 다음 위임부터 잇지 않는다). 원래 질문: 압축된 엔진 세션을 계속 이을까 (D-058 자동 압축 실측: 압축 뒤 목록 세부를 잃었다, n=1·임계값 인위 조정). 선택지 — 압축이 기록된 세션은 다음 위임부터 잇지 않고 orc 맥락으로 새로 띄운다 / 잇되 압축 이후 첫 위임에 orc 최근 맥락을 함께 싣는다 / 그대로 둔다 | — |
-| Q17 | Budget 토큰이 엔진 압축 몫을 세지 않는다 (D-058 실측: claude 수동 압축은 `result.usage` 가 0 — 약 2.7k, codex 는 `turn.completed.usage` 누적에 안 잡힘 — 5,638). 금액은 claude 누적 `total_cost_usd` 로 들어온다(D-057). 선택지 — claude `modelUsage` 누적 차분으로 토큰을 보정한다 / 압축 1회당 추정치를 더한다 / 두지 않는다(상한 대비 작다) | Budget 토큰 상한 정확도 (D-030) |
+| ~~Q17~~ | → **D-060** (실측: claude `modelUsage` 누적 차분에 압축 몫이 든다 → 토큰을 그것으로 센다, codex 는 보정 없이 Budget 에 표시). 원래 질문: Budget 토큰이 엔진 압축 몫을 세지 않는다 (D-058 실측: claude 수동 압축은 `result.usage` 가 0 — 약 2.7k, codex 는 `turn.completed.usage` 누적에 안 잡힘 — 5,638). 금액은 claude 누적 `total_cost_usd` 로 들어온다(D-057). 선택지 — claude `modelUsage` 누적 차분으로 토큰을 보정한다 / 압축 1회당 추정치를 더한다 / 두지 않는다(상한 대비 작다) | — |
 | ~~Q15~~ | → **D-058** (`compact_boundary` 를 읽어 `result.compacted` 에 남긴다, 동작은 그대로). 원래 질문: resume 체인에서 엔진이 압축하면 orc 가 모른다. claude 는 `system`·`compact_boundary` (`compact_metadata.trigger·pre_tokens·post_tokens`) 를 흘린다 (D-031 Q10 후속 압축 탐색). 선택지 — 어댑터가 notice 로 읽어 `result` 기록에 남긴다(`cut` 과 같은 자리) / 압축된 세션은 다음부터 잇지 않는다 / 두지 않는다. 자동 압축(`trigger: "auto"`)·codex 는 미실측 | — |
 | ~~Q14~~ | → **D-057** (engines.json `resume.cumulative` 선언 + 기록의 직전 원본 보고를 빼서 과금). 원래 질문: resume 한 위임의 과금이 앞 턴들을 다시 센다 (D-031 Q10 후속 실측): claude `total_cost_usd`, codex `turn.completed.usage` 가 세션 누적이다. 고치는 방법 — 이을 세션의 직전 누적값을 `engineSession` 에 남겨 빼기 / claude 는 `usage` 로 단가 계산 / 엔진 세션 로그 읽기(D-020 과 같은 비공식 경로라 비권장) | — |

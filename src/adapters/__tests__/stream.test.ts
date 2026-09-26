@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createLineSplitter, parseLine } from '../stream.ts';
 
 // 2026-09-20 에 세 CLI 를 실제로 돌려 캡처한 줄을 그대로 쓴다.
@@ -106,5 +107,37 @@ describe('엔진 세션 id (SPEC §3.8)', () => {
   it('id 가 문자열이 아니면 내지 않는다 — 지어내지 않는다', () => {
     const line = JSON.stringify({ type: 'result', result: 'ok', session_id: 42 });
     assert.ok(!parseLine('claude', line).some((e) => e.kind === 'session'));
+  });
+});
+
+/** 2026-09-26 Q17 실측 원본 (claude 2.1.283 · Haiku low) — 1턴과 그 세션을 `/compact` 로 resume 한 실행. */
+const fixture = (name: string): string[] =>
+  readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8').split('\n');
+
+describe('claude 토큰은 modelUsage 합으로 읽는다 (D-060)', () => {
+  it('1턴: result.usage(10·392) 가 아니라 modelUsage(937·405) 다 — 보조 호출까지 든 total_cost_usd 와 같은 범위', () => {
+    const events = fixture('claude-q17-turn1.jsonl').flatMap((l) => parseLine('claude', l));
+    assert.equal(events.filter((e) => e.kind === 'unparsed').length, 0);
+    const usage = events.filter((e) => e.kind === 'usage');
+    assert.equal(usage.length, 1, 'usage 와 modelUsage 를 둘 다 내면 두 번 센다');
+    assert.deepEqual(usage[0]?.usage, { inputTokens: 937, outputTokens: 405, cachedInputTokens: 12972, cacheWriteTokens: 7171 });
+  });
+
+  it('/compact 실행: result.usage 는 0 이지만 modelUsage 는 압축 몫을 품은 세션 누적이다', () => {
+    const events = fixture('claude-q17-compact.jsonl').flatMap((l) => parseLine('claude', l));
+    assert.equal(events.filter((e) => e.kind === 'unparsed').length, 0);
+    assert.deepEqual(events.find((e) => e.kind === 'compact')?.compaction, { trigger: 'manual', preTokens: 20546, postTokens: 1362 });
+    assert.deepEqual(events.find((e) => e.kind === 'usage')?.usage, {
+      inputTokens: 2373, outputTokens: 1443, cachedInputTokens: 33115, cacheWriteTokens: 7570,
+    });
+  });
+
+  it('modelUsage 가 없거나 비었으면 result.usage 로 떨어진다 (cursor)', () => {
+    const empty = JSON.stringify({ ...JSON.parse(CLAUDE_RESULT), modelUsage: {} });
+    for (const line of [CLAUDE_RESULT, empty]) {
+      assert.deepEqual(parseLine('claude', line).find((e) => e.kind === 'usage')?.usage, {
+        inputTokens: 10, outputTokens: 83, cachedInputTokens: 25980, cacheWriteTokens: 22607,
+      });
+    }
   });
 });

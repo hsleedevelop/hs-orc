@@ -71,6 +71,12 @@ export interface EngineSpec {
     | { readonly kind: 'flag'; readonly flag: string; readonly write?: false; readonly cumulative?: readonly ResumeCumulative[] }
     | { readonly kind: 'subcommand'; readonly argv: readonly string[]; readonly write?: false; readonly cumulative?: readonly ResumeCumulative[] };
   /**
+   * 이 엔진의 토큰 보고에 **압축 몫이 빠진다** (D-060). codex 는 압축해도 `exec --json` 에 신호가 없고
+   * 압축 토큰이 `turn.completed.usage` 누적에 안 잡힌다 (D-058 실측) — 보정할 값이 없어 Budget 이 표시만 한다.
+   * 선언이 없으면 보고에 압축 몫이 든다고 본다 (claude 는 `modelUsage` 로 실측, cursor 는 미실측).
+   */
+  readonly compactionUncounted?: boolean;
+  /**
    * 사용자 전역 hook·설정·MCP·skills 를 싣지 않게 막는 argv (D-032 B1). **지휘자 역할에만** 쓴다
    * (직접 답·요약·분류 폴백) — primary·reviewer 는 격리하지 않는다, 사용자의 작업 규칙이
    * 위임 품질의 일부다. 선언이 없는 엔진에 격리를 요청하면 격리 없이 조용히 돌리지 않고 던진다.

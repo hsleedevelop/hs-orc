@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadMatrix } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
 import { assign } from '../assign.ts';
+import { Budget } from '../budget.ts';
 import { createExecutor, sinceBaseline } from '../executor.ts';
 
 /**
@@ -113,7 +115,7 @@ describe('resume 한 실행의 누적 보고는 직전 보고를 빼서 센다 (
 
     const run = await createExecutor(catalog, fakeDir, 10_000)(plan.slots.reviewer, 'R', { resume: 'S1', baseline: { costUsd: 0.087634 } });
     assert.ok(Math.abs((run.actualUsd ?? 0) - 0.0062412) < 1e-9, `이번 몫만 센다: ${run.actualUsd}`);
-    assert.equal(run.usage?.cachedInputTokens, 43642, 'claude 의 usage 는 이미 이번 턴 몫이다');
+    assert.equal(run.usage?.cachedInputTokens, 43642, '기준에 토큰이 없으면 토큰은 원본을 센다 (D-060 이전 기록)');
     assert.equal(run.reported?.costUsd, 0.0938752, '다음 resume 의 기준은 원본이다');
   });
 
@@ -139,5 +141,53 @@ describe('resume 한 실행의 누적 보고는 직전 보고를 빼서 센다 (
     assert.deepEqual(sinceBaseline(raw, undefined, ['cost', 'usage']), raw);
     assert.deepEqual(sinceBaseline(raw, { costUsd: 0.08, usage: { ...raw.usage, inputTokens: 20 } }, ['cost', 'usage']), raw);
     assert.deepEqual(sinceBaseline(raw, { costUsd: 0.01 }, []), raw, '선언이 없는 엔진(cursor)은 빼지 않는다');
+  });
+});
+
+describe('압축 몫은 modelUsage 누적 차분으로 센다 — 두 번 세지 않는다 (D-060)', () => {
+  // 2026-09-26 Q17 실측 원본을 가짜 claude 가 그대로 흘린다.
+  const fixture = (name: string): string => fileURLToPath(new URL(`../../adapters/__tests__/fixtures/${name}`, import.meta.url));
+  const replay = (name: string): void => {
+    const file = path.join(fakeDir, 'claude');
+    writeFileSync(file, `#!/bin/sh\ncat '${fixture(name)}'\n`, 'utf8');
+    chmodSync(file, 0o755);
+  };
+  const total = (u: { inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheWriteTokens: number } | undefined): number =>
+    u ? u.inputTokens + u.outputTokens + u.cachedInputTokens + u.cacheWriteTokens : NaN;
+
+  it('1턴 → /compact resume: 두 번째 실행은 압축 몫(차분)만, Budget 합은 세션 누적과 같다', async () => {
+    const execute = createExecutor(catalog, fakeDir, 10_000);
+    replay('claude-q17-turn1.jsonl');
+    const first = await execute(plan.slots.reviewer, 'P');
+    replay('claude-q17-compact.jsonl');
+    const second = await execute(plan.slots.reviewer, '/compact', { resume: first.sessionId ?? '', ...(first.reported ? { baseline: first.reported } : {}) });
+
+    // result.usage 는 0 이었다 — 차분이 압축 실행의 토큰이다. 캐시 읽기+쓰기 20,542 ≈ pre_tokens 20,546.
+    assert.deepEqual(second.usage, { inputTokens: 1436, outputTokens: 1038, cachedInputTokens: 20143, cacheWriteTokens: 399 });
+    assert.ok(Math.abs((second.actualUsd ?? 0) - 0.00913905) < 1e-9, `금액도 차분이다: ${second.actualUsd}`);
+    assert.deepEqual(second.compactions, [{ trigger: 'manual', preTokens: 20546, postTokens: 1362 }]);
+    assert.equal(second.compactionUncounted, undefined, 'claude 는 압축 몫이 이미 들어 있다');
+
+    const budget = new Budget(100, 2_000_000);
+    budget.countTokens(first.usage, first.compactionUncounted);
+    budget.countTokens(second.usage, second.compactionUncounted);
+    // 1턴을 다시 세거나(21,485 더) 압축 이벤트의 pre_tokens(20,546)를 또 더하면 이 값을 넘는다.
+    assert.equal(budget.spentTokens, total(second.reported?.usage));
+    assert.equal(budget.spentTokens, 44501);
+    assert.doesNotMatch(budget.summary(), /압축 토큰을 보고하지 않는/);
+  });
+
+  it('codex 실행은 압축 몫이 빠질 수 있다고 표시된다 — 보정하지 않는다', async () => {
+    const file = path.join(fakeDir, 'codex');
+    const line = JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 40419, cached_input_tokens: 0, output_tokens: 10 } });
+    writeFileSync(file, `#!/bin/sh\ncat <<'JSONL'\n${line}\nJSONL\n`, 'utf8');
+    chmodSync(file, 0o755);
+
+    const run = await createExecutor(catalog, fakeDir, 10_000)(plan.slots.primary, 'P');
+    assert.equal(run.compactionUncounted, true);
+    const budget = new Budget(100, 2_000_000);
+    budget.countTokens(run.usage, run.compactionUncounted);
+    assert.equal(budget.spentTokens, 40429, '보고된 토큰만 센다 — 추정치를 더하지 않는다');
+    assert.match(budget.summary(), /압축 토큰을 보고하지 않는 엔진 1회/);
   });
 });

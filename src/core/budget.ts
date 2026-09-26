@@ -29,6 +29,7 @@ export interface BudgetMark {
   readonly charges: number;
   readonly tokens: number;
   readonly unreported: number;
+  readonly compactionUncounted: number;
 }
 
 /** 한 구간에 쌓인 과금·토큰. 대화 기록의 `spend` 줄이 이것이다 (D-054). */
@@ -36,6 +37,8 @@ export interface Spend {
   readonly charges: readonly Charge[];
   readonly tokens: number;
   readonly unreported: number;
+  /** D-060 이전 기록에는 없다 — 0 으로 읽는다. 0 이면 쓰지 않는다. */
+  readonly compactionUncounted?: number;
 }
 
 export class TokenBudgetExceeded extends Error {
@@ -70,6 +73,11 @@ export class Budget {
   private tokens = 0;
   /** 엔진이 토큰을 보고하지 않은 사이클 수. **상한이 그만큼 못 본 것**이라 숨기지 않는다. */
   private unreported = 0;
+  /**
+   * 압축 몫이 빠졌을 수 있는 토큰 보고 수 (D-060, codex). 엔진이 압축을 알리지도 세지도 않아 보정할 값이 없다 —
+   * `unreported` 처럼 **숨기지 않고** 표시만 한다.
+   */
+  private compactionUncounted = 0;
 
   constructor(limitUsd: number, limitTokens = 0) {
     this.limitUsd = limitUsd;
@@ -78,14 +86,16 @@ export class Budget {
 
   /** 지금까지의 위치. `since()` 에 넘기면 그 뒤에 쌓인 것만 돌려준다 (D-054). */
   mark(): BudgetMark {
-    return { charges: this.charges.length, tokens: this.tokens, unreported: this.unreported };
+    return { charges: this.charges.length, tokens: this.tokens, unreported: this.unreported, compactionUncounted: this.compactionUncounted };
   }
 
   since(mark: BudgetMark): Spend {
+    const compactionUncounted = this.compactionUncounted - mark.compactionUncounted;
     return {
       charges: this.charges.slice(mark.charges),
       tokens: this.tokens - mark.tokens,
       unreported: this.unreported - mark.unreported,
+      ...(compactionUncounted > 0 ? { compactionUncounted } : {}),
     };
   }
 
@@ -94,6 +104,7 @@ export class Budget {
     this.charges.push(...spend.charges);
     this.tokens += spend.tokens;
     this.unreported += spend.unreported;
+    this.compactionUncounted += spend.compactionUncounted ?? 0;
   }
 
   get spentTokens(): number {
@@ -107,13 +118,15 @@ export class Budget {
   /**
    * 엔진이 보고한 토큰을 더한다 (D-030). `undefined` 면 **0 으로 채우지 않고** 못 본 것으로 센다 —
    * 0 으로 떨어뜨리면 "공짜로 돌았다" 가 되어 상한이 통째로 거짓이 된다.
+   * `compactionUncounted` 는 그 보고에 압축 몫이 빠졌을 수 있다는 엔진 선언이다 (D-060, `SlotRun` 의 같은 이름 칸).
    */
-  countTokens(usage: TokenCounts | undefined): void {
+  countTokens(usage: TokenCounts | undefined, compactionUncounted = false): void {
     if (usage === undefined) {
       this.unreported += 1;
       return;
     }
     this.tokens += usage.inputTokens + usage.outputTokens + usage.cachedInputTokens + usage.cacheWriteTokens;
+    if (compactionUncounted) this.compactionUncounted += 1;
   }
 
   tokensExceeded(): boolean {
@@ -208,9 +221,12 @@ export class Budget {
     // 구독제 금액에 "/ $20" 을 붙이면 그 상한이 이 숫자를 막는다는 거짓말이 된다.
     const tokens = this.limitTokens > 0 ? ` · 토큰 ${this.tokens}/${this.limitTokens}` : ` · 토큰 ${this.tokens}`;
     const blind = this.unreported > 0 ? ` (토큰 미보고 ${this.unreported}회 — 상한이 그만큼 못 본다)` : '';
+    // D-060: claude 는 압축 몫이 `modelUsage` 로 이미 들어 있어 따로 적을 것이 없다. codex 는 셀 값이 없다.
+    const uncounted =
+      this.compactionUncounted > 0 ? ` (압축 토큰을 보고하지 않는 엔진 ${this.compactionUncounted}회 — 압축했다면 상한이 그만큼 못 본다)` : '';
     if (this.allConverted)
-      return `$${this.spentUsd.toFixed(4)} API 환산${mixed} · 구독제라 청구되지 않는다${tokens}${blind}`;
+      return `$${this.spentUsd.toFixed(4)} API 환산${mixed} · 구독제라 청구되지 않는다${tokens}${blind}${uncounted}`;
     const converted = this.convertedUsd > 0 ? ` + $${this.convertedUsd.toFixed(4)} API 환산` : '';
-    return `$${this.billedUsd.toFixed(4)} / $${this.limitUsd}${converted}${mixed}${tokens}${blind}`;
+    return `$${this.billedUsd.toFixed(4)} / $${this.limitUsd}${converted}${mixed}${tokens}${blind}${uncounted}`;
   }
 }
