@@ -727,6 +727,15 @@ PRD §2(제품 정의)·§4·§6·§7·§8 을 개정한다 (PRD v0.2). SPEC §6
 
 비용: claude API 환산 약 $0.094 (구독제, 청구 없음), codex 103,616 토큰.
 
+**압축 탐색** (같은 날, claude 2.1.282 · Haiku low, 스크래치 Z, 코드워드 `ORC-107954`, n=1 · 사용자 승인 B): 1턴 심기 → `claude -p "/compact" --resume <id>` → resume 으로 되묻기.
+- **`-p` 에서도 수동 `/compact` 가 돈다** (exit 0). 스트림에 `system`·`status: "compacting"` → `compact_result: "success"` → **`system`·`compact_boundary`** 가 나온다. `compact_metadata` = `{ trigger: "manual", pre_tokens: 43869, post_tokens: 9340, cumulative_dropped_tokens: 34529, duration_ms: 16770 }`. 그 뒤 요약이 `user` 줄로 실린다.
+- **압축 뒤에도 코드워드를 회수했다** — 요약 본문에 코드워드가 들어 있었다. 대화가 한 줄이라 당연한 결과다: **긴 세션에서 무엇을 잃는지는 보여 주지 못한다.**
+- **압축 실행의 토큰은 `result.usage` 에 0 으로 온다.** 금액은 누적 `total_cost_usd` 가 $0.08797 → $0.10005 로 올랐다(압축 몫 약 $0.012, `modelUsage` 입력·출력도 늘었다). D-057 로 금액은 맞게 빠지지만 **압축에 든 토큰은 세지 않는다** — 수동 압축 1회에 약 2.7k.
+- 압축 뒤 첫 resume 은 캐시 앞머리가 바뀌어 다시 캐시 쓰기를 한다(1h 쓰기 21,107 토큰, 약 $0.045).
+- codex `exec`·`exec resume` 의 `--help` 에는 압축 옵션이 없다 — 싼 탐색 경로가 없다.
+
+orc 에 주는 뜻: resume 체인에서 엔진이 압축해도 orc 는 지금 모른다. `compact_boundary` 를 읽어 기록에 남길지는 Q15. 비용: claude API 환산 누적 $0.1454.
+
 부수 관찰: 위임된 엔진은 **사용자 전역 설정을 그대로 싣고 뜬다** — claude 스트림에 `hook_progress`/`hook_response`(전역 hook), codex 에 skills 로드와 MCP 인증 실패 로그. 비대화 실행의 비용·동작이 사용자 환경에 따라 달라진다. D-031 범위 밖이라 Q13 으로 연다.
 
 **상태** 방향 확정 — 2026-09-23 사용자 결정. 같은 날 Q10 은 실측으로, Q11 은 사용자 결정(Haiku·low)으로 닫았다. 남은 세부는 Q12. SPEC v0.2 §6.4 가 이 결정의 구현 명세다.
@@ -1483,4 +1492,5 @@ D-031 Q10 후속 실측(2026-09-26)에서 resume 한 실행의 보고가 **세�
 | ~~Q11~~ | ~~직접 답 모델·effort~~ → **Haiku·low** (2026-09-23 사용자 결정 — 분류 폴백과 같은 계층). 경계는 SPEC §6.4.2: 읽기 전용, 결과를 지어내지 않는다, 행은 `SUGGEST` 로 제안만 | — |
 | ~~Q12~~ | ~~스크래치 세션 보존·정리 정책~~ → **자동 정리 없음** (2026-09-25 사용자 결정). 자동 삭제는 되돌릴 수 없고 증거를 지울 수 있다(D-028). 당시 2개·68K 로 정책 근거가 없다. 재검토: 약 50개를 넘거나 실사용 불편이 생기면 GUI 목록에 수동 삭제 | — |
 | ~~Q13~~ | ~~위임된 엔진이 사용자 전역 설정을 싣고 뜬다~~ → **D-032** (지휘자만 격리, primary·reviewer 는 의도대로 유지) | — |
+| Q15 | resume 체인에서 엔진이 압축하면 orc 가 모른다. claude 는 `system`·`compact_boundary` (`compact_metadata.trigger·pre_tokens·post_tokens`) 를 흘린다 (D-031 Q10 후속 압축 탐색). 선택지 — 어댑터가 notice 로 읽어 `result` 기록에 남긴다(`cut` 과 같은 자리) / 압축된 세션은 다음부터 잇지 않는다 / 두지 않는다. 자동 압축(`trigger: "auto"`)·codex 는 미실측 | 긴 세션의 맥락 신뢰도 |
 | ~~Q14~~ | → **D-057** (engines.json `resume.cumulative` 선언 + 기록의 직전 원본 보고를 빼서 과금). 원래 질문: resume 한 위임의 과금이 앞 턴들을 다시 센다 (D-031 Q10 후속 실측): claude `total_cost_usd`, codex `turn.completed.usage` 가 세션 누적이다. 고치는 방법 — 이을 세션의 직전 누적값을 `engineSession` 에 남겨 빼기 / claude 는 `usage` 로 단가 계산 / 엔진 세션 로그 읽기(D-020 과 같은 비공식 경로라 비권장) | — |
