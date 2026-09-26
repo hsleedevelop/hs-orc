@@ -1489,7 +1489,7 @@ resume 체인(D-031 결정 4)에서 orc 는 이을 때 그 실행 **이후**의 
 - *압축된 세션은 다음부터 잇지 않는다* — 압축 뒤 맥락이 orc 의 최근 N턴 자르기보다 나쁘다는 근거가 없다. 잇기를 끊으면 캐시·맥락 비용만 는다.
 - *두지 않는다* — resume 체인의 맥락이 요약으로 바뀐 사실을 사용자와 orc 가 모두 모른다.
 
-**검증** 실측 줄로 파싱 테스트, 세션 테스트(기록에 남는지 — 배선을 끊으면 실패함을 확인), chat 렌더 테스트. **미검증**: cursor 의 압축 신호(보류 중). codex 는 압축하지만 `exec --json` 에 신호를 내지 않는다 — 아래 codex 압축 실측. GUI 는 `cut` 과 마찬가지로 아직 그리지 않는다.
+**검증** 실측 줄로 파싱 테스트, 세션 테스트(기록에 남는지 — 배선을 끊으면 실패함을 확인), chat 렌더 테스트. **미검증**: cursor 의 압축 신호(보류 중). codex 는 압축하지만 `exec --json` 에 신호를 내지 않는다 — 아래 codex 압축 실측. GUI 는 #51 부터 result 카드 맨 아래 hint 줄로 압축을 그린다(`cut` 도 같은 자리, direct 말풍선은 `cut` 만 — 압축은 위임 결과에만 있다). 문구는 chat 과 같은 `src/shell/transcript-lines.ts` 를 쓰고 그 모듈만 테스트한다 — 화면 육안 확인은 하지 않았다.
 
 **자동 압축 실측** (2026-09-26, claude 2.1.283 · Haiku low, 스크래치, n=1 · 사용자 승인): 1턴에 코드워드 + 번호 붙인 사실 20개를 심고, 2턴을 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=20` 으로 resume 해 코드워드와 "사실 13 의 사물함 코드" 를 되물었다. 임계값을 낮춘 것은 200k 를 채우지 않으려는 것이다 — 변수는 바이너리 문자열로 찾았고, 이름대로 동작함을 이 실측이 보였다.
 - 2턴 안에서 **자동 압축이 일어났다**: `compact_boundary` 의 `compact_metadata` = `{ trigger: "auto", pre_tokens: 46382, post_tokens: 9763, cumulative_dropped_tokens: 36619, … , preserved_segment: {…} }`. 캡처한 스트림을 `parseLine` 에 그대로 넣으면 `compact` 이벤트가 `{ trigger: "auto", preTokens: 46382, postTokens: 9763 }` 로 나오고 `unparsed` 는 0 이다 — 이 결정의 경로가 실제 자동 압축 줄에서 동작한다.
