@@ -33,6 +33,15 @@ describe('chat — 기록 렌더', () => {
     assert.ok(lines.includes('맥락   앞 대화 2턴·300자를 싣지 못했다'));
   });
 
+  it('엔진이 압축했으면 결과 아래 알린다 (D-058)', () => {
+    const lines = renderRecord({
+      ...at, kind: 'result', outcome: 'ok', verdict: 'pass', text: '고쳤다', review: '', evidence: 'e', decisionId: 'd',
+      compacted: [{ trigger: 'auto', preTokens: 180000, postTokens: 12000 }, { trigger: 'manual' }],
+    });
+    assert.ok(lines.includes('압축   엔진이 앞 맥락을 요약으로 바꿨다 (auto 180000→12000 토큰)'));
+    assert.ok(lines.includes('압축   엔진이 앞 맥락을 요약으로 바꿨다 (manual)'));
+  });
+
   it('spend 줄은 화면에 찍지 않는다 (D-054)', () => {
     assert.deepEqual(renderRecord({ ...at, kind: 'spend', charges: [], tokens: 0, unreported: 0 } as unknown as TranscriptRecord), []);
   });

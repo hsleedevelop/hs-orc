@@ -7,6 +7,7 @@
 import type { Matrix } from '../data/matrix.ts';
 import type { Engines, ResumeCumulative } from '../data/engines.ts';
 import { createAdapter } from '../adapters/engine.ts';
+import type { EngineCompaction } from '../adapters/types.ts';
 import { meteredUsd, type TokenCounts } from '../data/pricing.ts';
 import type { ResolvedSlot } from './assign.ts';
 
@@ -39,6 +40,8 @@ export interface SlotRun {
    * 다음 resume 이 뺄 기준이라 엔진 세션과 함께 기록에 남긴다.
    */
   readonly reported?: EngineReport;
+  /** 이 실행 중 엔진이 한 압축 (D-058). 없으면 필드가 없다. */
+  readonly compactions?: readonly EngineCompaction[];
 }
 
 /** 엔진이 보고한 그대로의 금액·토큰. 보고가 없던 칸은 없다. */
@@ -141,6 +144,7 @@ export function createExecutor(
       durationMs: result.durationMs,
       ...(result.sessionId !== undefined ? { sessionId: result.sessionId } : {}),
       reported,
+      ...(result.compactions ? { compactions: result.compactions } : {}),
     };
   };
 }

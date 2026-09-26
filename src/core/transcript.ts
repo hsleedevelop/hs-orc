@@ -13,6 +13,7 @@ import type { Budget, Spend } from './budget.ts';
 import type { ContextCut } from './context.ts';
 import type { SettledOutcome } from './evidence.ts';
 import type { EngineReport } from './executor.ts';
+import type { EngineCompaction } from '../adapters/types.ts';
 
 export type SessionKind = 'project' | 'scratch';
 /** AO 어휘 (D-031). `blocked` 는 위임 승인 대기다 — 그 상태에서는 아무것도 자동으로 진행하지 않는다. */
@@ -62,6 +63,8 @@ export type TranscriptEntry =
       readonly evidence: string;
       readonly decisionId: string;
       readonly engineSession?: EngineSessionRef;
+      /** primary 실행 중 엔진이 맥락을 압축했다 (D-058). resume 체인에서 앞 맥락이 요약으로 바뀌었다는 뜻이다. */
+      readonly compacted?: readonly EngineCompaction[];
       /** 위임 프롬프트의 맥락을 잘랐으면 버린 양 (D-053). */
       readonly cut?: ContextCut;
     }

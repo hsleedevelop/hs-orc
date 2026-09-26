@@ -280,6 +280,7 @@ export class ConversationSession {
           evidence: d.report.summary,
           decisionId: d.decisionId,
           ...(d.primarySession ? { engineSession: d.primarySession } : {}),
+          ...(d.compactions ? { compacted: d.compactions } : {}),
           ...(context.cut ? { cut: context.cut } : {}),
         }),
       );
