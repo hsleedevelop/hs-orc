@@ -219,6 +219,11 @@ describe('압축 몫은 modelUsage 누적 차분으로 센다 — 두 번 세지
     assert.ok(Math.abs((compacted?.actualUsd ?? 0) - 0.0135754) < 1e-9, `금액도 차분이다: ${compacted?.actualUsd}`);
   });
 
+  it('캐시 쓰기 TTL 내역(D-062)은 resume 해도 빼지 않는다 — result.usage 는 누적이 아니라 그 실행 몫이다', async () => {
+    const runs = await chain();
+    assert.deepEqual(runs.map((r) => r.cacheWrite), [7138, 122, 147, 125, 1792].map((n) => ({ ephemeral1hTokens: n, ephemeral5mTokens: 0 })));
+  });
+
   it('codex 실행은 압축 몫이 빠질 수 있다고 표시된다 — 보정하지 않는다', async () => {
     const file = path.join(fakeDir, 'codex');
     const line = JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 40419, cached_input_tokens: 0, output_tokens: 10 } });

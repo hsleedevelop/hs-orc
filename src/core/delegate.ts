@@ -88,7 +88,10 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
     stored = storeRun(decision.id, journal.records.length + 1, slot.label, {
       rawStdout: run.rawStdout,
       rawStderr: run.rawStderr,
-      meta: { outcome: run.ok ? 'ok' : 'failed', durationMs: run.durationMs, modelId: slot.modelId, verdict: duo.verdict },
+      meta: {
+        outcome: run.ok ? 'ok' : 'failed', durationMs: run.durationMs, modelId: slot.modelId, verdict: duo.verdict,
+        ...(run.cacheWrite ? { cacheWrite: run.cacheWrite } : {}),
+      },
     }, runStoreRoot(input.cwd)).dir;
   } catch (error) {
     // catch 후 무동작 금지.

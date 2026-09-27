@@ -13,7 +13,7 @@ import type { Budget, Spend } from './budget.ts';
 import type { ContextCut } from './context.ts';
 import type { SettledOutcome } from './evidence.ts';
 import type { EngineReport } from './executor.ts';
-import type { EngineCompaction } from '../adapters/types.ts';
+import type { CacheWrite, EngineCompaction } from '../adapters/types.ts';
 
 export type SessionKind = 'project' | 'scratch';
 /** AO 어휘 (D-031). `blocked` 는 위임 승인 대기다 — 그 상태에서는 아무것도 자동으로 진행하지 않는다. */
@@ -42,6 +42,8 @@ export type TranscriptEntry =
       readonly notes: readonly string[];
       /** 맥락을 잘랐으면 버린 양. 안 잘랐으면 없다 (D-053). */
       readonly cut?: ContextCut;
+      /** 이 답 실행의 캐시 쓰기 TTL 내역 (D-062). 관측 전용 — 엔진이 안 줬으면 없다. 직접 답은 원시 로그가 없어 여기에 남긴다. */
+      readonly cacheWrite?: CacheWrite;
     }
   | {
       readonly kind: 'plan';

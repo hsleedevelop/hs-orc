@@ -1658,6 +1658,27 @@ Q18 (D-058 **압축 창 출처 실측**): 격리 인자(D-050)가 사용자 sett
 
 ---
 
+## D-062 — claude 캐시 쓰기 TTL 내역을 기록에 남긴다, 셈은 그대로다
+
+**배경**
+PLAN S10 실측: `hs-orc chat --scratch` 직접 답 1회가 $0.0642/31,519 tok 으로 GUI($0.0111)의 약 6배인데 토큰 양은 같다. "31.5k 전부 1시간 캐시 쓰기" 로 추정했지만, 직접 답은 원시 로그를 남기지 않고 격리(safe-mode) 실행은 claude 세션 기록도 없어 `result.usage.cache_creation` 을 볼 곳이 없었다. D-060 셈은 `modelUsage` 합이라 쓰기 합(`cacheCreationInputTokens`)만 있고 TTL 구분이 없다.
+
+**결정**
+1. 어댑터가 claude `result.usage.cache_creation` 의 `ephemeral_1h_input_tokens`·`ephemeral_5m_input_tokens` 를 `cacheWrite { ephemeral1hTokens, ephemeral5mTokens }` 로 읽어 `RunResult`·`SlotRun` 까지 싣는다. 칸이 없으면(cursor) 필드가 없다 — 0 으로 지어내지 않는다.
+2. 직접 답은 `direct` 대화 기록에, 위임 primary 는 원시 로그 `meta.json` 에 남긴다. 위임은 stdout 원본에도 이미 있다 — meta 는 찾기 쉽게 둔다.
+3. **관측 전용이다.** Budget·과금·`resume.cumulative` 차분(D-057·D-060)에 쓰지 않는다. `Usage` 네 칸도 그대로다.
+
+**실측 근거** (기존 캡처, 새 실행 없음)
+- `result.usage` 는 그 실행 몫이다 — resume 체인(`claude-d060-chain-*`)의 쓰기는 7,138 · 122 · 147 · 125 · 1,792 로 누적이 아니다. 그래서 빼지 않는다.
+- 한 실행 안의 여러 라운드는 더해져 있다 — `claude-q18-isolated` 는 20,744(19,846 + 898)이고 `iterations` 는 마지막 라운드 898 뿐이다.
+- `/compact` 실행은 0 이다(`claude-q17-compact`) — 압축 호출 몫과 보조 호출 몫은 `modelUsage` 에만 든다. 이 필드는 본 대화 호출의 캐시 쓰기만 보여준다.
+
+**검증** 단위: fixture 파싱(1턴·여러 라운드·압축·칸 없음), 가짜 claude 로 resume 체인 5회를 흘려 실행별 값, `direct` 기록·`meta.json` 저장. 파서 push·기록 전달을 각각 지우면 새 테스트가 실패함을 확인했다. 실엔진에서 chat 직접 답이 전부 새로 썼는지는 **아직 미검증**이다 — 이 필드로 다음 실측에서 본다.
+
+**상태** 확정 — 2026-09-27 (관측 필드 추가, 셈 불변).
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |

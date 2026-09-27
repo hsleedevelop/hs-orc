@@ -152,6 +152,25 @@ describe('claude 토큰은 modelUsage 합으로 읽는다 (D-060)', () => {
   });
 });
 
+describe('캐시 쓰기 TTL 내역은 관측만 한다 (D-062)', () => {
+  const cacheWrites = (lines: readonly string[]) =>
+    lines.flatMap((l) => parseLine('claude', l)).flatMap((e) => (e.kind === 'cacheWrite' ? [e.cacheWrite] : []));
+
+  it('result.usage.cache_creation 을 1h·5m 으로 한 번 낸다 — 한 실행 여러 라운드의 합이다', () => {
+    assert.deepEqual(cacheWrites(fixture('claude-q17-turn1.jsonl')), [{ ephemeral1hTokens: 7171, ephemeral5mTokens: 0 }]);
+    // 두 라운드(19,846 + 898) — iterations 는 마지막 라운드(898)뿐이라 거기서 읽으면 적게 센다.
+    assert.deepEqual(cacheWrites(fixture('claude-q18-isolated.jsonl')), [{ ephemeral1hTokens: 20744, ephemeral5mTokens: 0 }]);
+  });
+
+  it('/compact 실행은 엔진이 준 0 을 그대로 낸다 — 압축 호출 몫은 modelUsage 에만 든다', () => {
+    assert.deepEqual(cacheWrites(fixture('claude-q17-compact.jsonl')), [{ ephemeral1hTokens: 0, ephemeral5mTokens: 0 }]);
+  });
+
+  it('칸이 없으면(cursor·옛 캡처) 내지 않는다 — 0 으로 지어내지 않는다', () => {
+    assert.deepEqual(cacheWrites([CLAUDE_RESULT, CURSOR_RESULT]), []);
+  });
+});
+
 /** 2026-09-26 Q18 실측 원본 (claude 2.1.283 · Haiku low, 새 실행 1회씩) — 지휘자 격리 argv · 그 argv + 창 env · 비격리 등가 + `autoCompactWindow`. */
 describe('실패한 압축 시도는 압축으로 세지 않는다 (D-058, Q18 캡처)', () => {
   const compactions = (name: string) => {

@@ -266,6 +266,7 @@ cursor  -p "<prompt>" --model gpt-5.6-sol-xhigh --output-format stream-json
 - 모르는 id 로 resume 하면 claude·codex 모두 모델 호출 전에 exit 1 로 실패한다 — 엔진이 조용히 새 세션을 열지 않는다 (같은 실측).
 - resume 한 실행의 비용 보고는 **세션 누적**이다: claude `total_cost_usd`·`modelUsage`, codex `turn.completed.usage`. 실행기는 `engines.json` 의 `resume.cumulative` 칸에서 기록에 남긴 직전 원본 보고(`engineSession.reported`)를 빼서 과금한다. 기준이 없거나 빼서 음수면 원본을 센다 (D-057).
 - claude 의 토큰은 `result.usage` 가 아니라 `modelUsage` 모델별 합으로 읽는다 — `total_cost_usd` 와 같은 범위라 압축·보조 호출 몫까지 든 누적이고, `resume.cumulative` 의 `usage` 로 빼진다. 압축 이벤트의 토큰은 더하지 않는다(두 번 센다). codex 는 압축 토큰을 보고하지 않아(`compactionUncounted`) 보정 없이 Budget 요약에 그 사실만 드러낸다 (D-060).
+- claude `result.usage.cache_creation` 의 TTL 별 캐시 쓰기(1h·5m)는 **관측만** 한다 — 직접 답은 `direct` 기록의 `cacheWrite`, 위임은 원시 로그 `meta.json` 에 남긴다. 과금·상한에 쓰지 않고, 그 실행 몫이라 resume 해도 빼지 않는다 (D-062).
 - primary 실행 중 엔진이 맥락을 압축하면(claude `system`·`compact_boundary`) 결과 기록의 `compacted` 에 `trigger`·압축 전후 토큰을 남긴다. 그 세션은 다음 위임부터 **잇지 않고** orc 맥락을 실어 새로 띄운다 — 압축 요약이 세부를 버린다 (D-059).
 - resume 이 실패하면(비정상 종료·id 없음) **새 세션으로 조용히 바꾸지 않는다.** 실패를 올리고, 재시도는 맥락을 실은 새 실행으로 사용자가 고른다 — 조용히 맥락 없는 실행으로 떨어지면 답이 그럴듯하게 틀린다.
 

@@ -146,6 +146,15 @@ describe('대화 세션 — 메시지 1건 (SPEC §6.4.2)', () => {
     assert.deepEqual(third?.kind === 'direct' ? third.cut : null, { turns: 1, chars: 0 });
   });
 
+  it('직접 답 실행의 캐시 쓰기 TTL 내역을 direct 기록에 남긴다 — 없으면 필드도 없다 (D-062)', async () => {
+    const cacheWrite = { ephemeral1hTokens: 31000, ephemeral5mTokens: 0 };
+    const withTtl: SlotExecutor = () => Promise.resolve({ ...reply('답\nSUGGEST: NONE'), cacheWrite });
+    const direct = (await make(withTtl).session.send('넌 누구니')).find((r) => r.kind === 'direct');
+    assert.deepEqual(direct?.kind === 'direct' ? direct.cacheWrite : null, cacheWrite);
+    const plain = (await make(conductSpy().exec).session.send('넌 누구니')).find((r) => r.kind === 'direct');
+    assert.ok(plain?.kind === 'direct' && !('cacheWrite' in plain));
+  });
+
   it('유료 호출 뒤에 쌓인 과금·토큰을 spend 한 줄로 남긴다 (D-054)', async () => {
     const exec: SlotExecutor = () =>
       Promise.resolve({ ...reply('답\nSUGGEST: NONE'), actualUsd: 0.02, usage: { inputTokens: 10, outputTokens: 5, cachedInputTokens: 0, cacheWriteTokens: 0 } });

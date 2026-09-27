@@ -9,7 +9,7 @@
  *      → thread.started / turn.started / item.completed / turn.completed.
  *        최종 텍스트는 `item.type === 'agent_message'` 의 `text`, 사용량은 `turn.completed.usage`.
  */
-import type { RunEvent, Usage } from './types.ts';
+import type { CacheWrite, RunEvent, Usage } from './types.ts';
 
 export type StreamFormat = 'claude' | 'codex';
 
@@ -40,6 +40,8 @@ function claudeEvents(event: Record<string, unknown>): RunEvent[] {
     };
     out.push({ kind: 'usage', usage: normalized });
   }
+  const cacheWrite = cacheWriteOf(usage);
+  if (cacheWrite) out.push({ kind: 'cacheWrite', cacheWrite });
 
   const text = typeof event['result'] === 'string' ? event['result'] : '';
   const cost = event['total_cost_usd'];
@@ -69,6 +71,20 @@ function modelUsageTotal(value: unknown): Usage | undefined {
     outputTokens: sum('outputTokens'),
     cachedInputTokens: sum('cacheReadInputTokens'),
     cacheWriteTokens: sum('cacheCreationInputTokens'),
+  };
+}
+
+/**
+ * D-062: `result.usage.cache_creation` — 관측만 한다, 위 셈(D-060)에는 들지 않는다.
+ * 한 실행 안의 여러 라운드는 더해져 있다(`iterations` 는 마지막 라운드뿐 — fixtures/claude-q18-isolated: 20,744 vs 898).
+ * 칸이 없으면(cursor) undefined — 0 으로 지어내지 않는다.
+ */
+function cacheWriteOf(usage: Record<string, unknown> | null): CacheWrite | undefined {
+  const creation = asRecord(usage?.['cache_creation']);
+  if (!creation) return undefined;
+  return {
+    ephemeral1hTokens: num(creation['ephemeral_1h_input_tokens']),
+    ephemeral5mTokens: num(creation['ephemeral_5m_input_tokens']),
   };
 }
 
