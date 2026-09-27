@@ -7,7 +7,7 @@
 import type { Matrix } from '../data/matrix.ts';
 import type { Engines, ResumeCumulative } from '../data/engines.ts';
 import { createAdapter } from '../adapters/engine.ts';
-import type { EngineCompaction } from '../adapters/types.ts';
+import type { CacheWrite, EngineCompaction } from '../adapters/types.ts';
 import { meteredUsd, type TokenCounts } from '../data/pricing.ts';
 import type { ResolvedSlot } from './assign.ts';
 
@@ -32,6 +32,8 @@ export interface SlotRun {
    * 엔진이 보고하지 않으면 undefined 다. 0 으로 채우면 "공짜로 돌았다" 가 되어 상한이 거짓이 된다.
    */
   readonly usage?: TokenCounts;
+  /** 캐시 쓰기 TTL 내역 (D-062). 관측 전용 — `usage` 와 달리 과금·상한에 쓰지 않고, resume 해도 빼지 않는다(누적이 아니다). */
+  readonly cacheWrite?: CacheWrite;
   readonly durationMs: number;
   /** 엔진 세션 id (SPEC §3.8). 못 읽었으면 없다. */
   readonly sessionId?: string;
@@ -143,6 +145,7 @@ export function createExecutor(
       ...(costUsd !== undefined ? { actualUsd: costUsd } : {}),
       ...(metered !== undefined ? { meteredUsd: metered } : {}),
       ...(usage !== undefined ? { usage } : {}),
+      ...(result.cacheWrite ? { cacheWrite: result.cacheWrite } : {}),
       durationMs: result.durationMs,
       ...(result.sessionId !== undefined ? { sessionId: result.sessionId } : {}),
       reported,

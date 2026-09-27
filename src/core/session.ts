@@ -219,6 +219,7 @@ export class ConversationSession {
           cost: `$${charge.usd.toFixed(4)} ${charge.source}`,
           notes,
           ...(context.cut ? { cut: context.cut } : {}),
+          ...(answer.run.cacheWrite ? { cacheWrite: answer.run.cacheWrite } : {}),
         }),
       ];
     } catch (error) {

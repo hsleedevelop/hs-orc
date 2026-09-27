@@ -25,11 +25,21 @@ export interface Usage {
   readonly cacheWriteTokens: number;
 }
 
+/**
+ * claude `result.usage.cache_creation` 의 TTL 별 캐시 쓰기 (D-062). **관측 전용** — Budget 셈(D-060)에 들지 않는다.
+ * `result.usage` 범위라 이번 실행 본 대화 호출의 합이다: resume 해도 누적이 아니고, 보조 호출 몫은 빠진다.
+ */
+export interface CacheWrite {
+  readonly ephemeral1hTokens: number;
+  readonly ephemeral5mTokens: number;
+}
+
 /** 세 엔진의 서로 다른 이벤트를 이 어휘로 정규화한다. */
 export type RunEvent =
   | { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'notice'; readonly level: 'warn' | 'error'; readonly message: string }
   | { readonly kind: 'usage'; readonly usage: Usage }
+  | { readonly kind: 'cacheWrite'; readonly cacheWrite: CacheWrite }
   | { readonly kind: 'done'; readonly ok: boolean; readonly text: string; readonly costUsd?: number }
   /** 파싱 실패한 줄. **버리지 않는다** — 한 줄 실패가 실행 전체를 죽이지 않게 하되 침묵하지도 않는다. */
   | { readonly kind: 'unparsed'; readonly line: string; readonly reason: string }
@@ -55,6 +65,8 @@ export interface RunResult {
   readonly exitCode: number | null;
   readonly signal: NodeJS.Signals | null;
   readonly usage?: Usage;
+  /** 엔진이 캐시 쓰기 TTL 내역을 줬으면 그 값 (D-062). 없으면 필드가 없다. */
+  readonly cacheWrite?: CacheWrite;
   readonly costUsd?: number;
   readonly durationMs: number;
   /** 파싱과 무관하게 보존한다 (SPEC §3.7) — 파싱 실패가 원본 손실로 이어지면 안 된다. */

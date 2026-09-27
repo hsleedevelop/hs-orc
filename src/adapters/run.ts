@@ -5,7 +5,7 @@
  * - stdin 은 닫는다. 세 CLI 모두 stdin 이 TTY 가 아니면 입력을 기다린다(codex 는 무기한).
  */
 import { spawn } from 'node:child_process';
-import type { EngineCompaction, RunEvent, RunHandle, RunOutcome, RunResult, Usage } from './types.ts';
+import type { CacheWrite, EngineCompaction, RunEvent, RunHandle, RunOutcome, RunResult, Usage } from './types.ts';
 import { createLineSplitter, parseLine, type StreamFormat } from './stream.ts';
 
 export interface SpawnSpec {
@@ -36,6 +36,7 @@ export function runProcess(spec: SpawnSpec, onEvent?: (event: RunEvent) => void)
   let text = '';
   let ok = true;
   let usage: Usage | undefined;
+  let cacheWrite: CacheWrite | undefined;
   let costUsd: number | undefined;
   let sessionId: string | undefined;
   const compactions: EngineCompaction[] = [];
@@ -55,6 +56,9 @@ export function runProcess(spec: SpawnSpec, onEvent?: (event: RunEvent) => void)
         break;
       case 'usage':
         usage = event.usage;
+        break;
+      case 'cacheWrite':
+        cacheWrite = event.cacheWrite;
         break;
       case 'unparsed':
         unparsedLines.push(event.line);
@@ -119,6 +123,7 @@ export function runProcess(spec: SpawnSpec, onEvent?: (event: RunEvent) => void)
         exitCode,
         signal,
         ...(usage ? { usage } : {}),
+        ...(cacheWrite ? { cacheWrite } : {}),
         ...(costUsd !== undefined ? { costUsd } : {}),
         durationMs: Date.now() - startedAt,
         rawStdout,

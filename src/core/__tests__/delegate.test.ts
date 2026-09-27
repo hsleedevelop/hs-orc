@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadMatrix } from '../../data/matrix.ts';
@@ -62,6 +62,27 @@ describe('위임 1건 (SPEC §4 5~7단계)', () => {
 
     assert.equal(budget.charges.length, 2, 'reviewer 가 실제로 돌았다');
     assert.equal(journal.records.at(-1)?.charge?.usd, 0.5);
+  });
+
+  it('primary 실행의 캐시 쓰기 TTL 내역을 원시 로그 meta 에 남긴다 (D-062)', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-delegate-'));
+    process.env['HS_ORC_DECISION_LOG'] = path.join(dir, 'log.jsonl');
+    process.env['HS_ORC_RUN_STORE'] = path.join(dir, 'runs');
+    const cacheWrite = { ephemeral1hTokens: 7138, ephemeral5mTokens: 0 };
+    const execute: SlotExecutor = (slot) =>
+      Promise.resolve(slot.role === 'reviewer'
+        ? { ok: true, text: 'PASS', rawStdout: '', rawStderr: '', durationMs: 1 }
+        : { ok: true, text: 'ran', rawStdout: '', rawStderr: '', durationMs: 1, cacheWrite });
+
+    const d = await delegate({
+      matrix, plan: assign(matrix, catalog, row('R01')), reason: '수동 지정 R01', title: 't', prompt: 't',
+      verify: [], cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
+    });
+
+    const runDir = path.join(dir, 'runs', d.decisionId);
+    const meta = readdirSync(runDir).find((f) => f.endsWith('.meta.json')) ?? '';
+    const stored = JSON.parse(readFileSync(path.join(runDir, meta), 'utf8')) as { cacheWrite?: unknown };
+    assert.deepEqual(stored.cacheWrite, cacheWrite);
   });
 
   it('검증 명령이 실패하면 결정 로그 2차 outcome 은 ok 가 아니라 rework 다 (D-043)', async () => {
