@@ -169,6 +169,15 @@ describe('캐시 쓰기 TTL 내역은 관측만 한다 (D-062)', () => {
   it('칸이 없으면(cursor·옛 캡처) 내지 않는다 — 0 으로 지어내지 않는다', () => {
     assert.deepEqual(cacheWrites([CLAUDE_RESULT, CURSOR_RESULT]), []);
   });
+
+  /** 2026-09-27 실엔진 (claude 2.1.283 · Haiku low · 지휘자 격리): `hs-orc chat --scratch` "넌 누구니" 새 세션 2회, 시작 17초 간격. */
+  it('chat 직접 답: 차가운 실행은 접두를 전부 1h 로 쓰고, 즉시 재실행은 읽고 조금만 다시 쓴다', () => {
+    const read = (name: string) => fixture(name).flatMap((l) => parseLine('claude', l)).find((e) => e.kind === 'usage')?.usage.cachedInputTokens;
+    assert.deepEqual(cacheWrites(fixture('claude-d062-chat-cold.jsonl')), [{ ephemeral1hTokens: 20206, ephemeral5mTokens: 0 }]);
+    assert.equal(read('claude-d062-chat-cold.jsonl'), 0);
+    assert.deepEqual(cacheWrites(fixture('claude-d062-chat-warm.jsonl')), [{ ephemeral1hTokens: 1906, ephemeral5mTokens: 0 }]);
+    assert.equal(read('claude-d062-chat-warm.jsonl'), 18300);
+  });
 });
 
 /** 2026-09-26 Q18 실측 원본 (claude 2.1.283 · Haiku low, 새 실행 1회씩) — 지휘자 격리 argv · 그 argv + 창 env · 비격리 등가 + `autoCompactWindow`. */
