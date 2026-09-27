@@ -383,7 +383,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
           h('pre', { style: { marginTop: 10 } }, r.text || '(빈 출력)'),
           r.review ? h('pre', { style: { marginTop: 10 } }, r.review) : null,
           // 카드는 말풍선(pre-wrap)과 달리 공백을 접는다 — 같은 문구(`맥락   …`)가 두 자리에서 달라 보이지 않게 맞춘다.
-          ...[...cutLine(r.cut), ...compactLines(r.compacted)].map((l, j) => h('div', { key: `c${j}`, className: 'hint', style: { whiteSpace: 'pre-wrap' } }, l)));
+          // 첫 줄만 띄운다 — 붙이면 pre 블록 테두리에 닿아 출력의 일부처럼 보인다.
+          ...[...cutLine(r.cut), ...compactLines(r.compacted)].map((l, j) => h('div', { key: `c${j}`, className: 'hint', style: { whiteSpace: 'pre-wrap', marginTop: j === 0 ? 8 : 0 } }, l)));
       case 'summary':
         return h('div', { key: i, className: 'bubble orc' },
           r.text ? h('div', null, r.text) : null,
@@ -395,7 +396,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
 
   return h('div', { className: 'stack' },
     h('div', { className: 'row' },
-      h('span', { className: 'mono dim' }, view.kind === 'scratch' ? `스크래치 · ${elide(view.dir, 50)}` : elide(view.dir, 60)),
+      // 경로는 줄바꿈하지 않는다 — `hs-` 에서 끊기면 없는 경로처럼 읽힌다. 길면 `elide` 가 앞을 자르고 전체는 title 로 본다.
+      h('span', { className: 'mono dim', title: view.dir, style: { whiteSpace: 'nowrap' } }, view.kind === 'scratch' ? `스크래치 · ${elide(view.dir, 36)}` : elide(view.dir, 44)),
       h('div', { className: 'spacer' }),
       h('span', { className: 'dim mono' }, view.budget),
       h('span', { className: 'dim mono' }, view.appBudget),
