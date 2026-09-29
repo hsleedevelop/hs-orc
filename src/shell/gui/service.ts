@@ -137,6 +137,12 @@ export class GuiService {
    */
   private workdir: string;
   private session: ConversationSession | null = null;
+  /**
+   * 엔진 호출이 도는 세션 (D-063). 키는 `sessionBudgets` 와 같다. 화면에서 닫아도 실행은 이 객체에서 계속 돈다 —
+   * 다시 열면 파일로 새 객체를 만들지 않고 **이것에 붙는다.** 새 객체는 도착할 결과를 모르고(끊김 오탐),
+   * 도는 중에도 send 를 받아 같은 파일에 두 객체가 번갈아 쓴다. 호출이 끝나면 뺀다.
+   */
+  private readonly live = new Map<string, ConversationSession>();
 
   constructor(execute?: SlotExecutor, budgetUsd = loadLimits().budgetUsd, cwd = process.cwd()) {
     this.budget = new Budget(budgetUsd, loadLimits().tokenBudget);
@@ -354,17 +360,17 @@ export class GuiService {
   }
 
   async converse(text: string): Promise<SessionView> {
-    await this.requireConversation().send(text);
+    await this.running((s) => s.send(text));
     return this.conversation();
   }
 
   async conversePlanAs(taskId: string): Promise<SessionView> {
-    await this.requireConversation().planAs(taskId);
+    await this.running((s) => s.planAs(taskId));
     return this.conversation();
   }
 
   async converseApprove(payload: { verify: readonly string[]; write: boolean }): Promise<SessionView> {
-    await this.requireConversation().approve(payload);
+    await this.running((s) => s.approve(payload));
     return this.conversation();
   }
 
@@ -374,8 +380,20 @@ export class GuiService {
   }
 
   async converseAsk(): Promise<SessionView> {
-    await this.requireConversation().askConductor();
+    await this.running((s) => s.askConductor());
     return this.conversation();
+  }
+
+  /** 엔진을 부를 수 있는 호출은 끝날 때까지 `live` 에 둔다 (D-063). 한 세션에 동시에 하나뿐이다 — 상태 검사가 막는다. */
+  private async running(op: (s: ConversationSession) => Promise<unknown>): Promise<void> {
+    const s = this.requireConversation();
+    const key = `${s.dir}::${s.id}`;
+    this.live.set(key, s);
+    try {
+      await op(s);
+    } finally {
+      if (this.live.get(key) === s) this.live.delete(key);
+    }
   }
 
   closeConversation(): void {
@@ -388,7 +406,7 @@ export class GuiService {
   }
 
   private attach(kind: SessionKind, dir: string, id: string): SessionView {
-    this.session = assembleSession({
+    this.session = this.live.get(`${dir}::${id}`) ?? assembleSession({
       kind,
       dir,
       id,

@@ -294,6 +294,84 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     assert.ok(reopened.records.every((r) => r.kind !== 'spend'));
   });
 
+  /** 문을 열 때까지 모든 엔진 호출을 붙잡는다 — 위임·직접 답이 "도는 중" 인 상태를 만든다. */
+  const gated = () => {
+    let open = (): void => {};
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    const exec: SlotExecutor = async (slot, prompt) => { await gate; return fake(slot, prompt); };
+    return { exec, open: () => open() };
+  };
+  const fileKinds = (view: { dir: string; id: string }) =>
+    readFileSync(path.join(view.dir, '.hs-orc', 'sessions', `${view.id}.jsonl`), 'utf8')
+      .trim().split('\n').map((l) => (JSON.parse(l) as { kind: string }).kind);
+
+  it('위임이 도는 중에 세션 목록으로 나갔다 같은 세션을 다시 열면 같은 실행에 붙는다 — 끊김 배너 없음', async () => {
+    isolated();
+    const g = gated();
+    const service = new GuiService(g.exec, 20, process.cwd());
+    const a = service.startConversation('scratch');
+    await service.converse('이 타입 에러 고쳐줘');
+    const running = service.converseApprove({ verify: [], write: false });
+    service.closeConversation();
+
+    const reopened = service.openConversation('scratch', a.dir, a.id);
+    assert.equal(reopened.interrupted, false, '돌고 있는 위임을 끊겼다고 하면 안 된다');
+    assert.equal(reopened.state, 'working');
+    await assert.rejects(service.converse('넌 누구니'), /지금: working/);
+    // 앱을 새로 켠 것(다른 프로세스)이면 그대로 끊김이다 — 진짜 크래시 배너는 살아 있어야 한다.
+    assert.equal(new GuiService(fake, 20, process.cwd()).openConversation('scratch', a.dir, a.id).interrupted, true);
+
+    g.open();
+    await running;
+    const view = service.conversation();
+    assert.deepEqual(view.records.map((r) => r.kind), ['user', 'plan', 'approval', 'result', 'summary']);
+    assert.equal(view.state, 'waiting_input');
+    assert.equal(view.interrupted, false);
+    assert.deepEqual(fileKinds(a), ['user', 'plan', 'approval', 'result', 'summary', 'spend'], '기록이 겹치거나 섞이면 안 된다');
+  });
+
+  it('다른 세션을 열었다 돌아와도 도는 위임에 붙고, 끝난 뒤 다시 열면 파일에서 결과를 읽는다', async () => {
+    isolated();
+    const g = gated();
+    const service = new GuiService(g.exec, 20, process.cwd());
+    const a = service.startConversation('scratch');
+    await service.converse('이 타입 에러 고쳐줘');
+    const running = service.converseApprove({ verify: [], write: false });
+    service.closeConversation();
+    service.startConversation('scratch');
+    service.closeConversation();
+
+    const back = service.openConversation('scratch', a.dir, a.id);
+    assert.equal(back.state, 'working');
+    assert.equal(back.interrupted, false);
+
+    service.closeConversation();
+    g.open();
+    await running.catch(() => {});
+    const after = service.openConversation('scratch', a.dir, a.id);
+    assert.deepEqual(after.records.map((r) => r.kind), ['user', 'plan', 'approval', 'result', 'summary']);
+    assert.equal(after.interrupted, false);
+    assert.equal(after.state, 'waiting_input');
+  });
+
+  it('지휘자 직접 답이 도는 중에 다시 열어도 같은 실행에 붙는다', async () => {
+    isolated();
+    const g = gated();
+    const service = new GuiService(g.exec, 20, process.cwd());
+    const a = service.startConversation('scratch');
+    const running = service.converse('넌 누구니');
+    service.closeConversation();
+
+    const reopened = service.openConversation('scratch', a.dir, a.id);
+    assert.equal(reopened.state, 'working');
+    await assert.rejects(service.converse('또 묻는다'), /지금: working/);
+
+    g.open();
+    await running;
+    assert.deepEqual(service.conversation().records.map((r) => r.kind), ['user', 'direct']);
+    assert.deepEqual(fileKinds(a), ['user', 'direct', 'spend']);
+  });
+
   it('스크래치 뿌리 자체나 뿌리 밖을 가리키는 링크는 스크래치 세션으로 열지 않는다', () => {
     isolated();
     const root = process.env['HS_ORC_SCRATCH'] as string;
