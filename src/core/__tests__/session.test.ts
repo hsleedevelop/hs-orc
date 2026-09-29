@@ -13,7 +13,7 @@ import { Journal } from '../journal.ts';
 import type { EngineReport, SlotExecutor, SlotRun } from '../executor.ts';
 import { ConversationSession, SessionStateError } from '../session.ts';
 import { readDecisions } from '../decision-log.ts';
-import { replaySpend } from '../transcript.ts';
+import { appendRecord, replaySpend, transcriptPath, type TranscriptRecord } from '../transcript.ts';
 
 const isolate = () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-log-'));
@@ -98,29 +98,11 @@ describe('대화 세션 — 메시지 1건 (SPEC §6.4.2)', () => {
     assert.equal(budget.charges[0]?.label, '지휘자·Haiku·low');
   });
 
-  it('제안된 행을 고르면 같은 메시지로 배정을 받는다 — 새 메시지를 만들지 않는다', async () => {
-    const c = conductSpy('타입 수정 요청으로 보인다.\nSUGGEST: R01');
-    const { session } = make(c.exec);
-    const first = await session.send('넌 누구니');
-    assert.ok(first[1]?.kind === 'direct' && first[1].suggest === 'R01');
-    const out = await session.planAs('R01');
-    assert.deepEqual(out.map((r) => r.kind), ['plan']);
-    assert.ok(out[0]?.kind === 'plan' && out[0].taskId === 'R01');
-    assert.equal(session.records().filter((r) => r.kind === 'user').length, 1);
-    assert.equal(session.state, 'blocked');
-  });
-
   it('직접 답이 실패하면 사유를 남기고 입력 대기로 돌아간다 — 조용히 삼키지 않는다', async () => {
     const { session } = make(conductSpy('', false).exec);
     const out = await session.send('넌 누구니');
     assert.deepEqual(out.map((r) => r.kind), ['user', 'error']);
     assert.equal(session.state, 'waiting_input');
-  });
-
-  it('승인 대기 중에는 새 메시지를 받지 않는다', async () => {
-    const { session } = make(conductSpy().exec);
-    await session.send('이 타입 에러 고쳐줘');
-    await assert.rejects(session.send('또'), SessionStateError);
   });
 
   it('다음 직접 답에 앞 턴 대화를 싣는다 (G7)', async () => {
@@ -593,5 +575,150 @@ describe('대화 세션 — 분류 폴백은 돌지 않는다 (D-033)', () => {
     assert.ok(direct?.kind === 'direct');
     assert.equal(direct.notes.length, 0);
     assert.equal(c.prompts.length, 1);
+  });
+});
+
+describe('대화 세션 — 제안·배정 카드 합치기 (D-064 결정 3)', () => {
+  const SUGGEST_R01 = '타입 수정 요청으로 보인다.\nSUGGEST: R01';
+
+  it('SUGGEST 가 나오면 직접 답 뒤에 배정 카드가 곧바로 서고 승인 대기로 멈춘다 — 엔진은 지휘자 한 번뿐이다', async () => {
+    const c = conductSpy(SUGGEST_R01);
+    const d = delegateSpy();
+    const { session } = make(c.exec, undefined, d.exec);
+    const out = await session.send('넌 누구니');
+    assert.deepEqual(out.map((r) => r.kind), ['user', 'direct', 'plan']);
+    const plan = out[2];
+    assert.ok(plan?.kind === 'plan' && plan.taskId === 'R01' && plan.estimateUsd > 0);
+    assert.equal(session.state, 'blocked');
+    assert.equal(c.prompts.length, 1);
+    assert.equal(d.calls.length, 0);
+    // spend 는 카드 뒤에 붙는다 — 화면이 마지막 기록으로 카드를 고르는 데 걸리지 않는다 (renderer 는 spend 를 거른다).
+    assert.equal(session.records().at(-1)?.kind, 'spend');
+  });
+
+  it('plan.reason 은 지휘자 제안이다 — 수동 지정이 아니다. 결정 로그 trigger 에도 그대로 남는다', async () => {
+    const log = isolate();
+    const { session } = make(conductSpy(SUGGEST_R01).exec);
+    const out = await session.send('넌 누구니');
+    assert.ok(out[2]?.kind === 'plan' && out[2].reason === '지휘자 제안 R01');
+    await session.approve();
+    const first = readDecisions(log)[0];
+    assert.match(first?.trigger ?? '', /매트릭스 R01 · 지휘자 제안 R01$/);
+    assert.doesNotMatch(first?.trigger ?? '', /수동 지정/);
+  });
+
+  it('승인은 그 카드 1회다 — 승인 한 번으로 위임이 돌고 결과·요약이 붙는다', async () => {
+    isolate();
+    const c = conductSpy(SUGGEST_R01);
+    const d = delegateSpy();
+    const { session } = make(c.exec, undefined, d.exec);
+    await session.send('넌 누구니');
+    const out = await session.approve();
+    assert.deepEqual(out.map((r) => r.kind), ['approval', 'result', 'summary']);
+    assert.deepEqual(d.calls.map((x) => x.label).sort(), ['Haiku', 'Luna']);
+    assert.equal(session.state, 'waiting_input');
+  });
+
+  it('거절하면 실행 없이 입력 대기로 돌아가고 결정 로그에 declined 가 남는다', async () => {
+    const log = isolate();
+    const d = delegateSpy();
+    const { session } = make(conductSpy(SUGGEST_R01).exec, undefined, d.exec);
+    await session.send('넌 누구니');
+    const out = session.reject();
+    assert.ok(out[0]?.kind === 'approval' && out[0].approved === false);
+    assert.equal(session.state, 'waiting_input');
+    assert.equal(d.calls.length, 0);
+    assert.deepEqual(readDecisions(log).map((r) => r.status), ['decided', 'declined']);
+  });
+
+  it('planAs 로 다른 행을 고르면 사람이 고른 것이다 — reason 은 수동 지정', async () => {
+    const { session } = make(conductSpy(SUGGEST_R01).exec);
+    await session.send('넌 누구니');
+    session.reject();
+    const out = await session.planAs('R02');
+    assert.ok(out[0]?.kind === 'plan' && out[0].taskId === 'R02' && out[0].reason === '수동 지정 R02');
+    assert.equal(session.state, 'blocked');
+  });
+
+  it('지휘자에게 묻기는 카드를 거절로 남기고 같은 메시지에 다시 답한다 — 새 카드가 서도 승인 대기다', async () => {
+    const c = conductSpy(SUGGEST_R01);
+    const { session } = make(c.exec);
+    await session.send('넌 누구니');
+    const out = await session.askConductor();
+    assert.deepEqual(out.map((r) => r.kind), ['approval', 'direct', 'plan']);
+    assert.ok(out[0]?.kind === 'approval' && out[0].approved === false);
+    assert.equal(session.records().filter((r) => r.kind === 'user').length, 1);
+    assert.equal(session.state, 'blocked');
+  });
+
+  it('SUGGEST: NONE·못 읽음·매트릭스에 없는 행이면 카드 없이 직접 답만 남는다', async () => {
+    for (const reply of ['그냥 대화.\nSUGGEST: NONE', '제안 줄이 없다', '이상한 제안.\nSUGGEST: R99']) {
+      const { session } = make(conductSpy(reply).exec);
+      const out = await session.send('넌 누구니');
+      assert.deepEqual(out.map((r) => r.kind), ['user', 'direct'], reply);
+      assert.equal(session.state, 'waiting_input', reply);
+    }
+  });
+
+  it('카드가 선 채 새 메시지를 보내면 그 배정은 거절로 남고 새 메시지를 처리한다', async () => {
+    const log = isolate();
+    const d = delegateSpy();
+    const c = conductSpy(SUGGEST_R01);
+    const { session } = make(c.exec, undefined, d.exec);
+    await session.send('넌 누구니');
+    const out = await session.send('아니 그냥 얘기하자');
+    assert.deepEqual(out.map((r) => r.kind), ['approval', 'user', 'direct', 'plan']);
+    assert.ok(out[0]?.kind === 'approval' && out[0].approved === false && out[0].turn === 1);
+    assert.equal(out[1]?.turn, 2);
+    assert.equal(d.calls.length, 0);
+    assert.deepEqual(readDecisions(log).map((r) => r.status), ['decided', 'declined']);
+  });
+
+  it('처리 중(working)의 send 는 여전히 거절된다', async () => {
+    const { session } = make(conductSpy(SUGGEST_R01).exec);
+    const first = session.send('넌 누구니');
+    await assert.rejects(session.send('또'), SessionStateError);
+    await first;
+  });
+
+  it('누적 상한이면 승인해도 위임을 시작하지 않는다 (D-030)', async () => {
+    isolate();
+    const d = delegateSpy();
+    const { session, budget } = make(conductSpy(SUGGEST_R01).exec, undefined, d.exec);
+    await session.send('넌 누구니');
+    budget.charge('x', 999, 0, undefined, 'api');
+    const out = await session.approve();
+    assert.ok(out.some((r) => r.kind === 'error' && /누적 상한/.test(r.text)));
+    assert.equal(d.calls.length, 0);
+  });
+
+  it('옛 기록(제안 뒤 배정 없음)을 다시 열면 "Rxx 로 위임" 이 그대로 통한다 — reason 은 지휘자 제안', async () => {
+    const c = conductSpy();
+    const { dir } = make(c.exec);
+    const file = transcriptPath(dir, '0923-1200-aaa');
+    const at = { v: 1 as const, at: '2026-09-25T00:00:00.000Z', turn: 1 };
+    const old: TranscriptRecord[] = [
+      { ...at, kind: 'user', text: '넌 누구니' },
+      { ...at, kind: 'direct', text: '타입 수정 요청으로 보인다.', suggest: 'R01', cost: '$0.01 actual', notes: [] },
+    ];
+    for (const r of old) appendRecord(file, r);
+    const reopened = make(c.exec, dir).session;
+    assert.equal(reopened.state, 'waiting_input');
+    const out = await reopened.planAs('R01');
+    assert.ok(out[0]?.kind === 'plan' && out[0].reason === '지휘자 제안 R01');
+    assert.equal(reopened.state, 'blocked');
+    assert.equal(reopened.records().filter((r) => r.kind === 'user').length, 1);
+  });
+
+  it('제안 카드가 선 채 다시 열면 되살리지 않는다 — 입력 대기, spend 재생은 그대로 (D-054)', async () => {
+    const c = conductSpy(SUGGEST_R01);
+    const { session, dir } = make(c.exec);
+    await session.send('넌 누구니');
+    const reopened = make(c.exec, dir);
+    assert.equal(reopened.session.state, 'waiting_input');
+    const budget = new Budget(20, 2_000_000);
+    replaySpend(budget, reopened.session.records());
+    assert.ok(budget.charges.length > 0);
+    await assert.rejects(reopened.session.approve(), SessionStateError);
   });
 });

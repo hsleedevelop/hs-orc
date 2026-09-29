@@ -17,7 +17,7 @@ import { firstLine, unexecutedLine } from './decide.ts';
 import { delegate, type Delegated } from './delegate.ts';
 import { estimateUsd, type EngineReport, type SlotExecutor } from './executor.ts';
 import type { Journal } from './journal.ts';
-import { routeWithFallback } from './pipeline.ts';
+import { route as routeTask, routeWithFallback } from './pipeline.ts';
 import {
   appendRecord,
   readTranscript,
@@ -49,6 +49,9 @@ export interface SessionDeps {
   /** 없으면 `loadLimits()` 값 (SPEC §6.4.3). */
   readonly context?: ContextLimits;
 }
+
+/** `plan.reason` 에 남는 출처 — 행을 고른 것이 지휘자다. `수동 지정` 이면 사람이 고른 것으로 적힌다 (`pipeline.ts` reasonLabel). */
+const SUGGESTED_LABEL = '지휘자 제안';
 
 const why = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -109,9 +112,12 @@ export class ConversationSession {
   }
 
   async send(message: string): Promise<TranscriptRecord[]> {
-    this.require('waiting_input', '메시지 전송');
+    if (this.stateValue !== 'blocked') this.require('waiting_input', '메시지 전송');
     const text = message.trim();
     if (!text) return [];
+    // 선 카드가 있는 채 새 메시지가 오면 그 배정은 거절로 남기고 새 메시지를 처리한다 (D-064 결정 3).
+    // 위임을 시작하지 않는 쪽으로만 기운다 — 사용자가 승인 없이 다음으로 넘어간 것이다.
+    const declined = this.stateValue === 'blocked' ? this.reject() : [];
     // require() 를 지난 뒤, 첫 await 전에 바로 working 으로 바꾼다 — 겹쳐 들어온 두 번째 호출이
     // 같은 require() 를 통과해 턴을 두 번 올리는 것을 막는다 (final-review #2).
     this.stateValue = 'working';
@@ -126,7 +132,7 @@ export class ConversationSession {
       this.stateValue = 'waiting_input';
       throw error;
     }
-    return [user, ...(await this.route(text))];
+    return [...declined, user, ...(await this.route(text))];
   }
 
   /** 제안된 행(또는 사용자가 고른 행)으로 **마지막 메시지**의 배정을 받는다. 새 메시지를 만들지 않는다. */
@@ -134,9 +140,12 @@ export class ConversationSession {
     this.require('waiting_input', '행 지정');
     const last = this.records().findLast((r) => r.kind === 'user');
     if (last?.kind !== 'user') throw new SessionStateError('배정할 메시지가 없다.');
+    // 마지막 기록이 그 행을 제안한 직접 답이면 고른 것은 지휘자다 — 카드 합치기(D-064) 전 기록을 다시 열었을 때의 경로다.
+    const tail = this.log.at(-1);
+    const suggested = tail?.kind === 'direct' && tail.suggest === taskId;
     // send() 와 같은 이유로 첫 await 전에 바로 바꾼다 (final-review #2).
     this.stateValue = 'working';
-    return this.route(last.text, taskId);
+    return this.route(last.text, taskId, suggested ? SUGGESTED_LABEL : undefined);
   }
 
   private append(entry: TranscriptEntry): TranscriptRecord {
@@ -157,7 +166,7 @@ export class ConversationSession {
    * 에러 기록을 남기고 입력 대기로 돌아간다 (final-review #2). assigned 는 blocked 로,
    * 그 외는 answer() 가 자신의 종료 상태(direct/error → waiting_input)를 책임진다.
    */
-  private async route(text: string, taskId?: string): Promise<TranscriptRecord[]> {
+  private async route(text: string, taskId?: string, reasonLabel?: string): Promise<TranscriptRecord[]> {
     const { matrix, catalog, dir } = this.deps;
     try {
       // D-033: 지휘자가 대화 맥락으로 직접 답하고 SUGGEST 로 행을 제안한다 — 맥락 없는
@@ -166,31 +175,33 @@ export class ConversationSession {
         cwd: dir,
         classifyLlm: false,
         ...(taskId ? { taskId } : {}),
+        ...(reasonLabel ? { reasonLabel } : {}),
       });
       const notes = routed.fallback ? [routed.fallback.line] : [];
       const result = routed.result;
       if (result.stage !== 'assigned') return this.answer(text, notes);
-
-      const { plan } = result;
-      const { primary, reviewer } = plan.slots;
-      this.pending = { title: text, plan, reason: result.reason };
-      this.stateValue = 'blocked';
-      return [
-        this.append({
-          kind: 'plan',
-          taskId: plan.assignment.id,
-          title: plan.assignment.task,
-          reason: result.reason,
-          primary: `${primary.label}·${primary.effort} → ${primary.engine}/${primary.modelId}`,
-          reviewer: `${reviewer.label}·${reviewer.effort} → ${reviewer.engine}/${reviewer.modelId}`,
-          estimateUsd: plan.cost.totalUsd,
-          notes,
-        }),
-      ];
+      return [this.stage(text, result.plan, result.reason, notes)];
     } catch (error) {
       this.stateValue = 'waiting_input';
       return [this.append({ kind: 'error', text: `라우팅이 끝나지 못했다: ${why(error)}` })];
     }
+  }
+
+  /** 배정을 승인 대기로 세우고 `plan` 을 남긴다. 상태를 `blocked` 로 바꾼다. */
+  private stage(title: string, plan: AssignmentPlan, reason: string, notes: readonly string[]): TranscriptRecord {
+    const { primary, reviewer } = plan.slots;
+    this.pending = { title, plan, reason };
+    this.stateValue = 'blocked';
+    return this.append({
+      kind: 'plan',
+      taskId: plan.assignment.id,
+      title: plan.assignment.task,
+      reason,
+      primary: `${primary.label}·${primary.effort} → ${primary.engine}/${primary.modelId}`,
+      reviewer: `${reviewer.label}·${reviewer.effort} → ${reviewer.engine}/${reviewer.modelId}`,
+      estimateUsd: plan.cost.totalUsd,
+      notes,
+    });
   }
 
   private async answer(text: string, notes: readonly string[]): Promise<TranscriptRecord[]> {
@@ -211,22 +222,38 @@ export class ConversationSession {
       if (!answer.run.ok) {
         return [this.append({ kind: 'error', text: `직접 답을 받지 못했다: ${answer.run.text || '엔진이 실패했다'}` })];
       }
-      return [
-        this.append({
-          kind: 'direct',
-          text: answer.body,
-          suggest: answer.suggest,
-          cost: `$${charge.usd.toFixed(4)} ${charge.source}`,
-          notes,
-          ...(context.cut ? { cut: context.cut } : {}),
-          ...(answer.run.cacheWrite ? { cacheWrite: answer.run.cacheWrite } : {}),
-        }),
-      ];
+      const direct = this.append({
+        kind: 'direct',
+        text: answer.body,
+        suggest: answer.suggest,
+        cost: `$${charge.usd.toFixed(4)} ${charge.source}`,
+        notes,
+        ...(context.cut ? { cut: context.cut } : {}),
+        ...(answer.run.cacheWrite ? { cacheWrite: answer.run.cacheWrite } : {}),
+      });
+      return [direct, ...this.suggestedPlan(text, answer.suggest)];
     } catch (error) {
       return [this.append({ kind: 'error', text: `직접 답을 받지 못했다: ${why(error)}` })];
     } finally {
-      this.stateValue = 'waiting_input';
+      // 제안 카드가 섰으면 그 승인 대기가 이 호출의 종료 상태다.
+      this.stateValue = this.pending ? 'blocked' : 'waiting_input';
       this.recordSpend(mark);
+    }
+  }
+
+  /**
+   * 직접 답이 행을 제안했으면 곧바로 그 행의 배정·비용 카드를 세운다 (D-064 결정 3) — 승인은 그 카드 1회다.
+   * `assign()` 은 결정론이고 엔진을 부르지 않는다. 제안이 없거나 매트릭스에 없는 행이면 카드 없이 직접 답만 남는다.
+   * 이 카드를 세우지 못하는 것이 직접 답을 잃을 이유는 아니다 — 던지면 알리고 직접 답은 남긴다.
+   */
+  private suggestedPlan(text: string, suggest: string | null): TranscriptRecord[] {
+    if (!suggest) return [];
+    const { matrix, catalog } = this.deps;
+    try {
+      const result = routeTask(matrix, catalog, text, { taskId: suggest, reasonLabel: SUGGESTED_LABEL });
+      return result.stage === 'assigned' ? [this.stage(text, result.plan, result.reason, [])] : [];
+    } catch (error) {
+      return [this.append({ kind: 'error', text: `제안한 ${suggest} 의 배정을 계산하지 못했다: ${why(error)}` })];
     }
   }
 

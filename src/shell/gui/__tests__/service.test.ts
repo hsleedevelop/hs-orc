@@ -243,6 +243,21 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     assert.equal(view.state, 'waiting_input');
   });
 
+  it('지휘자 제안은 직접 답 아래 배정 카드가 되고, 카드가 선 채 보낸 메시지는 그 배정을 거절로 남긴다 (D-064)', async () => {
+    isolated();
+    const suggesting: SlotExecutor = (slot, prompt) =>
+      prompt.includes('[이번 메시지]')
+        ? Promise.resolve({ ok: true, text: '작업으로 보인다.\nSUGGEST: R01', rawStdout: '', rawStderr: '', durationMs: 1 })
+        : fake(slot, prompt);
+    const service = new GuiService(suggesting, 20, process.cwd());
+    service.startConversation('scratch');
+    const shown = await service.converse('넌 누구니');
+    assert.deepEqual(shown.records.map((r) => r.kind), ['user', 'direct', 'plan']);
+    assert.equal(shown.state, 'blocked');
+    const next = await service.converse('아니 그냥 얘기하자');
+    assert.deepEqual(next.records.map((r) => r.kind), ['user', 'direct', 'plan', 'approval', 'user', 'direct', 'plan']);
+  });
+
   it('스크래치에서는 쓰기 승인을 거절한다', async () => {
     isolated();
     const service = new GuiService(fake, 20, process.cwd());
