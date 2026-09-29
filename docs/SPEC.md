@@ -182,7 +182,7 @@ cursor는 `cursor-agent --list-models`, claude는 4개 id를 실제로 `-p` 실�
 | Sol | codex | `gpt-5.6-sol` | `gpt-5.6-sol-{effort}` ✅ |
 | **Astra** | codex | `gpt-6-astra` | **없음 ❌** |
 | **Haiku** | claude | `claude-haiku-4-5-20251001` | **없음 ❌** |
-| Sonnet | claude | `claude-sonnet-5` | `claude-sonnet-5-thinking-{effort}` ✅ |
+| Sonnet | claude | `claude-sonnet-5-5` | `claude-sonnet-5-5-{effort}` ✅ |
 | Opus | claude | `claude-opus-5` | `claude-opus-5-thinking-{effort}` ✅ |
 | Fable | claude | `claude-fable-5-1` | `claude-fable-5-1-thinking-{effort}` ✅ |
 
@@ -195,6 +195,7 @@ Cursor 쪽 id에서 S1이 확인한 두 가지(SPEC v0.1보다 정밀해진 부�
 
 - **OpenAI 모델에는 `-thinking` 변형이 아예 없다.** §3.3의 "기본은 `-thinking` 계열" 정책은
   Claude 3모델(sonnet·opus·fable)에만 적용된다. `gpt-5.6-*`는 `-{effort}`와 `-fast`만 있다.
+  단 **Sonnet 5.5는 `-thinking` 변형이 없다** (2026-09-29 실측: `claude-sonnet-5-5-{low|medium|high|xhigh|max}` 5종뿐, adaptive thinking이 기본) — `-{effort}`만 붙는다.
 - **`claude-opus-5` 비thinking은 `low|medium|high`뿐이다.** `xhigh`·`max`는 `-thinking` 변형이
   유일한 경로이므로, Opus에서 `-thinking` 기본값은 취향이 아니라 **커버리지 요구사항**이다.
 
