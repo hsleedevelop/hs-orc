@@ -31,14 +31,14 @@
     "gen:matrix": "node scripts/gen-matrix.mjs",
     "type-check": "tsc --noEmit && tsc -p tsconfig.renderer.json",
     "lint": "eslint .",
-    "test": "node --test 'src/**/__tests__/*.test.ts'",
+    "test": "node --import ./scripts/test-setup.mjs --test 'src/**/__tests__/*.test.ts'",
     "gate": "npm run matrix:check && npm run type-check && npm run lint && npm run test",
     "secret-scan": "gitleaks protect --staged --redact --no-banner",
     "prepare": "git config core.hooksPath githooks",
     "matrix:check": "node scripts/gen-matrix.mjs --check",
-    "tui": "node bin/hs-orc.mjs tui",
+    "tui": "HS_ORC_JEV=${HS_ORC_JEV:-off} node bin/hs-orc.mjs tui",
     "build:gui": "node bin/hs-orc.mjs build-gui",
-    "gui": "node bin/hs-orc.mjs gui"
+    "gui": "HS_ORC_JEV=${HS_ORC_JEV:-off} node bin/hs-orc.mjs gui"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

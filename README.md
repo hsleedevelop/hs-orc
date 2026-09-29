@@ -141,6 +141,8 @@ npm run gate        # matrix:check → type-check → lint → test (201 tests)
 npm run gen:matrix  # data/matrix-source.html → data/matrix.json 재생성
 ```
 
+**개발·테스트·화면 캡처 때는 Jev 를 끈다(`HS_ORC_JEV=off`)** — 키가 있는 셸에서 실제 `api.typesafe.ai` 호출이 새지 않게, `npm test`·`npm run gui`·`npm run tui` 가 기본으로 끄고 `jev-leak.test.ts` 가 그 격리를 재다. 사용자용 `hs-orc`·`hs-orc gui`·`chat` 은 그대로 켜짐이고, 개발 중에 켜려면 `HS_ORC_JEV=on npm run gui`. 스크린샷을 직접 띄울 때도 `HS_ORC_JEV=off` 를 앞에 붙인다.
+
 `data/matrix.json`은 **생성물이다.** 진실은 `data/matrix-source.html`이고, 수기 편집하면 `matrix:check`가 게이트 첫 단계에서 막는다. 행을 늘리려면 원본 HTML을 고치고 재생성한다.
 
 설계 문서: [`docs/PRD.md`](docs/PRD.md) · [`docs/SPEC.md`](docs/SPEC.md) · [`docs/PLAN.md`](docs/PLAN.md) · [`docs/DECISIONS.md`](docs/DECISIONS.md)(D-001~D-027, 기각한 대안과 이유 포함).
