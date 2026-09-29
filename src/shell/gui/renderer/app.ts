@@ -406,7 +406,10 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     view.interrupted ? h('div', { className: 'banner error' }, '승인한 위임의 결과가 기록되지 않았다 — 실행 중 앱이 끊겼다. 결정 로그 1차 줄만 남아 있을 수 있다.') : null,
     ...view.records.map(record),
     sending ? h('div', { className: 'bubble user dim' }, sending) : null,
-    busy ? text(view.state === 'blocked' || last?.kind === 'plan' ? '실행 중…' : '생각 중…', 'dim') : null,
+    // 다시 연 화면은 `busy` 를 모른다 — 서비스가 working 이면 도는 실행에 붙은 것이다 (D-063). 결과는 앞 화면이 건 요청이 돌아오며 싣는다.
+    busy || view.state === 'working'
+      ? text(view.state === 'blocked' || last?.kind === 'plan' || last?.kind === 'approval' ? '실행 중…' : '생각 중…', 'dim')
+      : null,
     error ? h('div', { className: 'banner error' }, error) : null,
     h('div', { ref: endRef }),
     card(null,
