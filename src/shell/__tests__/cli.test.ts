@@ -33,7 +33,8 @@ const cli = (args: readonly string[], env: NodeJS.ProcessEnv = {}) => {
   const r = spawnSync(process.execPath, [CLI, ...args], {
     cwd: sandbox,
     encoding: 'utf8',
-    env: { ...process.env, HS_ORC_DECISION_LOG: decisionLog, ...env },
+    // Jev 는 기본 켜짐이다 (D-065) — 키가 있는 머신에서 테스트가 외부로 나가지 않게 여기서 끈다. Jev 를 보는 테스트만 덮어쓴다.
+    env: { ...process.env, HS_ORC_DECISION_LOG: decisionLog, HS_ORC_JEV: 'off', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   return { code: r.status, out: r.stdout ?? '', err: r.stderr ?? '' };
@@ -85,6 +86,16 @@ describe('CLI 순서 보장', () => {
     const r = cli(['오늘 점심 뭐 먹지', '--no-classify-llm'], NO_PATH);
     assert.doesNotMatch(r.err, /Haiku·low/, '끈 폴백이 돌았다 — 말없이 돈 유료 호출이다.');
     assert.match(r.err, /--no-classify-llm 으로 꺼져 있다/);
+  });
+
+  it('Jev 키가 없으면 옛 방식으로 돌고 그 사실을 찍는다 (D-065) — --no-jev 는 아예 부르지 않는다', () => {
+    const noKey = { ...NO_PATH, HS_ORC_JEV: '', TYPESAFE_API_KEY: '' };
+    const on = cli(['이 타입 에러 고쳐줘'], noKey);
+    assert.equal(on.code, 0);
+    assert.match(on.err, /Jev 미사용 \(TYPESAFE_API_KEY 없음\) → 규칙 분류로 대체/);
+    assert.match(on.err, /primary\s+Luna/, '규칙으로 배정까지 이어져야 한다.');
+    const off = cli(['이 타입 에러 고쳐줘', '--no-jev'], noKey);
+    assert.doesNotMatch(off.err, /Jev/);
   });
 
   it('모르는 옵션은 작업 문자열로 섞이지 않고 던진다', () => {

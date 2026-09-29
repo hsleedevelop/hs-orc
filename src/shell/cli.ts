@@ -27,6 +27,7 @@ import { Budget } from '../core/budget.ts';
 import { changedFiles, loadEvidenceFile, runCommand, snapshotTests, testChanges, type TestSnapshot } from '../core/evidence-gather.ts';
 import { GATE_CHECKS, parseGateCheck, type GateSignals } from '../core/gatekeeper.ts';
 import { routeWithFallback } from '../core/pipeline.ts';
+import { defaultJev } from './jev.ts';
 import type { Effort } from '../data/matrix.ts';
 
 type Mode = 'once' | 'pingpong' | 'loop' | 'graph';
@@ -49,6 +50,8 @@ interface Parsed {
   reviewerEffort?: Effort;
   gate: GateSignals;
   classifyLlm: boolean;
+  /** false = Jev 로 외부 전송하지 않는다 (D-065). */
+  jev: boolean;
   run: boolean;
   write: boolean;
   /** 작업 전부터 실패하는 검증 명령까지 고치는 것을 범위에 넣는다 (D-042). 없으면 기준선 실패는 사람에게 올린다. */
@@ -58,7 +61,7 @@ interface Parsed {
 }
 
 const USAGE = `사용법: hs-orc "<작업>" [--task R01] [--effort high] [--reviewer-effort high]
-       [--gate <${GATE_CHECKS.join('|')}>]... [--no-classify-llm] [--run] [--write] [--timeout 600] [--raw]
+       [--gate <${GATE_CHECKS.join('|')}>]... [--no-classify-llm] [--no-jev] [--run] [--write] [--timeout 600] [--raw]
        [--mode once|pingpong|loop|graph] [--max-iterations N] [--budget 20] [--token-budget N] [--graph <nodes.json>]
        (그래프 스펙 예제: examples/graph-nodes.json · --token-budget 0 = 토큰 상한 없음, D-035)
        [--verify "[phase:]<명령>"]... [--evidence <file.json>] [--crash-test]
@@ -66,7 +69,7 @@ const USAGE = `사용법: hs-orc "<작업>" [--task R01] [--effort high] [--revi
 
 function parseArgs(argv: readonly string[]): Parsed {
   const positional: string[] = [];
-  const parsed: Parsed = { task: '', mode: 'once', gate: {}, verify: [], crashTest: false, skipReviewer: false, side: 'primary', classifyLlm: true, run: false, write: false, fixRedBaseline: false, raw: false, timeoutMs: 900_000 };
+  const parsed: Parsed = { task: '', mode: 'once', gate: {}, verify: [], crashTest: false, skipReviewer: false, side: 'primary', classifyLlm: true, jev: true, run: false, write: false, fixRedBaseline: false, raw: false, timeoutMs: 900_000 };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -117,6 +120,7 @@ function parseArgs(argv: readonly string[]): Parsed {
       // 그 낱말이 **작업 문자열로 섞여 들어간다**(조용한 오작동).
       case '--classify-llm': parsed.classifyLlm = true; break;
       case '--no-classify-llm': parsed.classifyLlm = false; break;
+      case '--no-jev': parsed.jev = false; break;
       case '--run': parsed.run = true; break;
       case '--write': parsed.write = true; break;
       case '--fix-red-baseline': parsed.fixRedBaseline = true; break;
@@ -179,13 +183,14 @@ async function main(): Promise<void> {
   const budget = new Budget(budgetUsd, tokenBudget);
 
   // 분류·하한선·배정 + LLM 폴백. 순서의 소유자는 Core 다 (SPEC §4, D-026).
-  const routed = await routeWithFallback(matrix, catalog, args.task, { ...options, classifyLlm: args.classifyLlm, budget });
+  const jev = args.jev ? defaultJev() : undefined;
+  const routed = await routeWithFallback(matrix, catalog, args.task, { ...options, classifyLlm: args.classifyLlm, budget, ...(jev ? { jev } : {}) });
   const result = routed.result;
   // 폴백이 돌았으면 **반드시 보여준다** — 말없이 도는 유료 호출은 없다.
   if (routed.fallback) {
     const line = `분류   ${routed.fallback.line}`;
     process.stderr.write(
-      routed.fallback.outcome === 'failed' || routed.fallback.outcome === 'skipped'
+      routed.fallback.outcome === 'failed' || routed.fallback.outcome === 'skipped' || routed.fallback.outcome === 'jev-unavailable'
         ? `${reportNotice('pipeline', 'classify-fallback', routed.fallback.line).display}\n`
         : `${line}\n`,
     );
@@ -194,13 +199,19 @@ async function main(): Promise<void> {
   if (result.stage === 'unclassified') {
     // 정상 비즈니스 상태다 — notice 로 내린다 (PLAN S6-4).
     const note = reportNotice('pipeline', 'unclassified', result.message);
-    process.stderr.write(
-      `${note.display}\n  ${args.classifyLlm ? 'LLM 폴백도 맞는 행을 고르지 못했다.' : 'LLM 폴백은 --no-classify-llm 으로 꺼져 있다.'}\n`,
-    );
+    // Jev 가 답했으면(D-065) 그 판정이 끝이다 — Haiku 로 다시 묻지 않는다.
+    const jevDecided = routed.jev === 'none' || routed.jev === 'unsure';
+    const second = jevDecided
+      ? 'Jev 가 판정했다 — LLM 폴백은 돌리지 않는다.'
+      : args.classifyLlm ? 'LLM 폴백도 맞는 행을 고르지 못했다.' : 'LLM 폴백은 --no-classify-llm 으로 꺼져 있다.';
+    process.stderr.write(`${note.display}\n  ${second}\n`);
 
-    // 누적만 한다. 행 추가는 원본 편집으로만 (D-022).
-    recordUnclassified(args.task);
-    for (const s of suggestRows(readUnclassified())) process.stderr.write(`\n${s.message}\n`);
+    // 누적만 한다. 행 추가는 원본 편집으로만 (D-022). 확신도 미만은 "맞는 행이 없다" 가 아니라 모호함이라 세지 않는다 —
+    // 세면 없는 행을 더하라는 가짜 제안이 나온다.
+    if (routed.jev !== 'unsure') {
+      recordUnclassified(args.task);
+      for (const s of suggestRows(readUnclassified())) process.stderr.write(`\n${s.message}\n`);
+    }
 
     process.exitCode = 1;
     return;

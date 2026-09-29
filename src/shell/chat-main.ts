@@ -5,6 +5,7 @@
 import { Journal } from '../core/journal.ts';
 import { listScratchSessions, listSessions, prepareSession, type SessionKind } from '../core/transcript.ts';
 import { assembleSession, restoreBudget } from './conversation.ts';
+import { defaultJev } from './jev.ts';
 import { CHAT_HELP, CHAT_USAGE, findSession, interruptGuard, openingLines, parseChatArgs, runChat } from './chat.ts';
 
 async function main(): Promise<void> {
@@ -31,7 +32,8 @@ async function main(): Promise<void> {
     ({ dir, id } = prepareSession(kind, cwd));
   }
   const budget = restoreBudget(dir, id);
-  const session = assembleSession({ kind, dir, id, budget, journal: new Journal() });
+  const classifier = defaultJev();
+  const session = assembleSession({ kind, dir, id, budget, journal: new Journal(), ...(classifier ? { classifier } : {}) });
   process.stdout.write(`${openingLines(session, budget).join('\n')}\n`);
   const guard = interruptGuard(session, (line) => void process.stdout.write(`${line}\n`));
   process.on('SIGINT', () => {

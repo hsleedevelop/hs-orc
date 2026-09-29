@@ -6,6 +6,7 @@
  */
 import { createElement } from 'react';
 import { render } from 'ink';
+import { defaultJev } from '../jev.ts';
 import { App } from './app.ts';
 import { SCREENS, type Screen } from './model.ts';
 
@@ -22,10 +23,12 @@ const task = argv
   .join(' ')
   .trim();
 
+const jevClient = defaultJev();
 render(
   createElement(App, {
     task,
     ...(requested !== undefined ? { initialScreen: requested as Screen } : {}),
     write,
+    ...(jevClient ? { jev: jevClient } : {}),
   }),
 );

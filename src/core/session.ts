@@ -5,6 +5,7 @@
  * 메시지 1건: 기록 → 라우팅(결정론 파이프라인 그대로) → 배정이면 승인 대기(`blocked`),
  * 아니면 지휘자 직접 답. 다음 위임을 **스스로 시작하지 않는다** (D-015).
  */
+import type { RowClassifier } from '../adapters/jev.ts';
 import type { Engines } from '../data/engines.ts';
 import type { Matrix } from '../data/matrix.ts';
 import { loadLimits } from '../data/limits.ts';
@@ -46,6 +47,11 @@ export interface SessionDeps {
   /** 위임 실행기. 쓰기 여부는 승인 때 정해진다 (D-025). */
   readonly executorFor: (write: boolean) => SlotExecutor;
   readonly now?: () => Date;
+  /**
+   * 주면 "위임할지·어느 행" 을 Jev 가 판정한다 (D-065). 지휘자는 직접 답만 한다 — Jev 가 답했으면 지휘자의 SUGGEST 는 쓰지 않는다.
+   * 없으면(끔·테스트) 옛 경로 그대로다: 규칙 → 지휘자 SUGGEST.
+   */
+  readonly classifier?: RowClassifier;
   /** 없으면 `loadLimits()` 값 (SPEC §6.4.3). */
   readonly context?: ContextLimits;
 }
@@ -171,15 +177,26 @@ export class ConversationSession {
     try {
       // D-033: 지휘자가 대화 맥락으로 직접 답하고 SUGGEST 로 행을 제안한다 — 맥락 없는
       // 폴백의 선택이 대화성 후속을 잘못 위임하는 일이 없다. 규칙이 놓친 메시지는 항상 직접 답으로 간다.
+      const { classifier } = this.deps;
+      // Jev 로 나가는 맥락은 최소로 자른다 — 외부 전송이다 (D-065). 대화 세션 맥락 상한과 따로 둔다.
+      const jevContext = classifier
+        ? buildContext(
+            this.records(),
+            { contextTurns: loadLimits().jevContextTurns, contextChars: loadLimits().jevContextChars },
+            { before: this.turn },
+          ).text
+        : '';
       const routed = await routeWithFallback(matrix, catalog, text, {
         cwd: dir,
         classifyLlm: false,
+        ...(classifier ? { jev: classifier, jevContext } : {}),
         ...(taskId ? { taskId } : {}),
         ...(reasonLabel ? { reasonLabel } : {}),
       });
       const notes = routed.fallback ? [routed.fallback.line] : [];
       const result = routed.result;
-      if (result.stage !== 'assigned') return this.answer(text, notes);
+      // Jev 가 답했는데 행을 확정하지 않았으면(NONE·확신도 미만) 지휘자의 SUGGEST 가 그 판정을 뒤집지 못하게 한다.
+      if (result.stage !== 'assigned') return this.answer(text, notes, routed.jev === 'none' || routed.jev === 'unsure');
       return [this.stage(text, result.plan, result.reason, notes)];
     } catch (error) {
       this.stateValue = 'waiting_input';
@@ -204,7 +221,7 @@ export class ConversationSession {
     });
   }
 
-  private async answer(text: string, notes: readonly string[]): Promise<TranscriptRecord[]> {
+  private async answer(text: string, notes: readonly string[], ignoreSuggest = false): Promise<TranscriptRecord[]> {
     const { matrix, catalog, budget, conduct } = this.deps;
     // route() 가 이미 working 으로 바꿔 놓았을 수 있다 — 여기서도 다시 대입해 answer() 를 단독으로
     // 불러도(테스트 등) 같은 보장이 서게 하고, 모든 탈출 경로를 finally 하나로 묶는다 (final-review #2).
@@ -222,16 +239,17 @@ export class ConversationSession {
       if (!answer.run.ok) {
         return [this.append({ kind: 'error', text: `직접 답을 받지 못했다: ${answer.run.text || '엔진이 실패했다'}` })];
       }
+      const suggest = ignoreSuggest ? null : answer.suggest;
       const direct = this.append({
         kind: 'direct',
         text: answer.body,
-        suggest: answer.suggest,
+        suggest,
         cost: `$${charge.usd.toFixed(4)} ${charge.source}`,
         notes,
         ...(context.cut ? { cut: context.cut } : {}),
         ...(answer.run.cacheWrite ? { cacheWrite: answer.run.cacheWrite } : {}),
       });
-      return [direct, ...this.suggestedPlan(text, answer.suggest)];
+      return [direct, ...this.suggestedPlan(text, suggest)];
     } catch (error) {
       return [this.append({ kind: 'error', text: `직접 답을 받지 못했다: ${why(error)}` })];
     } finally {

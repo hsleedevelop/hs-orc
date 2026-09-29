@@ -2,6 +2,7 @@
  * 대화 세션 조립 — GUI·CLI 가 **같은 조립**을 쓴다 (D-056). 셸마다 조립이 갈리면 같은 세션이
  * 셸마다 다른 실행기로 돈다 (D-026 전례). Electron 을 import 하지 않는다.
  */
+import type { RowClassifier } from '../adapters/jev.ts';
 import { loadEngines } from '../data/engines.ts';
 import { loadLimits } from '../data/limits.ts';
 import { loadMatrix } from '../data/matrix.ts';
@@ -35,10 +36,12 @@ export interface AssembleInput {
   readonly journal: Journal;
   /** 테스트용 — 주면 지휘자·위임 모두 이것을 쓴다. */
   readonly execute?: SlotExecutor;
+  /** Jev 분류기 (D-065). 합성 루트가 `defaultJev()` 를 넘긴다 — 없으면 옛 경로(규칙 → 지휘자 SUGGEST). */
+  readonly classifier?: RowClassifier;
 }
 
 export function assembleSession(input: AssembleInput): ConversationSession {
-  const { kind, dir, id, budget, journal, execute } = input;
+  const { kind, dir, id, budget, journal, execute, classifier } = input;
   const catalog = loadEngines();
   const timeout = loadLimits().runTimeoutMs;
   const inGit = kind === 'project' && repoRoot(dir) !== null;
@@ -50,6 +53,7 @@ export function assembleSession(input: AssembleInput): ConversationSession {
     id,
     budget,
     journal,
+    ...(classifier ? { classifier } : {}),
     // 지휘자(직접 답·요약)만 격리한다 (D-032 B1) — 위임 실행기(executorFor)는 그대로 사용자 설정을 싣는다.
     conduct: execute ?? createExecutor(catalog, dir, timeout, { nonGit: skipGitCheck(kind, inGit, false), isolate: true }),
     executorFor: (write) => execute ?? createExecutor(catalog, dir, timeout, { write, nonGit: skipGitCheck(kind, inGit, write) }),

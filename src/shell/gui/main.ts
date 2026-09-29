@@ -11,10 +11,11 @@ import path from 'node:path';
 import { BrowserWindow, app, dialog, ipcMain } from 'electron';
 import { titleInfo } from '../tui/model.ts';
 import { claudeSessions, codexSessions, reviews } from '../integrations.ts';
+import { defaultJev } from '../jev.ts';
 import { GuiService } from './service.ts';
 import type { SessionKind } from '../../core/transcript.ts';
 
-const service = new GuiService();
+const service = new GuiService(undefined, undefined, undefined, defaultJev());
 
 function createWindow(): void {
   const window = new BrowserWindow({

@@ -7,6 +7,7 @@ import { AssignError, assign, crossVendorPair } from '../assign.ts';
 import { GATE_CHECKS, evaluateGate } from '../gatekeeper.ts';
 import { route, routeWithFallback } from '../pipeline.ts';
 import { Budget } from '../budget.ts';
+import { JevUnavailableError, type JevChoiceAnswer, type RowClassifier } from '../../adapters/jev.ts';
 import { parseGraphSpec, type GraphSpec } from '../modes/graph.ts';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -266,5 +267,105 @@ describe('examples/graph-nodes.json', () => {
       () => parseGraphSpec(matrix, catalog, { nodes: [{ id: 'a', prompt: 'p', task: 'R01' }, { id: 'a', prompt: 'q', task: 'R02' }] }),
       /노드 id 가 겹친다/,
     );
+  });
+});
+
+/**
+ * D-065: Jev 가 분류를 맡는다 — 행만 고르고, 못 쓰면 옛 방식(규칙 → Haiku)으로 돈다. 사유는 반드시 남긴다.
+ * Haiku 폴백은 `classifyLlm: false` 로 막는다(엔진 실행 없음).
+ */
+describe('routeWithFallback — Jev (D-065)', () => {
+  const answer = (choice: string, probabilities: Record<string, number>, confidence: number): JevChoiceAnswer => ({
+    choice, probabilities, confidence, inputTokens: 1032, outputTokens: 12, elapsedMs: 900,
+  });
+  const returns = (a: JevChoiceAnswer): RowClassifier => () => Promise.resolve(a);
+  const fails = (failure: ConstructorParameters<typeof JevUnavailableError>[0], detail?: string): RowClassifier => () =>
+    Promise.reject(new JevUnavailableError(failure, detail));
+  const opts = { classifyLlm: false, jevConfidenceMin: 0.6 } as const;
+
+  it('확신 있는 행은 배정된다 — 근거가 결정 로그 trigger 로 간다, 규칙이 못 잡는 문장도', async () => {
+    const jev = returns(answer('R03', { R03: 0.97, NONE: 0.03 }, 0.97));
+    const r = await routeWithFallback(matrix, catalog, '설정 화면에 다크 모드 토글을 넣어줘', { ...opts, jev });
+    assert.equal(r.result.stage, 'assigned');
+    assert.ok(r.result.stage === 'assigned' && r.result.reason === 'Jev R03 p=0.97 conf=0.97');
+    assert.equal(r.jev, 'row');
+    // 돌았다고 말한다: 행·확률·토큰. 비용은 지어내지 않는다.
+    assert.match(r.fallback?.line ?? '', /Jev 분류 → R03 \(p=0\.97 · conf=0\.97 · 입력 1,032·출력 12 토큰 · 0\.9s · 비용 미산정/);
+  });
+
+  it('Jev 는 행만 고른다 — 모델·reviewer 는 매트릭스 그대로다', async () => {
+    const jev = returns(answer('R05', { R05: 0.95, NONE: 0.05 }, 0.9));
+    const r = await routeWithFallback(matrix, catalog, '500 원인', { ...opts, jev });
+    const row = matrix.assignments.find((a) => a.id === 'R05');
+    assert.ok(r.result.stage === 'assigned');
+    assert.equal(r.result.plan.slots.primary.model, row?.primary.model);
+    assert.equal(r.result.plan.slots.reviewer.model, row?.reviewer.model);
+  });
+
+  it('확신도가 기준 미만이면 행을 확정하지 않고 후보 상위 3개를 보인다 — Haiku 로 다시 묻지 않는다', async () => {
+    const jev = returns(answer('R05', { R05: 0.4, R06: 0.3, R07: 0.2, NONE: 0.1 }, 0.36));
+    const r = await routeWithFallback(matrix, catalog, '버그도 고치고 테스트도 추가하고 성능도', { classifyLlm: true, jevConfidenceMin: 0.6, jev });
+    assert.equal(r.result.stage, 'unclassified');
+    assert.equal(r.jev, 'unsure');
+    assert.equal(r.fallback?.outcome, 'unsure');
+    assert.match(r.fallback?.line ?? '', /확신도 0\.36 < 0\.6 · 후보 R05 0\.40 · R06 0\.30 · R07 0\.20/);
+    assert.ok(r.result.stage === 'unclassified' && /후보: R05 0\.40/.test(r.result.message));
+  });
+
+  it('NONE 은 사람에게 간다 (D-022)', async () => {
+    const jev = returns(answer('NONE', { NONE: 0.99, R01: 0.01 }, 0.98));
+    const r = await routeWithFallback(matrix, catalog, '오늘 점심 뭐 먹지', { ...opts, jev });
+    assert.equal(r.result.stage, 'unclassified');
+    assert.equal(r.jev, 'none');
+    assert.equal(r.fallback?.outcome, 'none');
+  });
+
+  it('Jev 로 붙은 행도 하한선이 먼저 막는다', async () => {
+    const jev = returns(answer('R10', { R10: 0.99, NONE: 0.01 }, 0.98));
+    const r = await routeWithFallback(matrix, catalog, '설계 검토', { ...opts, jev, gate: { irreversibleChange: true } });
+    assert.equal(r.result.stage, 'direct');
+  });
+
+  for (const [failure, shown] of [
+    ['no-key', 'TYPESAFE_API_KEY 없음'],
+    ['network', '네트워크 오류'],
+    ['auth', '401'],
+    ['rejected', '422'],
+    ['rate-limit', '429'],
+    ['overloaded', '529'],
+  ] as const) {
+    it(`Jev 를 못 쓰면(${failure}) 규칙으로 돈다 — 사유를 남긴다`, async () => {
+      const r = await routeWithFallback(matrix, catalog, '이 타입 에러 고쳐줘', { ...opts, jev: fails(failure) });
+      assert.ok(r.result.stage === 'assigned' && r.result.plan.assignment.id === 'R01');
+      assert.ok(r.result.stage === 'assigned' && /키워드/.test(r.result.reason), '규칙 근거가 그대로 남아야 한다.');
+      assert.equal(r.jev, 'unavailable');
+      assert.equal(r.fallback?.outcome, 'jev-unavailable');
+      assert.match(r.fallback?.line ?? '', new RegExp(`^Jev 미사용 \\(.*${shown}.*\\) → 규칙 분류로 대체`));
+    });
+  }
+
+  it('Jev 를 못 쓰고 규칙도 빗나가면 Haiku 폴백까지 옛 방식 그대로다 — 두 사실이 한 줄에 있다', async () => {
+    const original = process.env['PATH'] ?? '';
+    process.env['PATH'] = '';
+    try {
+      const r = await routeWithFallback(matrix, catalog, '오늘 점심 뭐 먹지', { jevConfidenceMin: 0.6, jev: fails('network') });
+      assert.equal(r.fallback?.outcome, 'failed');
+      assert.match(r.fallback?.line ?? '', /^Jev 미사용 \(네트워크 오류\) → 규칙 무매치 → Haiku·low/);
+    } finally {
+      process.env['PATH'] = original;
+    }
+  });
+
+  it('수동 지정(taskId)이면 Jev 를 부르지 않는다 — 외부 전송이 없다', async () => {
+    const jev: RowClassifier = () => assert.fail('수동 지정에 Jev 가 호출됐다');
+    const r = await routeWithFallback(matrix, catalog, '아무 문장', { ...opts, jev, taskId: 'R02' });
+    assert.ok(r.result.stage === 'assigned' && r.result.reason === '수동 지정 R02');
+    assert.equal(r.jev, null);
+  });
+
+  it('jev 를 안 넘기면 옛 방식 그대로다 — 외부 전송은 명시로만 켠다', async () => {
+    const r = await routeWithFallback(matrix, catalog, '이 타입 에러 고쳐줘');
+    assert.equal(r.jev, null);
+    assert.equal(r.fallback, null);
   });
 });

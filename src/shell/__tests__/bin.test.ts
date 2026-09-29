@@ -26,7 +26,8 @@ const hsOrc = (args: readonly string[], cwd = outside) => {
   const r = spawnSync(process.execPath, [BIN, ...args], {
     cwd,
     encoding: 'utf8',
-    env: { ...process.env, PATH: '' },
+    // Jev 는 기본 켜짐이다 (D-065) — 키가 있는 머신에서 이 테스트가 외부로 나가지 않게 끈다.
+    env: { ...process.env, PATH: '', HS_ORC_JEV: 'off' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   return { code: r.status, out: r.stdout ?? '', err: r.stderr ?? '' };

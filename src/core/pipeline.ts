@@ -14,6 +14,9 @@ import { ClassifyError, assignmentById, classify } from './classify.ts';
 import { evaluateGate, type GateCheck, type GateSignals } from './gatekeeper.ts';
 import { assign, type AssignOptions, type AssignmentPlan } from './assign.ts';
 import { classifyWithModel } from './classify-llm.ts';
+import { candidatesText, classifyWithJev, jevReason, usageText } from './classify-jev.ts';
+import type { RowClassifier } from '../adapters/jev.ts';
+import { loadLimits } from '../data/limits.ts';
 import type { Budget } from './budget.ts';
 
 export type RouteResult =
@@ -28,6 +31,8 @@ export interface PipelineOptions extends AssignOptions {
   readonly gate?: GateSignals;
   /** taskId 를 누가 정했는지. 비면 "수동 지정" 이다 — LLM 폴백이 정한 것을 수동이라 쓰면 근거가 거짓이 된다. */
   readonly reasonLabel?: string;
+  /** taskId 와 함께 주면 근거 문구를 통째로 대신한다 — Jev 의 `Jev R05 p=… conf=…` 가 결정 로그 trigger 로 간다 (D-065). */
+  readonly reason?: string;
 }
 
 export function route(matrix: Matrix, catalog: Engines, task: string, options: PipelineOptions = {}): RouteResult {
@@ -37,7 +42,7 @@ export function route(matrix: Matrix, catalog: Engines, task: string, options: P
   try {
     if (options.taskId) {
       assignment = assignmentById(matrix, options.taskId);
-      reason = `${options.reasonLabel ?? '수동 지정'} ${assignment.id}`;
+      reason = options.reason ?? `${options.reasonLabel ?? '수동 지정'} ${assignment.id}`;
     } else {
       const classified = classify(matrix, task);
       assignment = classified.assignment;
@@ -61,7 +66,7 @@ export function route(matrix: Matrix, catalog: Engines, task: string, options: P
 /** 폴백이 돌았다는 사실. **셸이 반드시 사용자에게 보여준다** — 말없이 도는 유료 호출은 없다 (D-026). */
 export interface FallbackNote {
   /** skipped = 예산이 이미 상한이라 시작조차 하지 않았다 (D-034). */
-  readonly outcome: 'matched' | 'none' | 'failed' | 'skipped';
+  readonly outcome: 'matched' | 'none' | 'failed' | 'skipped' | 'unsure' | 'jev-unavailable';
   /** 화면에 그대로 찍을 한 줄. 셸마다 다시 쓰지 않는다. */
   readonly line: string;
 }
@@ -70,6 +75,11 @@ export interface RoutedWithFallback {
   readonly result: RouteResult;
   /** `null` 이면 폴백이 돌지 않았다 — 규칙으로 붙었거나 꺼져 있다. */
   readonly fallback: FallbackNote | null;
+  /**
+   * Jev 가 어떻게 끝났나 (D-065). `null` = 시도하지 않았다(끔·수동 지정). `unavailable` 이면 옛 방식(규칙 → Haiku)으로 돌았다.
+   * `none`·`unsure` 는 Jev 가 **답을 했고** 행을 확정하지 않았다 — 셸은 Haiku 로 다시 묻지 않는다.
+   */
+  readonly jev: 'row' | 'none' | 'unsure' | 'unavailable' | null;
 }
 
 export interface FallbackOptions extends PipelineOptions {
@@ -86,6 +96,15 @@ export interface FallbackOptions extends PipelineOptions {
    * 폴백을 **시작하지 않는다**. 안 주면(TUI·GUI 의 옛 호출부 등) 과금 없이 예전처럼 돈다.
    */
   readonly budget?: Budget;
+  /**
+   * 주면 분류를 Jev 에 먼저 맡긴다 (D-065). **생략하면 옛 방식 그대로다** — 외부 전송은 셸이 명시로 켠다.
+   * `taskId`(수동 지정)가 있으면 쓰지 않는다. 못 쓰면(키 없음·네트워크·401/422/429/529) 규칙 → Haiku 로 돌고 사유를 남긴다.
+   */
+  readonly jev?: RowClassifier;
+  /** Jev 로 함께 보낼 최근 대화 (대화 세션). 없으면 요청 문장만 간다. */
+  readonly jevContext?: string;
+  /** 없으면 `limits.json` 의 `jevConfidenceMin`. */
+  readonly jevConfidenceMin?: number;
 }
 
 /** 매트릭스 행의 슬롯 라벨에서 이 모델의 표시 라벨을 찾는다. 못 찾으면 모델 키를 그대로 쓴다. */
@@ -119,6 +138,72 @@ export async function routeWithFallback(
   task: string,
   options: FallbackOptions = {},
 ): Promise<RoutedWithFallback> {
+  if (!options.jev || options.taskId) return { ...(await routeLegacy(matrix, catalog, task, options)), jev: null };
+  return routeViaJev(matrix, catalog, task, options, options.jev);
+}
+
+/**
+ * Jev 가 분류한다 (D-065). 행만 고른다 — 모델·effort·reviewer 는 `route()` 안의 매트릭스가 정한다.
+ * 확신도 미만·NONE 은 사람에게 올린다(Haiku 로 다시 묻지 않는다, D-022). 못 쓰면 옛 방식으로 돌리고 사유를 붙인다.
+ */
+async function routeViaJev(
+  matrix: Matrix,
+  catalog: Engines,
+  task: string,
+  options: FallbackOptions,
+  jev: RowClassifier,
+): Promise<RoutedWithFallback> {
+  const confidenceMin = options.jevConfidenceMin ?? loadLimits().jevConfidenceMin;
+  let verdict;
+  try {
+    verdict = await classifyWithJev(matrix, jev, task, {
+      confidenceMin,
+      ...(options.jevContext ? { context: options.jevContext } : {}),
+    });
+  } catch (error) {
+    // 못 쓴 것은 삼키지 않는다 — 옛 방식으로 돌고, 그 사실과 사유를 화면·기록에 남긴다.
+    const legacy = await routeLegacy(matrix, catalog, task, options);
+    const why = error instanceof Error ? error.message : String(error);
+    const outcome = legacy.fallback?.outcome === 'failed' || legacy.fallback?.outcome === 'skipped' ? legacy.fallback.outcome : 'jev-unavailable';
+    return {
+      result: legacy.result,
+      fallback: { outcome, line: `Jev 미사용 (${why}) → ${legacy.fallback?.line ?? '규칙 분류로 대체'}` },
+      jev: 'unavailable',
+    };
+  }
+
+  const cost = usageText(verdict.usage);
+  const conf = verdict.confidence.toFixed(2);
+  if (verdict.kind === 'row') {
+    const id = verdict.assignment.id;
+    return {
+      result: route(matrix, catalog, task, { ...options, taskId: id, reason: jevReason(id, verdict.probability, verdict.confidence) }),
+      fallback: { outcome: 'matched', line: `Jev 분류 → ${id} (p=${verdict.probability.toFixed(2)} · conf=${conf} · ${cost})` },
+      jev: 'row',
+    };
+  }
+  const hint = `\n  --task <R01..R${String(matrix.assignments.length).padStart(2, '0')}> 로 직접 지정하라.`;
+  const shown = candidatesText(verdict.candidates);
+  if (verdict.kind === 'none') {
+    return {
+      result: { stage: 'unclassified', message: `Jev: 맞는 행 없음 (NONE p=${verdict.probability.toFixed(2)} conf=${conf})${hint}` },
+      fallback: { outcome: 'none', line: `Jev 분류 → 맞는 행 없음 (NONE p=${verdict.probability.toFixed(2)} · conf=${conf} · ${cost})` },
+      jev: 'none',
+    };
+  }
+  return {
+    result: { stage: 'unclassified', message: `Jev 확신도 ${conf} < ${confidenceMin} — 행을 확정하지 않는다. 후보: ${shown}${hint}` },
+    fallback: { outcome: 'unsure', line: `Jev 분류 → 확정 안 함: 확신도 ${conf} < ${confidenceMin} · 후보 ${shown} (${cost})` },
+    jev: 'unsure',
+  };
+}
+
+async function routeLegacy(
+  matrix: Matrix,
+  catalog: Engines,
+  task: string,
+  options: FallbackOptions,
+): Promise<{ result: RouteResult; fallback: FallbackNote | null }> {
   const result = route(matrix, catalog, task, options);
   if (result.stage !== 'unclassified' || options.classifyLlm === false) return { result, fallback: null };
 

@@ -61,6 +61,7 @@ hs-orc --help
 | `--mode pingpong\|loop\|graph` | 진행 방식 (기본 `once`) |
 | `--verify "[phase:]<명령>"` | 증거로 쓸 명령. exit code를 받는다 |
 | `--no-classify-llm` | 규칙이 빗나갔을 때의 LLM 분류 폴백을 끈다 |
+| `--no-jev` | Jev 분류(아래 "외부 전송")를 끈다 — 요청이 밖으로 나가지 않는다 |
 | `--no-reviewer` | reviewer 생략 (끈 것이지 통과가 아니다) |
 
 그래프 모드는 커밋된 예제가 있다:
@@ -68,6 +69,15 @@ hs-orc --help
 ```bash
 hs-orc "<작업>" --mode graph --graph examples/graph-nodes.json --run
 ```
+
+## 외부 전송 — Jev 분류 (D-065)
+
+분류는 [TypeSafe Jev](https://docs.typesafe.ai) 가 먼저 한다. **요청 문장이 `api.typesafe.ai` 로 전송된다.** 대화 세션(`chat`·GUI)은 최근 2턴·1200자의 대화 맥락이 함께 나간다. 파일·diff·경로·엔진 출력은 나가지 않는다.
+
+- 키는 환경변수 `TYPESAFE_API_KEY` 로만 준다. 로그·기록·오류 문구에 남기지 않는다.
+- Jev 는 **업무 행(R01~R11)만 고른다.** 모델·effort·reviewer 는 매트릭스가 정한다. 확신도가 `data/limits.json` 의 `jevConfidenceMin` 미만이거나 "해당 없음" 이면 행을 확정하지 않고 후보를 보여 준다.
+- 끄려면 `--no-jev` 또는 `HS_ORC_JEV=off` (GUI·TUI·`chat` 포함). 키가 없거나 호출이 실패하면(401·422·429·529·네트워크) 옛 방식(규칙 → Haiku 폴백 / 세션은 지휘자 제안)으로 돌고 화면에 `Jev 미사용 (사유)` 를 찍는다.
+- 호출마다 토큰과 시간을 보여 준다. **가격이 공개돼 있지 않아 금액은 산정하지 않는다.**
 
 ## 증거 없이는 완료가 아니다
 
