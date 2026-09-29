@@ -6,7 +6,7 @@
  */
 import { loadMatrix } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
-import { loadLimits } from '../../data/limits.ts';
+import { loadLimits, type ApprovalMode } from '../../data/limits.ts';
 import { routeWithFallback } from '../../core/pipeline.ts';
 import { createExecutor, type SlotExecutor } from '../../core/executor.ts';
 import { Budget } from '../../core/budget.ts';
@@ -113,6 +113,8 @@ export interface SessionView {
   readonly interrupted: boolean;
   /** primary·reviewer 가 도는 중이라 지금 취소할 수 있다 (D-066). 화면의 '취소' 버튼이 이것을 본다. */
   readonly cancellable: boolean;
+  /** 이 세션의 승인 방식 (D-064). 세션 머리의 선택이 이것을 본다. */
+  readonly mode: ApprovalMode;
 }
 
 export interface WorktreeState {
@@ -368,11 +370,13 @@ export class GuiService {
       appBudget: this.appBudgetSummary(),
       interrupted: s.interrupted,
       cancellable: s.cancellable,
+      mode: s.mode,
     };
   }
 
-  async converse(text: string): Promise<SessionView> {
-    await this.running((s) => s.send(text));
+  /** `write` — 쓰기 위임으로 보낸다 (H2). 자동 승인은 읽기 전용만 시작하므로 쓰기는 늘 카드가 선다. */
+  async converse(text: string, write = false): Promise<SessionView> {
+    await this.running((s) => s.send(text, { write }));
     return this.conversation();
   }
 
@@ -394,6 +398,12 @@ export class GuiService {
   async converseCancel(): Promise<SessionView> {
     const s = this.requireConversation();
     if (s.cancel()) await this.liveCalls.get(`${s.dir}::${s.id}`)?.catch(() => undefined);
+    return this.conversation();
+  }
+
+  /** 승인 방식을 바꾼다 (D-064). 엔진을 부르지 않으므로 `live` 에 두지 않는다 — 도는 세션에도 바로 붙는다. */
+  converseMode(mode: ApprovalMode): SessionView {
+    this.requireConversation().setMode(mode);
     return this.conversation();
   }
 

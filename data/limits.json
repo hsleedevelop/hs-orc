@@ -7,6 +7,8 @@
   "runTimeoutMs": 900000,
   "tokenBudget": 2000000,
   "tokenBudgetRationale": "구독제에서는 금액 상한이 아무것도 막지 않는다 (D-030) — total_cost_usd 조차 청구되지 않는다. 실제로 희소한 자원은 사용량 한도이고, 그에 비례하는 것이 토큰이다. 200만 토큰은 첫 실사용 (R01 두 슬롯, 수만 토큰) 기준 수십 사이클 규모다. 사고는 그 전에 멈춘다.",
+  "approvalMode": "auto-ask",
+  "approvalModeRationale": "새 대화 세션의 승인 방식 (D-064). manual 은 매번 묻고, auto-ask 는 쓰기·모델이 고른 행·비싼 조합·상한 근접·첫 위임만 묻고, auto 는 쓰기·모델이 고른 행·인자로 읽기 전용이 보장되지 않는 엔진만 묻는다. 방식은 세션마다 기록에 남는다 — 이 값은 새 세션의 시작값일 뿐이고 기록에 방식이 없는 옛 세션은 manual 로 연다.",
   "contextTurns": 6,
   "contextChars": 6000,
   "jevConfidenceMin": 0.6,

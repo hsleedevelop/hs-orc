@@ -2,7 +2,14 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
+/** 대화 세션 승인 방식 (D-064). */
+export type ApprovalMode = 'manual' | 'auto-ask' | 'auto';
+export const APPROVAL_MODES: readonly ApprovalMode[] = ['manual', 'auto-ask', 'auto'];
+export const isApprovalMode = (value: unknown): value is ApprovalMode => APPROVAL_MODES.includes(value as ApprovalMode);
+
 export interface Limits {
+  /** 새 대화 세션의 승인 방식 (D-064 결정 8). 기록에 방식이 없는 옛 세션은 이 값이 아니라 `manual` 이다. */
+  readonly approvalMode: ApprovalMode;
   readonly budgetUsd: number;
   /** 구독제에서 금액 대신 막는 것 (D-030). 돈이 아니라 사용량 한도가 희소 자원이다. */
   readonly tokenBudget: number;
@@ -35,6 +42,7 @@ export function checkLimits(limits: Limits): Limits {
   if (!Number.isInteger(limits.contextChars) || limits.contextChars < 2) {
     throw new Error(`limits.json 의 contextChars 는 2 이상의 정수여야 한다: ${limits.contextChars}`);
   }
+  if (!isApprovalMode(limits.approvalMode)) throw new Error(`limits.json 의 approvalMode 는 ${APPROVAL_MODES.join('·')} 중 하나여야 한다: ${String(limits.approvalMode)}`);
   if (limits.jevConfidenceMin > 1) throw new Error(`limits.json 의 jevConfidenceMin 은 1 이하여야 한다: ${limits.jevConfidenceMin}`);
   for (const key of ['jevContextTurns', 'jevContextChars'] as const) {
     if (!Number.isInteger(limits[key]) || limits[key] < 2) throw new Error(`limits.json 의 ${key} 는 2 이상의 정수여야 한다: ${limits[key]}`);

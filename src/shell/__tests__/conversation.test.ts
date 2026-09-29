@@ -32,7 +32,7 @@ describe('세션 조립 (D-056)', () => {
     isolated();
     const { exec, calls } = fake();
     const { dir, id } = prepareSession('scratch', process.cwd());
-    const session = assembleSession({ kind: 'scratch', dir, id, budget: restoreBudget(dir, id), journal: new Journal(), execute: exec });
+    const session = assembleSession({ approvalMode: 'manual', kind: 'scratch', dir, id, budget: restoreBudget(dir, id), journal: new Journal(), execute: exec });
     const out = await session.send('넌 누구니');
     assert.deepEqual(out.map((r) => r.kind), ['user', 'direct']);
     assert.equal(calls.length, 1, '지휘자 1회 — 분류 폴백은 돌지 않는다 (D-033)');
@@ -43,7 +43,7 @@ describe('세션 조립 (D-056)', () => {
     const { exec } = fake();
     const { dir, id } = prepareSession('scratch', process.cwd());
     const budget = restoreBudget(dir, id);
-    await assembleSession({ kind: 'scratch', dir, id, budget, journal: new Journal(), execute: exec }).send('넌 누구니');
+    await assembleSession({ approvalMode: 'manual', kind: 'scratch', dir, id, budget, journal: new Journal(), execute: exec }).send('넌 누구니');
     assert.equal(restoreBudget(dir, id).summary(), budget.summary());
   });
 });

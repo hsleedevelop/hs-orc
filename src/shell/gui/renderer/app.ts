@@ -28,17 +28,24 @@ interface WorktreeState { repo: string | null; items: WorktreeInfo[]; current: s
 
 type SessionKind = 'project' | 'scratch';
 type SessionState = 'waiting_input' | 'working' | 'blocked';
+type ApprovalMode = 'manual' | 'auto-ask' | 'auto';
+const MODES: { id: ApprovalMode; label: string; hint: string }[] = [
+  { id: 'manual', label: 'manual', hint: '모든 배정을 묻는다' },
+  { id: 'auto-ask', label: 'auto-ask', hint: '쓰기·모델이 고른 행·$10 이상·상한 근접·첫 위임만 묻는다' },
+  { id: 'auto', label: 'auto', hint: '쓰기·모델이 고른 행만 묻는다' },
+];
 interface Cut { turns: number; chars: number }
 interface Compaction { trigger: string; preTokens?: number; postTokens?: number }
 type Rec =
   | { kind: 'user'; turn: number; text: string }
   | { kind: 'direct'; turn: number; text: string; suggest: string | null; cost: string; notes: string[]; cut?: Cut }
-  | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; estimateUsd: number; notes: string[] }
-  | { kind: 'approval'; turn: number; approved: boolean; write: boolean }
+  | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; estimateUsd: number; notes: string[]; mode?: ApprovalMode; asked?: { code: string; text: string }[]; write?: boolean }
+  | { kind: 'approval'; turn: number; approved: boolean; write: boolean; by?: 'user' | 'auto'; mode?: ApprovalMode }
+  | { kind: 'mode'; turn: number; mode: ApprovalMode }
   | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string; cut?: Cut; compacted?: Compaction[] }
   | { kind: 'summary'; turn: number; text: string; next: string }
   | { kind: 'error'; turn: number; text: string };
-interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean }
+interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; mode: ApprovalMode }
 interface SessionSummary { id: string; dir: string; kind: SessionKind; lastAt: string; preview: string }
 
 interface Bridge {
@@ -46,7 +53,8 @@ interface Bridge {
   convStart(kind: SessionKind): Promise<SessionView>;
   convOpen(payload: { kind: SessionKind; dir: string; id: string }): Promise<SessionView>;
   convView(): Promise<SessionView>;
-  convSend(text: string): Promise<SessionView>;
+  convSend(text: string, write?: boolean): Promise<SessionView>;
+  convMode(mode: ApprovalMode): Promise<SessionView>;
   convPlanAs(taskId: string): Promise<SessionView>;
   convApprove(payload: { verify: string[]; write: boolean }): Promise<SessionView>;
   convCancel(): Promise<SessionView>;
@@ -284,7 +292,9 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState('');
   const [verify, setVerify] = useState('');
-  const [write, setWrite] = useState(false);
+  // null = 카드가 정한 대로(쓰기 위임으로 보낸 배정은 켜진 채 선다). 사람이 스위치를 만지면 그 값이 이긴다.
+  const [write, setWrite] = useState<boolean | null>(null);
+  const [sendWrite, setSendWrite] = useState(false);
   const [busy, setBusy] = useState(false);
   // 승인한 위임이 도는 동안의 화면 쪽 표시 (D-066). 요청이 안 끝났으니 `view.cancellable` 은 아직 갱신 전이다.
   const [delegation, setDelegation] = useState<'' | 'running' | 'cancelling'>('');
@@ -308,7 +318,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     if (!t) return;
     setDraft('');
     setSending(t);
-    act(orc.convSend(t));
+    act(orc.convSend(t, sendWrite && view.kind !== 'scratch'));
   };
 
   const last = view.records.at(-1);
@@ -323,6 +333,10 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       planLine(`primary  ${r.primary}`, 1),
       planLine(`reviewer ${r.reviewer}`, 2),
       planLine(`비용 예상 $${r.estimateUsd}`, 3),
+      // 묻는 카드는 걸린 조건을 이름으로 보인다 (D-064) — 이유 없이 선 카드는 무엇을 봐야 할지 모른다.
+      active && r.mode && r.mode !== 'manual' && r.asked && r.asked.length > 0
+        ? h('div', { className: 'hint warn' }, `묻는 이유: ${r.asked.map((a) => a.text).join(' · ')}`)
+        : null,
       active
         ? h('div', { className: 'stack', style: { padding: 0, width: '100%', marginTop: 10 } },
             h('div', { className: 'row' },
@@ -339,20 +353,20 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
             }),
             h('label', { className: 'toggle' },
               h('input', {
-                type: 'checkbox', checked: write && view.kind !== 'scratch', disabled: view.kind === 'scratch',
+                type: 'checkbox', checked: (write ?? r.write === true) && view.kind !== 'scratch', disabled: view.kind === 'scratch',
                 onChange: (e: { target: { checked: boolean } }) => setWrite(e.target.checked),
               }),
               h('span', { className: 'track' }),
               h('span', { className: 'text' },
                 view.kind === 'scratch' ? '스크래치는 쓰기를 켤 수 없다'
-                : write ? h('b', null, 'primary 슬롯이 이 폴더의 파일을 고칠 수 있다')
+                : (write ?? r.write === true) ? h('b', null, 'primary 슬롯이 이 폴더의 파일을 고칠 수 있다')
                 : 'primary 슬롯 파일 쓰기 (--write)',
                 h('span', { className: 'dim' }, ' · reviewer 는 언제나 읽기 전용'))),
             h('div', { className: 'row' },
               h('button', {
                 className: 'btn accent', disabled: busy,
-                onClick: () => { setDelegation('running'); act(orc.convApprove({ verify: lines(verify), write: write && view.kind !== 'scratch' })); },
-              }, busy ? '실행 중…' : `승인하고 실행 · 두 슬롯${write && view.kind !== 'scratch' ? ' · 쓰기 켜짐' : ''}`),
+                onClick: () => { setDelegation('running'); act(orc.convApprove({ verify: lines(verify), write: (write ?? r.write === true) && view.kind !== 'scratch' })); },
+              }, busy ? '실행 중…' : `승인하고 실행 · 두 슬롯${(write ?? r.write === true) && view.kind !== 'scratch' ? ' · 쓰기 켜짐' : ''}`),
               h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convReject()) }, '거절'),
               // 규칙이 대화성 후속을 작업 행으로 잡았을 때 — 거절하고 같은 메시지를 지휘자가 답한다 (D-038).
               h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convAsk()) }, '지휘자에게 묻기')))
@@ -376,7 +390,10 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       case 'plan':
         return planCard(r, i, r === last && view.state === 'blocked');
       case 'approval':
-        return h('div', { key: i, className: 'hint' }, r.approved ? `승인${r.write ? ' · 쓰기 켜짐' : ''}` : '거절');
+        // 자동 승인도 카드·비용은 그대로 위에 보인다 (G2·FR-5) — 승인 클릭만 없다 (D-064 결정 7).
+        return h('div', { key: i, className: 'hint' }, r.approved && r.by === 'auto' ? `자동 승인 · ${r.mode ?? ''} · 묻는 조건 없음` : r.approved ? `승인${r.write ? ' · 쓰기 켜짐' : ''}` : '거절');
+      case 'mode':
+        return h('div', { key: i, className: 'hint' }, `승인 방식 → ${r.mode}`);
       case 'result':
         return h('section', { key: i, className: 'card' },
           h('span', { className: 'label' }, `위임 결과 · ${r.decisionId}`),
@@ -404,6 +421,11 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       // 경로는 줄바꿈하지 않는다 — `hs-` 에서 끊기면 없는 경로처럼 읽힌다. 길면 `elide` 가 앞을 자르고 전체는 title 로 본다.
       h('span', { className: 'mono dim', title: view.dir, style: { whiteSpace: 'nowrap' } }, view.kind === 'scratch' ? `스크래치 · ${elide(view.dir, 36)}` : elide(view.dir, 44)),
       h('div', { className: 'spacer' }),
+      // 방식은 세션 값이다 (D-064). 바꿔도 이미 선 카드는 자동 승인하지 않는다 — 다음 배정부터다.
+      h('select', {
+        value: view.mode, disabled: busy, title: MODES.find((m) => m.id === view.mode)?.hint ?? '',
+        onChange: (e: { target: { value: string } }) => act(orc.convMode(e.target.value as ApprovalMode)),
+      }, ...MODES.map((m) => h('option', { key: m.id, value: m.id, title: m.hint }, `승인 · ${m.label}`))),
       h('span', { className: 'dim mono' }, view.budget),
       h('span', { className: 'dim mono' }, view.appBudget),
       h('button', { className: 'btn', onClick: props.onClose }, '세션 목록')),
@@ -433,6 +455,11 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
         },
       }),
       h('div', { className: 'row', style: { marginTop: 10 } },
+        h('label', { className: 'hint', title: '자동 승인은 읽기 전용만 시작한다 — 쓰기 위임은 늘 카드가 서고 쓰기가 켜진 채다' },
+          h('input', {
+            type: 'checkbox', checked: sendWrite && view.kind !== 'scratch', disabled: view.kind === 'scratch',
+            onChange: (e: { target: { checked: boolean } }) => setSendWrite(e.target.checked),
+          }), ' 쓰기 위임으로 보내기'),
         h('div', { className: 'spacer' }),
         h('button', { className: 'btn accent', disabled: !canType || !draft.trim(), onClick: send }, '전송'))));
 }

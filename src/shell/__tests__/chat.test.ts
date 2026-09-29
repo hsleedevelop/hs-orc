@@ -11,6 +11,7 @@ import type { SlotExecutor } from '../../core/executor.ts';
 import { Journal } from '../../core/journal.ts';
 import { appendRecord, prepareSession, transcriptPath, type TranscriptRecord } from '../../core/transcript.ts';
 import { assembleSession, restoreBudget } from '../conversation.ts';
+import type { ApprovalMode } from '../../data/limits.ts';
 import { findSession, interruptGuard, openingLines, parseChatArgs, renderRecord, runChat } from '../chat.ts';
 
 const at = { v: 1 as const, at: '2026-09-26T00:00:00.000Z', turn: 1 };
@@ -47,7 +48,7 @@ describe('chat — 기록 렌더', () => {
   });
 });
 
-const drive = async (lines: readonly string[], suggest?: string) => {
+const drive = async (lines: readonly string[], suggest?: string, mode: ApprovalMode = 'manual', kind: 'scratch' | 'project' = 'scratch') => {
   const tmp = mkdtempSync(path.join(os.tmpdir(), 'hs-chat-'));
   process.env['HS_ORC_DECISION_LOG'] = path.join(tmp, 'log.jsonl');
   process.env['HS_ORC_RUN_STORE'] = path.join(tmp, 'runs');
@@ -59,9 +60,9 @@ const drive = async (lines: readonly string[], suggest?: string) => {
     if (suggest && prompt.includes('[이번 메시지]')) return Promise.resolve({ ok: true, text: `제안한다.\nSUGGEST: ${suggest}`, rawStdout: '', rawStderr: '', durationMs: 1 });
     return Promise.resolve({ ok: true, text: slot.label === 'Haiku' ? 'PASS' : `ran:${prompt}`, rawStdout: '', rawStderr: '', durationMs: 1 });
   };
-  const { dir, id } = prepareSession('scratch', process.cwd());
+  const { dir, id } = prepareSession(kind, kind === 'project' ? tmp : process.cwd());
   const budget = restoreBudget(dir, id);
-  const session = assembleSession({ kind: 'scratch', dir, id, budget, journal: new Journal(), execute: exec });
+  const session = assembleSession({ approvalMode: mode, kind, dir, id, budget, journal: new Journal(), execute: exec });
   let out = '';
   const output = new Writable({
     write(chunk: Buffer, _enc, cb) {
@@ -77,7 +78,7 @@ describe('chat — 입력 루프', () => {
   it('잡담은 지휘자가 직접 답한다', async () => {
     const { out, session } = await drive(['넌 누구니']);
     assert.match(out, /나 {5}넌 누구니/);
-    assert.deepEqual(session.records().filter((r) => r.kind !== 'spend').map((r) => r.kind), ['user', 'direct']);
+    assert.deepEqual(session.records().filter((r) => r.kind !== 'spend' && r.kind !== 'mode').map((r) => r.kind), ['user', 'direct']);
   });
 
   it('배정이 뜨면 y 로 읽기 전용 위임하고 누적을 찍는다', async () => {
@@ -139,13 +140,13 @@ describe('chat — 입력 루프', () => {
     const { out, session } = await drive(['넌 누구니', 'y'], 'R01');
     assert.match(out, /제안 {3}R01 \(지휘자\)/);
     assert.match(out, /업무 {3}R01 .*\(지휘자 제안 R01\)/);
-    assert.deepEqual(session.records().filter((r) => r.kind !== 'spend').map((r) => r.kind), ['user', 'direct', 'plan', 'approval', 'result', 'summary']);
+    assert.deepEqual(session.records().filter((r) => r.kind !== 'spend' && r.kind !== 'mode').map((r) => r.kind), ['user', 'direct', 'plan', 'approval', 'result', 'summary']);
   });
 
   it('카드가 선 채 공백이 든 문장을 쓰면 거절하고 새 메시지로 보낸다 — 한 단어는 되묻는다', async () => {
     const { out, session } = await drive(['넌 누구니', 'yes', '아니 그냥 얘기하자'], 'R01');
     assert.match(out, /y·w·n·a 중 하나로 답한다/);
-    const kinds = session.records().filter((r) => r.kind !== 'spend').map((r) => r.kind);
+    const kinds = session.records().filter((r) => r.kind !== 'spend' && r.kind !== 'mode').map((r) => r.kind);
     assert.deepEqual(kinds, ['user', 'direct', 'plan', 'approval', 'user', 'direct', 'plan']);
     assert.ok(session.records().some((r) => r.kind === 'approval' && !r.approved));
   });
@@ -174,7 +175,7 @@ describe('chat — 진입', () => {
     const { session } = await drive(['넌 누구니']);
     appendFileSync(transcriptPath(session.dir, session.id), '{깨진 줄\n');
     const budget = restoreBudget(session.dir, session.id);
-    const reopened = assembleSession({ kind: 'scratch', dir: session.dir, id: session.id, budget, journal: new Journal() });
+    const reopened = assembleSession({ approvalMode: 'manual', kind: 'scratch', dir: session.dir, id: session.id, budget, journal: new Journal() });
     assert.ok(openingLines(reopened, budget).includes('경고   기록에 깨진 줄 1개 — 건너뛰고 보여준다'));
   });
 
@@ -192,14 +193,14 @@ describe('chat — 진입', () => {
     const { session } = await drive(['이 타입 에러 고쳐줘']);
     appendRecord(transcriptPath(session.dir, session.id), { v: 1, at: new Date().toISOString(), turn: 1, kind: 'approval', approved: true, write: false });
     const budget = restoreBudget(session.dir, session.id);
-    const reopened = assembleSession({ kind: 'scratch', dir: session.dir, id: session.id, budget, journal: new Journal() });
+    const reopened = assembleSession({ approvalMode: 'manual', kind: 'scratch', dir: session.dir, id: session.id, budget, journal: new Journal() });
     assert.ok(openingLines(reopened, budget).some((l) => l.startsWith('끊김')));
   });
 
   it('승인 안 된 배정으로 끝난 세션은 그 배정을 되살리지 않는다고 알린다', async () => {
     const { session } = await drive(['이 타입 에러 고쳐줘']);
     const budget = restoreBudget(session.dir, session.id);
-    const reopened = assembleSession({ kind: 'scratch', dir: session.dir, id: session.id, budget, journal: new Journal() });
+    const reopened = assembleSession({ approvalMode: 'manual', kind: 'scratch', dir: session.dir, id: session.id, budget, journal: new Journal() });
     assert.ok(openingLines(reopened, budget).some((l) => l.includes('되살리지 않는다') && l.includes('/task R01')));
     assert.equal(reopened.state, 'waiting_input');
   });
@@ -242,7 +243,7 @@ describe('chat — Ctrl-C', () => {
     };
     const { dir, id } = prepareSession('scratch', process.cwd());
     const budget = restoreBudget(dir, id);
-    const session = assembleSession({ kind: 'scratch', dir, id, budget, journal: new Journal(), execute: exec });
+    const session = assembleSession({ approvalMode: 'manual', kind: 'scratch', dir, id, budget, journal: new Journal(), execute: exec });
     let out = '';
     const output = new Writable({ write(chunk: Buffer, _enc, cb) { out += chunk.toString(); cb(); } });
     // 입력은 두 번에 나눠 준다 — 취소 뒤 줄이 그 위임 도중에 미리 쌓이지 않게(쌓이면 승인 답으로 읽힌다).
@@ -264,12 +265,46 @@ describe('chat — Ctrl-C', () => {
     assert.match(out, /결과 {3}취소됨 · 결정 /);
     assert.match(out, /증거 {3}취소됨 — primary 실행 중/);
     assert.deepEqual(roles.slice(0, 1), ['primary'], '취소한 위임은 reviewer 를 띄우지 않는다');
-    const kinds = session.records().filter((r) => r.kind !== 'spend').map((r) => r.kind);
+    const kinds = session.records().filter((r) => r.kind !== 'spend' && r.kind !== 'mode').map((r) => r.kind);
     assert.deepEqual(kinds, ['user', 'plan', 'approval', 'result', 'user', 'plan', 'approval', 'result', 'summary'], '취소 뒤 새 위임이 돈다');
   });
 
   it('입력 대기 중이면 바로 나간다', () => {
     const guard = interruptGuard({ state: 'waiting_input', records: () => [], cancel: () => false }, () => undefined);
     assert.equal(guard(), 'exit');
+  });
+});
+
+describe('chat — 승인 방식 (D-064)', () => {
+  it('/mode 는 지금 방식을 보이고, 바꾸면 기록에 남는다 — 모르는 방식은 거절한다', async () => {
+    const { out, session } = await drive(['/mode', '/mode auto', '/mode auto', '/mode yolo'], undefined, 'manual');
+    assert.match(out, /방식 {3}manual \(manual · auto-ask · auto\)/);
+    assert.match(out, /방식 {3}승인 방식 → auto/);
+    assert.match(out, /방식 {3}이미 auto/);
+    assert.match(out, /모르는 방식이다: yolo/);
+    assert.equal(session.mode, 'auto');
+    assert.equal(session.records().filter((r) => r.kind === 'mode').length, 1);
+  });
+
+  it('auto 에서는 y 없이 시작한다 — 카드·자동 승인 줄·결과가 그대로 찍힌다', async () => {
+    const { out, calls } = await drive(['/mode auto', '이 타입 에러 고쳐줘']);
+    assert.match(out, /업무 {3}R\d{2} /);
+    assert.match(out, /승인 {3}자동 승인 · auto · 묻는 조건 없음/);
+    assert.match(out, /결과 {3}/);
+    assert.ok(calls.length >= 2);
+    assert.doesNotMatch(out, /승인\? /);
+  });
+
+  it('/write 는 auto 에서도 카드를 세우고 묻는 이유를 찍는다 — 자동 승인은 쓰기를 켜지 않는다', async () => {
+    const { out, calls } = await drive(['/mode auto', '/write 이 타입 에러 고쳐줘'], undefined, 'manual', 'project');
+    assert.match(out, /묻는 이유 {2}H2 쓰기를 켠 위임/);
+    assert.doesNotMatch(out, /자동 승인/);
+    assert.equal(calls.length, 0);
+  });
+
+  it('--approval 은 시작 인자로 파싱하고 모르는 값은 던진다', () => {
+    assert.equal(parseChatArgs(['--approval', 'auto-ask']).approval, 'auto-ask');
+    assert.equal(parseChatArgs([]).approval, undefined);
+    assert.throws(() => parseChatArgs(['--approval', 'yolo']), /--approval 은/);
   });
 });
