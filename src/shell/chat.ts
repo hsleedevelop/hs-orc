@@ -17,7 +17,8 @@ export function renderRecord(r: TranscriptRecord): string[] {
         ...r.notes.map((n) => `분류   ${n}`),
         r.text,
         `비용   ${r.cost}`,
-        ...(r.suggest ? [`제안   ${r.suggest} — /task ${r.suggest} 로 위임한다`] : []),
+        // 제안이 있으면 곧이어 배정 카드가 붙는다 (D-064) — 카드 이전 기록에는 붙지 않아 openingLines 가 /task 길을 알린다.
+        ...(r.suggest ? [`제안   ${r.suggest} (지휘자)`] : []),
         ...cutLine(r.cut),
       ];
     case 'plan':
@@ -51,7 +52,7 @@ export function renderRecord(r: TranscriptRecord): string[] {
 
 export const CHAT_HELP = [
   '명령   메시지를 그냥 쓰면 보낸다 · /task Rxx 마지막 메시지를 그 행으로 배정 · /help · /quit (Ctrl-D)',
-  '승인   배정이 뜨면 y 읽기 전용 · w 쓰기 · n 거절 · a 지휘자에게 묻기',
+  '승인   배정이 뜨면 y 읽기 전용 · w 쓰기 · n 거절 · a 지휘자에게 묻기 · 문장을 쓰면 거절하고 그 메시지를 보낸다',
 ].join('\n');
 
 export interface ChatIO {
@@ -103,7 +104,9 @@ export async function runChat(
             say(`누적   ${budget.summary()}`);
           } else if (line === 'n') show(session.reject());
           else if (line === 'a') show(await session.askConductor());
-          else say('y·w·n·a 중 하나로 답한다.');
+          // 공백이 든 문장은 새 메시지다 — 배정은 거절로 남는다 (D-064). 한 단어(오타 y·yes 등)는 유료 호출로 새지 않게 되묻는다.
+          else if (/\s/.test(line) && !line.startsWith('/')) show(await session.send(line));
+          else say('y·w·n·a 중 하나로 답한다 (새 메시지는 문장으로 쓴다).');
         } else if (line.startsWith('/task')) {
           const m = /^\/task\s+(R\d{2})$/i.exec(line);
           if (m?.[1]) show(await session.planAs(m[1].toUpperCase()));
@@ -183,6 +186,8 @@ export function openingLines(session: ConversationSession, budget: Budget, tail 
     ...(session.interrupted ? ['끊김   지난 위임은 승인 뒤 결과가 기록되지 않았다 — 다시 보내면 새로 띄운다.'] : []),
     // Core 는 승인 안 된 배정을 되살리지 않는다 (session.ts 생성자) — 사용자에게 그 사실과 길을 알린다.
     ...(last?.kind === 'plan' ? [`안내   승인 안 된 배정은 되살리지 않는다 — 다시 보내거나 /task ${last.taskId}.`] : []),
+    // 카드 합치기(D-064) 이전 기록 — 제안만 있고 배정이 없다.
+    ...(last?.kind === 'direct' && last.suggest ? [`안내   ${last.suggest} 로 위임하려면 /task ${last.suggest}.`] : []),
     CHAT_HELP,
   ];
 }

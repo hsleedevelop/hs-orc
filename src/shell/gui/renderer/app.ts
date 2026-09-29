@@ -309,7 +309,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
   };
 
   const last = view.records.at(-1);
-  const canType = view.state === 'waiting_input' && !busy;
+  // 배정 카드가 선 채 보내면 그 배정은 거절로 남는다 (D-064) — 제안 카드가 대화를 막지 않는다.
+  const canType = (view.state === 'waiting_input' || view.state === 'blocked') && !busy;
 
   const planCard = (r: Extract<Rec, { kind: 'plan' }>, i: number, active: boolean): ReactNode =>
     h('section', { key: i, className: 'card' },
@@ -408,14 +409,14 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     sending ? h('div', { className: 'bubble user dim' }, sending) : null,
     // 다시 연 화면은 `busy` 를 모른다 — 서비스가 working 이면 도는 실행에 붙은 것이다 (D-063). 결과는 앞 화면이 건 요청이 돌아오며 싣는다.
     busy || view.state === 'working'
-      ? text(view.state === 'blocked' || last?.kind === 'plan' || last?.kind === 'approval' ? '실행 중…' : '생각 중…', 'dim')
+      ? text(!sending && (view.state === 'blocked' || last?.kind === 'plan' || last?.kind === 'approval') ? '실행 중…' : '생각 중…', 'dim')
       : null,
     error ? h('div', { className: 'banner error' }, error) : null,
     h('div', { ref: endRef }),
     card(null,
       h('textarea', {
         rows: 3, value: draft, disabled: !canType,
-        placeholder: view.state === 'blocked' ? '배정을 승인하거나 거절해야 다음 메시지를 받는다' : '메시지 · ⌘↵ 전송',
+        placeholder: view.state === 'blocked' ? '배정을 승인·거절하거나, 메시지를 보내면 이 배정은 거절로 남는다 · ⌘↵ 전송' : '메시지 · ⌘↵ 전송',
         onChange: (e: { target: { value: string } }) => setDraft(e.target.value),
         onKeyDown: (e: { key: string; metaKey: boolean; ctrlKey: boolean; preventDefault: () => void }) => {
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }

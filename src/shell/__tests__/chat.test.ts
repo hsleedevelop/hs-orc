@@ -16,9 +16,9 @@ import { findSession, interruptGuard, openingLines, parseChatArgs, renderRecord,
 const at = { v: 1 as const, at: '2026-09-26T00:00:00.000Z', turn: 1 };
 
 describe('chat — 기록 렌더', () => {
-  it('직접 답은 본문·비용을 찍고, 제안이 있으면 /task 명령을 알려준다', () => {
+  it('직접 답은 본문·비용을 찍고, 제안이 있으면 그 행을 알린다 — 배정 카드가 곧이어 붙는다', () => {
     const lines = renderRecord({ ...at, kind: 'direct', text: '안녕하세요', suggest: 'R01', cost: '$0.0110 actual', notes: [] });
-    assert.deepEqual(lines, ['안녕하세요', '비용   $0.0110 actual', '제안   R01 — /task R01 로 위임한다']);
+    assert.deepEqual(lines, ['안녕하세요', '비용   $0.0110 actual', '제안   R01 (지휘자)']);
   });
 
   it('배정은 두 슬롯과 추정 비용을 찍는다', () => {
@@ -47,7 +47,7 @@ describe('chat — 기록 렌더', () => {
   });
 });
 
-const drive = async (lines: readonly string[]) => {
+const drive = async (lines: readonly string[], suggest?: string) => {
   const tmp = mkdtempSync(path.join(os.tmpdir(), 'hs-chat-'));
   process.env['HS_ORC_DECISION_LOG'] = path.join(tmp, 'log.jsonl');
   process.env['HS_ORC_RUN_STORE'] = path.join(tmp, 'runs');
@@ -55,6 +55,8 @@ const drive = async (lines: readonly string[]) => {
   const calls: string[] = [];
   const exec: SlotExecutor = (slot, prompt) => {
     calls.push(slot.label);
+    // 직접 답 프롬프트에만 [이번 메시지] 가 든다 — suggest 가 주어지면 그 행을 제안한다.
+    if (suggest && prompt.includes('[이번 메시지]')) return Promise.resolve({ ok: true, text: `제안한다.\nSUGGEST: ${suggest}`, rawStdout: '', rawStderr: '', durationMs: 1 });
     return Promise.resolve({ ok: true, text: slot.label === 'Haiku' ? 'PASS' : `ran:${prompt}`, rawStdout: '', rawStderr: '', durationMs: 1 });
   };
   const { dir, id } = prepareSession('scratch', process.cwd());
@@ -131,6 +133,21 @@ describe('chat — 입력 루프', () => {
     assert.equal(session.records().at(-1)?.kind, 'plan');
     assert.match(out, /명령 {3}메시지를 그냥 쓰면/);
     assert.doesNotMatch(out, /y·w·n·a 중 하나로 답한다/);
+  });
+
+  it('지휘자 제안은 곧바로 배정 카드가 되고 y 한 번으로 위임한다 — 사유는 지휘자 제안', async () => {
+    const { out, session } = await drive(['넌 누구니', 'y'], 'R01');
+    assert.match(out, /제안 {3}R01 \(지휘자\)/);
+    assert.match(out, /업무 {3}R01 .*\(지휘자 제안 R01\)/);
+    assert.deepEqual(session.records().filter((r) => r.kind !== 'spend').map((r) => r.kind), ['user', 'direct', 'plan', 'approval', 'result', 'summary']);
+  });
+
+  it('카드가 선 채 공백이 든 문장을 쓰면 거절하고 새 메시지로 보낸다 — 한 단어는 되묻는다', async () => {
+    const { out, session } = await drive(['넌 누구니', 'yes', '아니 그냥 얘기하자'], 'R01');
+    assert.match(out, /y·w·n·a 중 하나로 답한다/);
+    const kinds = session.records().filter((r) => r.kind !== 'spend').map((r) => r.kind);
+    assert.deepEqual(kinds, ['user', 'direct', 'plan', 'approval', 'user', 'direct', 'plan']);
+    assert.ok(session.records().some((r) => r.kind === 'approval' && !r.approved));
   });
 
   it('/quit 뒤의 줄은 처리하지 않는다', async () => {
