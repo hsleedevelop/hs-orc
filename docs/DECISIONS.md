@@ -1648,6 +1648,7 @@ Q18 (D-058 **압축 창 출처 실측**): 격리 인자(D-050)가 사용자 sett
 **검증**
 - 단위: `buildInvocation` 은 격리일 때만 env 를 돌려준다(resolve). 실제로 뜬 가짜 claude 의 env 로 확인했다 — 지휘자 실행기는 1000000 을 받고, 같은 claude 인 primary(R08 Fable)·reviewer(R01 Haiku)는 받지 않는다. 부모 env 에 300000 이 있으면 지휘자만 덮고 primary 는 300000 을 물려받는다(executor). 분류 폴백 프로세스도 받는다(classify-llm). spawn 이 env 를 버리거나, 격리가 아니어도 싣거나, 부모 env 가 이기게 바꾸면 각각 테스트가 실패함을 확인했다.
 - 실엔진 (2026-09-26, claude 2.1.283 · Haiku low, 스크래치, n=1 · 사용자 승인 범위 안): 이 변경 뒤 위 재확인 방법 그대로 1회 돌렸다(부모 env 에 창 값 없음). 디버그 로그는 `autocompact: … level=compact effectiveWindow=180000` → `routing through reactive (thresholdSource=env)` 다 — orc 가 실은 값이 받아들여졌고(1,000,000 → 모델 창 200,000 − 출력 몫 20,000), 출처가 `env` 가 됐다. 도구 1회 실행이라 압축 자체가 `too_few_groups` 로 실패한 것은 Q18 실측 B 와 같다. 스트림은 B 와 같은 모양이라 커밋하지 않았다. 비용 $0.0077942 (Q18 포함 누적 $0.1255, 상한 $1, 구독제 청구 없음).
+- 재확인 (2026-09-29, claude 2.1.284 · Haiku low, 스크래치, n=1): 재확인 방법 그대로(부모 env 에 창 값 없음) 도구 1회 실행. 디버그 로그 `autocompact: … level=compact effectiveWindow=180000` → `routing through reactive (thresholdSource=env)` — 2.1.283 과 같다, 결정 유효. 비용 $0.0090 (구독제 청구 없음).
 - **미검증**: 라운드가 쌓인 긴 지휘자 실행에서 실제로 압축되는지. 압축 성공은 설정 출처(Q18 실측 C)와 env 출처의 resume(D-060 실엔진 검증 5번)으로만 봤다. 반응형 압축도 여전히 미실측이다.
 
 **영향**
