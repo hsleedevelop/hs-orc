@@ -9,7 +9,7 @@ import type { Matrix } from '../data/matrix.ts';
 import type { AssignmentPlan } from './assign.ts';
 import type { Budget } from './budget.ts';
 import { appendDecision } from './decision-log.ts';
-import { firstLine, secondLine } from './decide.ts';
+import { cancelledLine, firstLine, secondLine } from './decide.ts';
 import { runDuo, type Verdict } from './duo.ts';
 import { collect, outcomeOf, type Evidence, type EvidenceReport, type SettledOutcome } from './evidence.ts';
 import { changedFiles, runCommand, snapshotTests, testChanges } from './evidence-gather.ts';
@@ -40,12 +40,17 @@ export interface DelegateInput {
   readonly resumePrimary?: string;
   /** 이어 붙일 세션의 직전 원본 보고 (D-057). */
   readonly resumeBaseline?: EngineReport;
+  /** 신호가 서면 도는 엔진 슬롯을 종료하고 위임을 `cancelled` 로 끝낸다 (D-066). */
+  readonly signal?: AbortSignal;
 }
 
 export interface Delegated {
   readonly ok: boolean;
   readonly text: string;
-  readonly outcome: SettledOutcome;
+  /** `cancelled` — 사용자가 실행 중에 멈췄다 (D-066). 실패도 성공도 아니다: 증거를 모으지 않고, 엔진 세션을 남기지 않는다. */
+  readonly outcome: SettledOutcome | 'cancelled';
+  /** `outcome` 이 `cancelled` 일 때 어느 슬롯에서 멈췄는가. */
+  readonly cancelledAt?: 'primary' | 'reviewer';
   readonly report: EvidenceReport;
   readonly verdict: Verdict;
   readonly review?: string;
@@ -71,9 +76,12 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
   let duo;
   try {
     duo = await runDuo(matrix, plan, input.execute, input.prompt, budget,
-      input.resumePrimary !== undefined
-        ? { resumePrimary: input.resumePrimary, ...(input.resumeBaseline ? { resumeBaseline: input.resumeBaseline } : {}) }
-        : {});
+      {
+        ...(input.resumePrimary !== undefined
+          ? { resumePrimary: input.resumePrimary, ...(input.resumeBaseline ? { resumeBaseline: input.resumeBaseline } : {}) }
+          : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
   } catch (error) {
     // 1차 줄을 pending 으로 버려두지 않는다 — 실행을 시작했고 끝나지 못했다.
     appendDecision(secondLine(decision, 'wrong', `실행 중 예외: ${error instanceof Error ? error.message : String(error)}`));
@@ -89,13 +97,28 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
       rawStdout: run.rawStdout,
       rawStderr: run.rawStderr,
       meta: {
-        outcome: run.ok ? 'ok' : 'failed', durationMs: run.durationMs, modelId: slot.modelId, verdict: duo.verdict,
+        outcome: duo.cancelledAt ? 'cancelled' : run.ok ? 'ok' : 'failed', durationMs: run.durationMs, modelId: slot.modelId, verdict: duo.verdict,
         ...(run.cacheWrite ? { cacheWrite: run.cacheWrite } : {}),
       },
     }, runStoreRoot(input.cwd)).dir;
   } catch (error) {
     // catch 후 무동작 금지.
     process.stderr.write(`${reportError('run-store', 'persist', error).display}\n`);
+  }
+
+  // 사용자가 멈췄다 (D-066). 증거·journal 에 넣지 않는다 — 잘린 실행은 결과가 아니다. 2차 줄은 `cancelled` 로 닫고,
+  // 엔진 세션은 넘기지 않는다(강제 종료로 끊긴 세션은 이을 수 없다). 원시 로그는 위에서 남겼다.
+  if (duo.cancelledAt) {
+    appendDecision(cancelledLine(decision, duo.cancelledAt));
+    return {
+      ok: false,
+      text: run.text,
+      outcome: 'cancelled',
+      cancelledAt: duo.cancelledAt,
+      report: collect(plan.assignment, []),
+      verdict: 'unknown',
+      decisionId: decision.id,
+    };
   }
 
   const evidence: Evidence[] = [...duo.evidence, ...input.verify.filter((v) => v.trim()).map((v) => runCommand(v, input.cwd))];

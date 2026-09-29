@@ -32,6 +32,8 @@ export function renderRecord(r: TranscriptRecord): string[] {
     case 'approval':
       return [r.approved ? `승인   ${r.write ? '쓰기 켬 — primary 가 파일을 고칠 수 있다' : '읽기 전용'}` : '거절'];
     case 'result':
+      // 취소는 결과가 아니라 멈춤이다 (D-066) — reviewer 판정·검증이 없다. 받은 출력은 남겨 보여준다.
+      if (r.outcome === 'cancelled') return [`결과   취소됨 · 결정 ${r.decisionId}`, `증거   ${r.evidence}`, ...(r.text ? [r.text] : [])];
       return [
         `결과   ${r.outcome} · reviewer ${r.verdict.toUpperCase()} · 결정 ${r.decisionId}`,
         `증거   ${r.evidence}`,
@@ -53,6 +55,7 @@ export function renderRecord(r: TranscriptRecord): string[] {
 export const CHAT_HELP = [
   '명령   메시지를 그냥 쓰면 보낸다 · /task Rxx 마지막 메시지를 그 행으로 배정 · /help · /quit (Ctrl-D)',
   '승인   배정이 뜨면 y 읽기 전용 · w 쓰기 · n 거절 · a 지휘자에게 묻기 · 문장을 쓰면 거절하고 그 메시지를 보낸다',
+  '취소   위임이 도는 중 Ctrl-C 한 번 — 그 위임만 멈추고 세션은 남는다 · 한 번 더 누르면 나간다',
 ].join('\n');
 
 export interface ChatIO {
@@ -194,19 +197,28 @@ export function openingLines(session: ConversationSession, budget: Budget, tail 
 
 /**
  * Ctrl-C 처리. 엔진은 자기 프로세스 그룹으로 떠(adapters/run.ts `detached`) 셸이 죽어도 **계속 돌고 과금된다** —
- * 쓰기를 켰으면 파일도 계속 고친다. 그래서 위임이 도는 중의 첫 Ctrl-C 는 경고만 하고 끝날 때까지 기다린다.
- * 같은 위임 중 두 번째는 나간다(사용자가 알고 고른 것). 입력 대기 중이면 바로 나간다.
+ * 쓰기를 켰으면 파일도 계속 고친다. 그래서 셸을 먼저 죽이지 않는다.
+ * - 위임(primary·reviewer)이 도는 중의 첫 Ctrl-C 는 **그 위임만 취소**한다 (D-066) — 엔진 그룹을 종료하고 세션은 남는다.
+ *   같은 위임 중 두 번째는 나간다(종료 신호는 이미 갔다, 사용자가 알고 고른 것).
+ * - 직접 답·요약이 도는 중은 취소 대상이 아니다 — 첫 Ctrl-C 는 경고만 하고 기다리고, 두 번째는 나간다.
+ * - 입력 대기 중이면 바로 나간다.
  */
 export function interruptGuard(
-  session: Pick<ConversationSession, 'state' | 'records'>,
+  session: Pick<ConversationSession, 'state' | 'records' | 'cancel'>,
   say: (line: string) => void,
 ): () => 'exit' | 'wait' {
   // 위임 하나 동안 기록 길이는 그대로다(결과는 끝날 때 붙는다) — 그 길이로 "같은 위임" 을 가린다.
   let warnedAt = -1;
+  let cancelledAt = -1;
   return () => {
     if (session.state !== 'working') return 'exit';
     const at = session.records().length;
-    if (warnedAt === at) return 'exit';
+    if (warnedAt === at || cancelledAt === at) return 'exit';
+    if (session.cancel()) {
+      cancelledAt = at;
+      say('\n취소   위임을 취소한다 — 엔진 프로세스를 종료하는 중이다. 세션은 남는다. 한 번 더 누르면 기다리지 않고 나간다.');
+      return 'wait';
+    }
     warnedAt = at;
     say('\n중단   위임이 도는 중이다 — 끝날 때까지 기다린다. 한 번 더 누르면 엔진을 남겨 둔 채 나간다(엔진은 계속 돌고 과금된다).');
     return 'wait';

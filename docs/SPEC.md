@@ -250,6 +250,7 @@ cursor  -p "<prompt>" --model gpt-5.6-sol-xhigh --output-format stream-json
 ### 3.7 프로세스 관리
 
 - 취소는 자식 프로세스를 **실제로 종료**해야 한다. 프로세스 그룹 단위 종료. 좀비 검출 테스트 필수.
+  - 대화 세션의 위임 취소도 이 경로를 쓴다 — `AbortSignal` 이 `SlotRunOptions.signal` 로 내려가 어댑터 `cancel()` 을 부른다 (D-066).
 - 타임아웃은 작업 유형별 기본값을 두되 사용자가 덮어쓸 수 있다.
 - stdout/stderr 원본을 실행별로 보존한다. 파싱 실패가 원본 손실로 이어지지 않게 한다.
 - stream-json 파싱은 **바깥 try와 분리된 중첩 try**로 감싼다. 한 줄 파싱 실패가 실행 전체를 죽이지 않는다.

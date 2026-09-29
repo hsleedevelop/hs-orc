@@ -387,6 +387,78 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     assert.deepEqual(fileKinds(a), ['user', 'direct', 'spend']);
   });
 
+  /** 취소 신호가 서야 끝나는 가짜 — **첫** primary 는 안 끝나고, 신호가 서면 cancelled 로 돌아온다. 그 뒤 실행은 곧바로 끝난다. */
+  const hangingPrimary = () => {
+    const roles: string[] = [];
+    let primaries = 0;
+    const exec: SlotExecutor = (slot, prompt, options) => {
+      roles.push(slot.role);
+      if (slot.role === 'primary') primaries += 1;
+      if (slot.role === 'reviewer' || primaries > 1) return fake(slot, prompt);
+      return new Promise((resolve) => {
+        options?.signal?.addEventListener('abort', () => resolve({ ok: false, cancelled: true, text: '', rawStdout: '', rawStderr: '', durationMs: 1 }), { once: true });
+      });
+    };
+    return { exec, roles };
+  };
+
+  it('도는 위임을 취소하면 취소 결과를 담은 뷰가 돌아오고 세션은 입력 대기다 (D-066)', async () => {
+    isolated();
+    const h = hangingPrimary();
+    const service = new GuiService(h.exec, 20, process.cwd());
+    const a = service.startConversation('scratch');
+    await service.converse('이 타입 에러 고쳐줘');
+    const running = service.converseApprove({ verify: [], write: false });
+    assert.equal(service.conversation().cancellable, true);
+
+    const view = await service.converseCancel();
+    assert.equal(view.state, 'waiting_input');
+    assert.equal(view.cancellable, false);
+    assert.equal(view.interrupted, false);
+    assert.deepEqual(view.records.map((r) => r.kind), ['user', 'plan', 'approval', 'result']);
+    const result = view.records.at(-1);
+    assert.ok(result?.kind === 'result' && result.outcome === 'cancelled');
+    assert.deepEqual(h.roles, ['primary'], 'primary 중 취소면 reviewer 를 띄우지 않는다');
+    await running; // 원래 요청도 같은 뷰로 끝난다 — 던지지 않는다
+    assert.equal(service.openConversation('scratch', a.dir, a.id).interrupted, false, '파일에서 다시 열어도 끊김이 아니다');
+    // 취소 뒤 새 위임이 돈다.
+    await service.converse('이 타입 에러 다시 고쳐줘');
+    const again = await service.converseApprove({ verify: [], write: false });
+    assert.equal(again.records.findLast((r) => r.kind === 'result')?.kind, 'result');
+    assert.equal(again.state, 'waiting_input');
+  });
+
+  it('다시 연 화면(재부착)에서도, 다른 세션을 열었다 돌아와서도 취소가 그 위임을 멈춘다', async () => {
+    isolated();
+    const h = hangingPrimary();
+    const service = new GuiService(h.exec, 20, process.cwd());
+    const a = service.startConversation('scratch');
+    await service.converse('이 타입 에러 고쳐줘');
+    const running = service.converseApprove({ verify: [], write: false });
+    service.closeConversation();
+    service.startConversation('scratch'); // 다른 세션을 열어 둔다
+    service.closeConversation();
+
+    const back = service.openConversation('scratch', a.dir, a.id);
+    assert.equal(back.state, 'working');
+    assert.equal(back.cancellable, true, '다시 연 화면도 취소 버튼을 띄울 수 있어야 한다');
+    assert.equal(back.interrupted, false);
+    const view = await service.converseCancel();
+    assert.equal(view.state, 'waiting_input');
+    assert.equal(view.records.at(-1)?.kind, 'result');
+    await running;
+    assert.deepEqual(fileKinds(a), ['user', 'plan', 'approval', 'result', 'spend']);
+  });
+
+  it('취소할 위임이 없을 때의 취소는 던지지 않고 지금 뷰를 돌려준다 (버튼과 완료가 겹친 경합)', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    service.startConversation('scratch');
+    const view = await service.converseCancel();
+    assert.equal(view.state, 'waiting_input');
+    assert.equal(view.cancellable, false);
+  });
+
   it('스크래치 뿌리 자체나 뿌리 밖을 가리키는 링크는 스크래치 세션으로 열지 않는다', () => {
     isolated();
     const root = process.env['HS_ORC_SCRATCH'] as string;

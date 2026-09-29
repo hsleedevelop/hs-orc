@@ -11,7 +11,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 export type Branch = 'down' | 'keep' | 'up_part' | 'up_session';
-export type Status = 'decided' | 'ran' | 'declined' | 'blocked' | 'no_reply';
+/** `cancelled` 는 이 제품이 더한 값이다 (D-066) — 라우터 스키마에 없다. 실행이 시작됐다가 사용자가 멈췄다. */
+export type Status = 'decided' | 'ran' | 'declined' | 'blocked' | 'no_reply' | 'cancelled';
 export type Outcome = 'ok' | 'rework' | 'wrong' | 'unverified' | 'pending';
 
 export interface DecisionRecord {
