@@ -1858,11 +1858,11 @@ PLAN S10 실측: `hs-orc chat --scratch` 직접 답 1회가 $0.0642/31,519 tok �
 - `limits.json` 에 `jevConfidenceMin`·`jevTimeoutMs`·`jevContextTurns`·`jevContextChars` 추가(`checkLimits` 가 검사).
 - `FallbackNote.outcome` 에 `unsure`·`jev-unavailable`, `RoutedWithFallback.jev`, `PipelineOptions.reason` 추가. `SessionDeps.classifier`·`AssembleInput.classifier`·`GuiService` 4번째 인자·`App` 의 `jev` 는 선택 — 안 주면 옛 동작이다.
 - 테스트: 어댑터(요청 모양·키 없음·상태 코드 5종·네트워크·시간 초과·형식 오류·키 비유출), 분류(criteria·확신·미만·NONE·맥락·모르는 옵션), 파이프라인(성공·미만·NONE·하한선·오류 6종 폴백·규칙 무매치+Haiku 실패 합성·수동 지정·미주입), 세션(카드·NONE·미만·폴백·맥락 상한·planAs), limits, CLI(키 없음 줄·`--no-jev`). 가짜 분류기/fetch 만 쓴다.
-- **건드리지 않은 것:** D-064 상태 줄·SPEC §6.4.2(다른 세션이 고치는 중). 아래 후속 참조.
+- **건드리지 않은 것:** D-064 본문·상태 줄·SPEC(§6.4.2 포함) — 그 표기 수정은 #63 으로 별도 머지됐고 이 브랜치는 그 위에 병합했다. SPEC 문구 개정은 아래 후속.
 
 **후속 (이 결정이 정하지 않음)**
 1. **D-064 결정 4 H1("규칙 분류 실패에서 온 배정 = 모델이 고른 행 → 항상 묻는다")이 Jev 배정을 포함하는가.** Jev 는 p·conf 를 주므로 지휘자 제안과 같은 취급이 맞는지 전하가 정한다. 지금은 세션에서 Jev 배정도 카드(승인 대기)로 선다 — D-064 3단계(방식 3종) 이전이라 모든 위임이 수동 승인이다.
-2. SPEC §4(분류기)·§6.4.2(지휘자 SUGGEST 를 Jev 가 대체)·PRD 문구 개정은 D-064 상태 줄 수정이 머지된 뒤.
+2. SPEC §4(분류기)·§6.4.2(지휘자 SUGGEST 를 Jev 가 대체)·PRD 문구 개정 — 이 PR 은 코드·D-065·README 만이다. SPEC 이 현행(규칙 → 지휘자 SUGGEST)을 설명하는 자리는 Jev 를 끄거나 못 쓸 때의 경로로 남아 있어 틀리지는 않는다.
 3. Jev 가격 확인 후 비용 표시·`Budget` 합산 재검토. 지금은 호출 수·토큰이 화면에만 있고 누적이 없다.
 4. 실사용 결정 로그의 `Jev … conf=` 분포로 0.6 재보정, 오답이 나오면 그 확신도를 기준으로.
 5. 평가 문장 세트는 커밋하지 않았다(스크래치). 재현이 필요하면 위 표의 문장 집합으로 다시 만든다.
