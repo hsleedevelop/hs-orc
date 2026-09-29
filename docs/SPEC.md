@@ -182,7 +182,7 @@ cursor는 `cursor-agent --list-models`, claude는 4개 id를 실제로 `-p` 실�
 | Sol | codex | `gpt-5.6-sol` | `gpt-5.6-sol-{effort}` ✅ |
 | **Astra** | codex | `gpt-6-astra` | **없음 ❌** |
 | **Haiku** | claude | `claude-haiku-4-5-20251001` | **없음 ❌** |
-| Sonnet | claude | `claude-sonnet-5` | `claude-sonnet-5-thinking-{effort}` ✅ |
+| Sonnet | claude | `claude-sonnet-5-5` | `claude-sonnet-5-5-{effort}` ✅ |
 | Opus | claude | `claude-opus-5` | `claude-opus-5-thinking-{effort}` ✅ |
 | Fable | claude | `claude-fable-5-1` | `claude-fable-5-1-thinking-{effort}` ✅ |
 
@@ -195,6 +195,7 @@ Cursor 쪽 id에서 S1이 확인한 두 가지(SPEC v0.1보다 정밀해진 부�
 
 - **OpenAI 모델에는 `-thinking` 변형이 아예 없다.** §3.3의 "기본은 `-thinking` 계열" 정책은
   Claude 3모델(sonnet·opus·fable)에만 적용된다. `gpt-5.6-*`는 `-{effort}`와 `-fast`만 있다.
+  단 **Sonnet 5.5는 `-thinking` 변형이 없다** (2026-09-29 실측: `claude-sonnet-5-5-{low|medium|high|xhigh|max}` 5종뿐, adaptive thinking이 기본) — `-{effort}`만 붙는다.
 - **`claude-opus-5` 비thinking은 `low|medium|high`뿐이다.** `xhigh`·`max`는 `-thinking` 변형이
   유일한 경로이므로, Opus에서 `-thinking` 기본값은 취향이 아니라 **커버리지 요구사항**이다.
 
@@ -429,6 +430,7 @@ user 메시지 append
 - 항상 **읽기 전용**으로 띄운다 (`write` 없음). 세션의 쓰기 스위치와 무관하다.
 - 마지막 줄은 `SUGGEST: Rxx` 또는 `SUGGEST: NONE` 이다. reviewer 판정처럼 **마지막 줄만** 읽는다. 못 읽으면 제안 없음 — 행을 추측하지 않는다.
 - 제안이 있으면 화면은 "Rxx 로 위임" 을 띄우고, 누르면 `taskId: Rxx` 로 배정을 받는다 (FR-1 수동 덮어쓰기와 같은 경로). **자동으로 배정하지 않는다.**
+  - *D-064 1단계 (확정, 구현 전 — 그때까지 위 두 번 승인이 현행):* 제안이 있으면 세션이 곧바로 그 행으로 배정을 계산해(엔진 호출 없음) 직접 답 아래 배정·비용 카드를 붙인다 — 승인은 그 카드 1회다. `plan.reason` 은 `수동 지정` 이 아니라 `지휘자 제안 Rxx` 다. 대기 중 새 메시지는 그 배정을 거절로 남기고 처리한다. 이 배정은 어떤 승인 방식에서도 묻는다(§6.4.5 H1).
 - 비용은 세션 `Budget` 에 `지휘자·Haiku·low` 로 과금하고 메시지 옆에 한 줄로 찍는다. 승인은 받지 않는다.
 - 실패하면 `error` 를 append 하고 사유를 화면에 올린 뒤 `waiting_input` 으로 돌아간다. 조용히 삼키지 않는다.
 
@@ -448,7 +450,25 @@ user 메시지 append
 - 위임이 끝나면 `result` 를 append 한다 (결정 로그 2차와 같은 시점).
 - 지휘자(Haiku·low)가 요청·primary 출력(앞부분)·reviewer 판정·증거 요약을 받아 **3줄 이내 요약**을 낸다 → `summary` append.
 - **다음 제안은 코드가 계산한다.** outcome 이 `wrong`·`rework`·`unverified` 이거나 판정이 `fail` 이면 사다리(`core/ladder.ts`)의 다음 단계를 제안에 넣는다 — 상향 판단을 모델에 넘기지 않는다(G1). 모델은 요약만 한다.
-- 다음 위임은 사용자가 승인해야 시작한다 (D-015).
+- 다음 위임은 사용자가 승인해야 시작한다 (D-015). D-064 의 자동 승인도 이것을 바꾸지 않는다 — 다음 위임은 사용자 메시지가 연다 (§6.4.5).
+
+#### 6.4.5 승인 방식 (D-064 — 확정 2026-09-29, 구현 전)
+
+> 구현 순서: (1) SUGGEST 카드 합치기(§6.4.2) → (2) 세션 위임 취소 경로 → (3) 아래 방식 3종. **(3)이 구현되기 전까지 현행은 모든 위임을 수동 승인한다**(`manual` 과 같다). 자동 승인은 (2) 취소 경로 뒤에만 들어온다.
+
+| 방식 | 배정이 생기면 |
+|---|---|
+| `manual` | 언제나 `blocked` — 카드 승인 |
+| `auto-ask` (새 세션 기본값, `limits.json` `approvalMode`) | H·A 조건 중 하나라도 걸리면 `blocked`, 아니면 바로 `approve()` |
+| `auto` | H 조건만 `blocked`, 아니면 바로 `approve()` |
+
+- **자동 승인은 클릭을 대신할 뿐 위임을 스스로 시작하지 않는다.** 사용자 메시지(또는 행 지정) 1건이 만든 배정 1건만 대상이다. 다음 제안·사다리 상향·재시도는 자동으로 시작하지 않는다 (D-015·D-031 결정 3).
+- **H — 항상 묻는다 (방식으로 끌 수 없다):** H1 지휘자 제안에서 온 배정(규칙 분류 실패, D-022·D-033) · H2 쓰기 켠 위임(D-025 — 쓰기는 배정마다 켜고 승인한다, 방식과 별개) · H3 읽기 전용이 인자로 보장되지 않는 primary 엔진(지금 cursor, D-051·D-052). 상한 도달은 묻지 않고 막는다 (D-030).
+- **A — `auto-ask` 만 묻는다:** A1 `plan.cost.totalUsd ≥ $10`(오늘 Fable+Astra 조합) · A2 상한 근접(api 슬롯이면 `remainingUsd < 2 × 예상`, 토큰은 `남은 < tokenBudget × 20%`) · A3 직전 위임이 `wrong`·`rework`·`fail` 인데 같은 행, 또는 행 기본보다 높은 effort·모델 · A4 세션의 첫 위임.
+- 묻는 카드는 걸린 조건을 이름으로 보인다. 판정은 Core `ConversationSession` 이 기록·배정·`Budget` 으로 계산한다 — 모델에게 묻지 않는다(G1), 셸은 표시만 한다.
+- 자동 승인도 `approval` 을 남긴다: `{ approved: true, write: false, by: 'auto', mode, asked: [] }`. 사람이 누르면 `by: 'user'` 와 걸린 조건 `asked`. 카드는 그대로 대화에 뜨고 `자동 승인 · <방식>` 한 줄이 붙는다(G2·FR-5). 결정 로그 1차·2차는 그대로이고 1차 `note` 에 승인 방식을 더한다. `spend`·비용 한 줄도 그대로다.
+- 방식은 `{ kind: 'mode', mode }` 기록으로 영속하고, 열 때 마지막 것을 재생한다(D-054 와 같은 원리). `mode` 가 없는 기록은 `manual` 로 연다. 다시 열기(D-063)는 도는 객체의 방식 또는 재생한 방식을 쓴다. 방식을 바꿔도 이미 선 카드는 자동 승인하지 않는다.
+- 셸: GUI 세션 머리의 방식 선택 · `hs-orc chat` 의 `/mode <방식>`·`--approval <방식>`. TUI 는 대화 세션이 없어 제외한다(D-056 결정 4).
 
 ## 7. TUI (v1)
 
