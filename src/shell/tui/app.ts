@@ -9,6 +9,7 @@ import { Box, Text, useApp, useInput } from 'ink';
 import { loadMatrix } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
 import { loadLimits } from '../../data/limits.ts';
+import type { RowClassifier } from '../../adapters/jev.ts';
 import { routeWithFallback, type RouteResult } from '../../core/pipeline.ts';
 import { createExecutor } from '../../core/executor.ts';
 import { runDuo } from '../../core/duo.ts';
@@ -46,12 +47,14 @@ function RunScreen({
   budget,
   keys,
   write,
+  jev,
 }: {
   task: string;
   journal: Journal;
   budget: Budget;
   keys: boolean;
   write: boolean;
+  jev: RowClassifier | undefined;
 }): ReactElement {
   // 분류 폴백이 async 라 라우팅을 렌더 중에 못 한다 (D-026).
   // CLI 에만 폴백이 있으면 같은 입력이 셸마다 다르게 동작한다 — 그래서 여기도 같은 Core 함수를 쓴다.
@@ -60,7 +63,7 @@ function RunScreen({
     if (!task) { setRouted({ result: null, notes: [] }); return; }
     let live = true;
     // 이미 가진 앱 예산을 넘긴다 (D-034) — 분류 폴백 비용도 같은 누적 상한에 합산된다.
-    void routeWithFallback(loadMatrix(), loadEngines(), task, { budget }).then((r) => {
+    void routeWithFallback(loadMatrix(), loadEngines(), task, { budget, ...(jev ? { jev } : {}) }).then((r) => {
       if (live) setRouted({ result: r.result, notes: r.fallback ? [r.fallback.line] : [] });
     });
     return () => { live = false; };
@@ -208,7 +211,7 @@ function DebugScreen({ keys }: { keys: boolean }): ReactElement {
   );
 }
 
-export function App({ task, initialScreen, write = false }: { task: string; initialScreen?: Screen; write?: boolean }): ReactElement {
+export function App({ task, initialScreen, write = false, jev }: { task: string; initialScreen?: Screen; write?: boolean; jev?: RowClassifier }): ReactElement {
   const [screen, setScreen] = useState<Screen>(initialScreen ?? 'Run');
   const { exit } = useApp();
   // 파이프·CI 처럼 stdin 이 TTY 가 아니면 raw mode 가 없고, 가드하지 않으면 **화면이 통째로 죽는다**(실측).
@@ -230,7 +233,7 @@ export function App({ task, initialScreen, write = false }: { task: string; init
   );
 
   const body =
-    screen === 'Run' ? h(RunScreen, { task, journal, budget, keys: keysAvailable, write })
+    screen === 'Run' ? h(RunScreen, { task, journal, budget, keys: keysAvailable, write, jev })
     : screen === 'Sessions' ? h(SessionsScreen, null)
     : screen === 'Reviews' ? h(ReviewsScreen, null)
     : screen === 'Dashboard' ? h(DashboardScreen, { journal, budget })

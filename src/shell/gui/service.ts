@@ -45,6 +45,7 @@ import {
   samePath,
   type WorktreeInfo,
 } from './worktree.ts';
+import type { RowClassifier } from '../../adapters/jev.ts';
 import { assembleSession, restoreBudget } from '../conversation.ts';
 
 export { skipGitCheck } from '../conversation.ts';
@@ -144,7 +145,11 @@ export class GuiService {
    */
   private readonly live = new Map<string, ConversationSession>();
 
-  constructor(execute?: SlotExecutor, budgetUsd = loadLimits().budgetUsd, cwd = process.cwd()) {
+  /** Jev 분류기 (D-065). 합성 루트(`gui/main.ts`)만 넘긴다 — 기본은 꺼짐이라 테스트는 외부로 나가지 않는다. */
+  private readonly jev: RowClassifier | undefined;
+
+  constructor(execute?: SlotExecutor, budgetUsd = loadLimits().budgetUsd, cwd = process.cwd(), jev?: RowClassifier) {
+    this.jev = jev;
     this.budget = new Budget(budgetUsd, loadLimits().tokenBudget);
     this.budgetUsd = budgetUsd;
     this.execute = execute;
@@ -210,6 +215,7 @@ export class GuiService {
       cwd: this.workdir,
       // 이미 가진 예산을 넘긴다 (D-034) — 분류 폴백 비용도 같은 누적 상한에 합산된다.
       budget: this.budget,
+      ...(this.jev ? { jev: this.jev } : {}),
       ...(options.classifyLlm === undefined ? {} : { classifyLlm: options.classifyLlm }),
       ...(options.taskId ? { taskId: options.taskId } : {}),
     });
@@ -289,6 +295,7 @@ export class GuiService {
       cwd: this.workdir,
       // 이미 가진 예산을 넘긴다 (D-034) — 분류 폴백 비용도 같은 누적 상한에 합산된다.
       budget: this.budget,
+      ...(this.jev ? { jev: this.jev } : {}),
       ...(payload.classifyLlm === undefined ? {} : { classifyLlm: payload.classifyLlm }),
       ...(payload.taskId ? { taskId: payload.taskId } : {}),
     });
@@ -412,6 +419,7 @@ export class GuiService {
       id,
       budget: this.sessionBudget(dir, id),
       journal: this.journal,
+      ...(this.jev ? { classifier: this.jev } : {}),
       ...(this.execute ? { execute: this.execute } : {}),
     });
     return this.conversation();

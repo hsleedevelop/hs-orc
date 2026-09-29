@@ -13,6 +13,12 @@ export interface Limits {
   readonly contextTurns: number;
   /** 그 맥락의 글자 상한. 넘으면 앞을 자른다. */
   readonly contextChars: number;
+  /** Jev 분류의 확신도 기준 (D-065). 미만이면 행을 확정하지 않는다. */
+  readonly jevConfidenceMin: number;
+  readonly jevTimeoutMs: number;
+  /** Jev 로 외부 전송하는 맥락의 상한 — 대화 세션이 싣는 것보다 작다. */
+  readonly jevContextTurns: number;
+  readonly jevContextChars: number;
 }
 
 const LIMITS_PATH = path.resolve(import.meta.dirname, '..', '..', 'data', 'limits.json');
@@ -21,13 +27,17 @@ let cached: Limits | undefined;
 
 /** 수기 파일이라 값을 믿지 않는다. 0·음수 상한은 막지 않고, `contextChars` 가 2 미만이면 맥락 자르기가 깨진다. */
 export function checkLimits(limits: Limits): Limits {
-  for (const key of ['budgetUsd', 'tokenBudget', 'maxIterations', 'maxNodes', 'runTimeoutMs', 'contextTurns', 'contextChars'] as const) {
+  for (const key of ['budgetUsd', 'tokenBudget', 'maxIterations', 'maxNodes', 'runTimeoutMs', 'contextTurns', 'contextChars', 'jevConfidenceMin', 'jevTimeoutMs', 'jevContextTurns', 'jevContextChars'] as const) {
     const value = limits[key];
     if (!Number.isFinite(value) || value <= 0) throw new Error(`limits.json 의 ${key} 는 양수여야 한다: ${value}`);
   }
   if (!Number.isInteger(limits.contextTurns)) throw new Error(`limits.json 의 contextTurns 는 정수여야 한다: ${limits.contextTurns}`);
   if (!Number.isInteger(limits.contextChars) || limits.contextChars < 2) {
     throw new Error(`limits.json 의 contextChars 는 2 이상의 정수여야 한다: ${limits.contextChars}`);
+  }
+  if (limits.jevConfidenceMin > 1) throw new Error(`limits.json 의 jevConfidenceMin 은 1 이하여야 한다: ${limits.jevConfidenceMin}`);
+  for (const key of ['jevContextTurns', 'jevContextChars'] as const) {
+    if (!Number.isInteger(limits[key]) || limits[key] < 2) throw new Error(`limits.json 의 ${key} 는 2 이상의 정수여야 한다: ${limits[key]}`);
   }
   return limits;
 }

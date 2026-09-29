@@ -13,6 +13,7 @@ import { Journal } from '../journal.ts';
 import type { EngineReport, SlotExecutor, SlotRun } from '../executor.ts';
 import { ConversationSession, SessionStateError } from '../session.ts';
 import { readDecisions } from '../decision-log.ts';
+import { JevUnavailableError, type JevChoiceAnswer, type JevChoiceRequest, type RowClassifier } from '../../adapters/jev.ts';
 import { appendRecord, replaySpend, transcriptPath, type TranscriptRecord } from '../transcript.ts';
 
 const isolate = () => {
@@ -720,5 +721,88 @@ describe('대화 세션 — 제안·배정 카드 합치기 (D-064 결정 3)', (
     replaySpend(budget, reopened.session.records());
     assert.ok(budget.charges.length > 0);
     await assert.rejects(reopened.session.approve(), SessionStateError);
+  });
+});
+
+/**
+ * D-065: 세션에서는 "위임할지·어느 행" 을 Jev 가 정한다. 지휘자는 직접 답만 한다.
+ * 분류기는 가짜다 — 이 파일은 외부로 나가지 않는다.
+ */
+describe('대화 세션 — Jev 분류 (D-065)', () => {
+  const answer = (choice: string, confidence: number, probabilities: Record<string, number> = { [choice]: 0.9, NONE: 0.1 }): JevChoiceAnswer => ({
+    choice, probabilities, confidence, inputTokens: 900, outputTokens: 10, elapsedMs: 800,
+  });
+  const jevSpy = (result: JevChoiceAnswer | Error) => {
+    const requests: JevChoiceRequest[] = [];
+    const classifier: RowClassifier = (r) => (requests.push(r), result instanceof Error ? Promise.reject(result) : Promise.resolve(result));
+    return { classifier, requests };
+  };
+  const makeJev = (conduct: SlotExecutor, classifier: RowClassifier) => {
+    const session = new ConversationSession({
+      matrix, catalog, kind: 'project', dir: mkdtempSync(path.join(os.tmpdir(), 'hs-session-')), id: '0929-1200-aaa',
+      budget: new Budget(20, 2_000_000), journal: new Journal(), conduct, executorFor: () => delegateSpy().exec, classifier,
+    });
+    return session;
+  };
+
+  it('확신 있는 행은 지휘자를 부르지 않고 배정 카드가 선다 — 근거·토큰이 카드에 남는다', async () => {
+    const c = conductSpy();
+    const session = makeJev(c.exec, jevSpy(answer('R03', 0.97)).classifier);
+    const out = await session.send('설정 화면에 다크 모드 토글을 넣어줘');
+    assert.deepEqual(out.map((r) => r.kind), ['user', 'plan']);
+    const plan = out[1];
+    assert.ok(plan?.kind === 'plan' && plan.taskId === 'R03' && plan.reason === 'Jev R03 p=0.90 conf=0.97');
+    assert.match(plan.notes[0] ?? '', /Jev 분류 → R03 .*입력 900·출력 10 토큰/);
+    assert.equal(c.prompts.length, 0);
+    assert.equal(session.state, 'blocked');
+  });
+
+  it('NONE 이면 지휘자가 직접 답한다 — 지휘자의 SUGGEST 가 Jev 판정을 뒤집지 못한다', async () => {
+    const c = conductSpy('무엇을 도울까요?\nSUGGEST: R01');
+    const session = makeJev(c.exec, jevSpy(answer('NONE', 0.99, { NONE: 0.99, R01: 0.01 })).classifier);
+    const out = await session.send('넌 누구니');
+    assert.deepEqual(out.map((r) => r.kind), ['user', 'direct']);
+    assert.ok(out[1]?.kind === 'direct' && out[1].suggest === null);
+    assert.match(out[1]?.kind === 'direct' ? (out[1].notes[0] ?? '') : '', /Jev 분류 → 맞는 행 없음/);
+    assert.equal(session.state, 'waiting_input');
+  });
+
+  it('확신도 미만이면 카드 없이 직접 답하고 후보를 보인다', async () => {
+    const c = conductSpy('어떤 작업인지 더 알려 주세요.\nSUGGEST: R05');
+    const session = makeJev(c.exec, jevSpy(answer('R06', 0.36, { R06: 0.4, R05: 0.3, R07: 0.2, NONE: 0.1 })).classifier);
+    const out = await session.send('버그도 고치고 테스트도 추가하고 성능도');
+    assert.deepEqual(out.map((r) => r.kind), ['user', 'direct']);
+    assert.match(out[1]?.kind === 'direct' ? (out[1].notes[0] ?? '') : '', /후보 R06 0\.40 · R05 0\.30 · R07 0\.20/);
+  });
+
+  it('Jev 를 못 쓰면 옛 경로 그대로다 — 규칙 · 지휘자 SUGGEST, 사유는 기록에 남는다', async () => {
+    const c = conductSpy('작업으로 보입니다.\nSUGGEST: R03');
+    const session = makeJev(c.exec, jevSpy(new JevUnavailableError('rate-limit', '429')).classifier);
+    const out = await session.send('넌 누구니');
+    assert.deepEqual(out.map((r) => r.kind), ['user', 'direct', 'plan']);
+    const [, direct, plan] = out;
+    assert.ok(direct?.kind === 'direct' && /^Jev 미사용 \(429 호출 한도 \(429\)\)/.test(direct.notes[0] ?? ''));
+    assert.ok(plan?.kind === 'plan' && plan.reason === '지휘자 제안 R03');
+  });
+
+  it('Jev 로 나가는 맥락은 최근 2턴·1200자 이내다 — 대화 세션 맥락 상한과 따로다', async () => {
+    const jev = jevSpy(answer('NONE', 1, { NONE: 1 }));
+    const session = makeJev(conductSpy().exec, jev.classifier);
+    for (const m of ['하나', '둘', '셋', '넷']) await session.send(m);
+    const state = jev.requests.at(-1)?.state as { recent_conversation: string; message: string };
+    assert.equal(state.message, '넷');
+    assert.match(state.recent_conversation, /둘[\s\S]*셋/);
+    assert.doesNotMatch(state.recent_conversation, /하나/);
+    assert.ok(state.recent_conversation.length <= 1200);
+  });
+
+  it('행 지정(planAs)에는 Jev 를 부르지 않는다', async () => {
+    const jev = jevSpy(answer('NONE', 1, { NONE: 1 }));
+    const session = makeJev(conductSpy().exec, jev.classifier);
+    await session.send('넌 누구니');
+    const before = jev.requests.length;
+    const out = await session.planAs('R02');
+    assert.equal(jev.requests.length, before);
+    assert.ok(out[0]?.kind === 'plan' && out[0].reason === '수동 지정 R02');
   });
 });

@@ -17,4 +17,12 @@ describe('상한 파일 검사 (SPEC §9)', () => {
     assert.throws(() => checkLimits({ ...loadLimits(), maxIterations: 0 }), /maxIterations/);
     assert.throws(() => checkLimits({ ...loadLimits(), tokenBudget: Number.NaN }), /tokenBudget/);
   });
+
+  it('Jev 값은 검사한다 — 확신도는 (0,1], 맥락은 2 이상의 정수 (D-065)', () => {
+    for (const jevConfidenceMin of [0, -0.1, 1.5, Number.NaN]) {
+      assert.throws(() => checkLimits({ ...loadLimits(), jevConfidenceMin }), /jevConfidenceMin/);
+    }
+    for (const jevContextChars of [1, 2.5]) assert.throws(() => checkLimits({ ...loadLimits(), jevContextChars }), /jevContextChars/);
+    assert.throws(() => checkLimits({ ...loadLimits(), jevTimeoutMs: 0 }), /jevTimeoutMs/);
+  });
 });
