@@ -67,7 +67,7 @@ const resumeSpy = (secondOk = true) => {
 
 const make = (conduct: SlotExecutor, dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-')), execute = delegateSpy().exec) => {
   const budget = new Budget(20, 2_000_000);
-  const session = new ConversationSession({
+  const session = new ConversationSession({ approvalMode: 'manual',
     matrix, catalog, kind: 'project', dir, id: '0923-1200-aaa',
     budget, journal: new Journal(), conduct, executorFor: () => execute,
   });
@@ -117,7 +117,7 @@ describe('대화 세션 — 메시지 1건 (SPEC §6.4.2)', () => {
 
   it('맥락을 자르면 버린 양을 직접 답 기록에 남긴다 — 안 잘랐으면 남기지 않는다 (D-053)', async () => {
     const c = conductSpy();
-    const session = new ConversationSession({
+    const session = new ConversationSession({ approvalMode: 'manual',
       matrix, catalog, kind: 'project', dir: mkdtempSync(path.join(os.tmpdir(), 'hs-session-')), id: '0923-1200-aaa',
       budget: new Budget(20, 2_000_000), journal: new Journal(), conduct: c.exec, executorFor: () => delegateSpy().exec,
       context: { contextTurns: 1, contextChars: 6000 },
@@ -191,7 +191,7 @@ describe('대화 세션 — 승인·결과 처리 (SPEC §6.4.4)', () => {
     const result = out[1];
     assert.ok(result?.kind === 'result');
     assert.equal(readDecisions(log).filter((r) => r.id === result.decisionId).length, 2);
-    assert.match(readDecisions(log)[0]?.note ?? '', /session 0923-1200-aaa$/);
+    assert.match(readDecisions(log)[0]?.note ?? '', /session 0923-1200-aaa · 승인 user$/);
   });
 
   it('증거가 없으면 요약 옆에 사다리 첫 단계를 제안한다', async () => {
@@ -322,7 +322,7 @@ describe('대화 세션 — 승인·결과 처리 (SPEC §6.4.4)', () => {
 
   it('스크래치 세션은 쓰기 승인을 거절하고 승인 대기에 남는다', async () => {
     const budget = new Budget(20, 2_000_000);
-    const session = new ConversationSession({
+    const session = new ConversationSession({ approvalMode: 'manual',
       matrix, catalog, kind: 'scratch', dir: mkdtempSync(path.join(os.tmpdir(), 'hs-scratch-')), id: '0923-1200-bbb',
       budget, journal: new Journal(), conduct: conductSpy().exec, executorFor: () => delegateSpy().exec,
     });
@@ -541,7 +541,7 @@ describe('대화 세션 — 재진입 방지 (final-review #2)', () => {
       },
     };
     const budget = new Budget(20, 2_000_000);
-    const session = new ConversationSession({
+    const session = new ConversationSession({ approvalMode: 'manual',
       matrix, catalog: broken, kind: 'project', dir: mkdtempSync(path.join(os.tmpdir(), 'hs-session-')), id: '0923-1200-ddd',
       budget, journal: new Journal(), conduct: conductSpy().exec, executorFor: () => delegateSpy().exec,
     });
@@ -557,7 +557,7 @@ describe('대화 세션 — 분류 폴백은 돌지 않는다 (D-033)', () => {
   it('규칙이 놓친 메시지는 LLM 분류 폴백 없이 지휘자가 바로 답한다', async () => {
     const c = conductSpy();
     const budget = new Budget(20, 2_000_000);
-    const session = new ConversationSession({
+    const session = new ConversationSession({ approvalMode: 'manual',
       matrix, catalog, kind: 'project', dir: mkdtempSync(path.join(os.tmpdir(), 'hs-session-')), id: '0923-1200-eee',
       budget, journal: new Journal(), conduct: c.exec, executorFor: () => delegateSpy().exec,
     });
@@ -738,7 +738,7 @@ describe('대화 세션 — Jev 분류 (D-065)', () => {
     return { classifier, requests };
   };
   const makeJev = (conduct: SlotExecutor, classifier: RowClassifier) => {
-    const session = new ConversationSession({
+    const session = new ConversationSession({ approvalMode: 'manual',
       matrix, catalog, kind: 'project', dir: mkdtempSync(path.join(os.tmpdir(), 'hs-session-')), id: '0929-1200-aaa',
       budget: new Budget(20, 2_000_000), journal: new Journal(), conduct, executorFor: () => delegateSpy().exec, classifier,
     });

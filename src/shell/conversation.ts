@@ -4,7 +4,7 @@
  */
 import type { RowClassifier } from '../adapters/jev.ts';
 import { loadEngines } from '../data/engines.ts';
-import { loadLimits } from '../data/limits.ts';
+import { loadLimits, type ApprovalMode } from '../data/limits.ts';
 import { loadMatrix } from '../data/matrix.ts';
 import { Budget } from '../core/budget.ts';
 import { createExecutor, type SlotExecutor } from '../core/executor.ts';
@@ -38,10 +38,12 @@ export interface AssembleInput {
   readonly execute?: SlotExecutor;
   /** Jev 분류기 (D-065). 합성 루트가 `defaultJev()` 를 넘긴다 — 없으면 옛 경로(규칙 → 지휘자 SUGGEST). */
   readonly classifier?: RowClassifier;
+  /** 기록이 빈 새 세션의 시작 방식 — 없으면 `limits.json`. 테스트가 고정한다 (D-064). */
+  readonly approvalMode?: ApprovalMode;
 }
 
 export function assembleSession(input: AssembleInput): ConversationSession {
-  const { kind, dir, id, budget, journal, execute, classifier } = input;
+  const { kind, dir, id, budget, journal, execute, classifier, approvalMode } = input;
   const catalog = loadEngines();
   const timeout = loadLimits().runTimeoutMs;
   const inGit = kind === 'project' && repoRoot(dir) !== null;
@@ -54,6 +56,7 @@ export function assembleSession(input: AssembleInput): ConversationSession {
     budget,
     journal,
     ...(classifier ? { classifier } : {}),
+    ...(approvalMode ? { approvalMode } : {}),
     // 지휘자(직접 답·요약)만 격리한다 (D-032 B1) — 위임 실행기(executorFor)는 그대로 사용자 설정을 싣는다.
     conduct: execute ?? createExecutor(catalog, dir, timeout, { nonGit: skipGitCheck(kind, inGit, false), isolate: true }),
     executorFor: (write) => execute ?? createExecutor(catalog, dir, timeout, { write, nonGit: skipGitCheck(kind, inGit, write) }),

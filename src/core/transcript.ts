@@ -13,6 +13,8 @@ import type { Budget, Spend } from './budget.ts';
 import type { ContextCut } from './context.ts';
 import type { SettledOutcome } from './evidence.ts';
 import type { EngineReport } from './executor.ts';
+import type { ApprovalMode } from '../data/limits.ts';
+import type { AskReason } from './approval.ts';
 import type { CacheWrite, EngineCompaction } from '../adapters/types.ts';
 
 export type SessionKind = 'project' | 'scratch';
@@ -54,8 +56,25 @@ export type TranscriptEntry =
       readonly reviewer: string;
       readonly estimateUsd: number;
       readonly notes: readonly string[];
+      /** 이 배정이 설 때의 승인 방식 (D-064). 이 결정 전 기록에는 없다. */
+      readonly mode?: ApprovalMode;
+      /** 승인 클릭을 기다리는 이유(`manual` 이 아니면). 비어 있으면 자동 승인이 뒤따른다. 카드가 이름으로 보인다. */
+      readonly asked?: readonly AskReason[];
+      /** 사용자가 쓰기 위임으로 보냈다 — 카드의 쓰기 스위치가 켜진 채 선다. */
+      readonly write?: boolean;
     }
-  | { readonly kind: 'approval'; readonly approved: boolean; readonly write: boolean }
+  | {
+      readonly kind: 'approval';
+      readonly approved: boolean;
+      readonly write: boolean;
+      /** 누가 승인했나 (D-064 결정 7). 이 결정 전 기록·거절에는 없다. */
+      readonly by?: 'user' | 'auto';
+      readonly mode?: ApprovalMode;
+      /** 그 배정에서 걸린 조건 코드(`H1`…`A4`). 자동 승인은 비어 있다. */
+      readonly asked?: readonly string[];
+    }
+  /** 승인 방식 변경 (D-064 결정 8). 세션을 열면 마지막 것을 재생한다 — 화면에 한 줄로 보인다(감사용). */
+  | { readonly kind: 'mode'; readonly mode: ApprovalMode }
   | {
       readonly kind: 'result';
       /** `cancelled` — 사용자가 실행 중에 멈췄다 (D-066). 실패가 아니라 끊김도 아니다 — 잇지 않는다. */

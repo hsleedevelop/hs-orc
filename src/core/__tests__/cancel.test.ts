@@ -53,14 +53,14 @@ const slowExec = (hang: readonly ('primary' | 'reviewer')[], partial: Partial<Sl
 
 const make = (execute: SlotExecutor, conduct: SlotExecutor = () => Promise.resolve(done('요약 한 줄')), dir = mkdtempSync(path.join(os.tmpdir(), 'hs-cancel-s-'))) => {
   const budget = new Budget(20, 2_000_000);
-  const session = new ConversationSession({
+  const session = new ConversationSession({ approvalMode: 'manual',
     matrix, catalog, kind: 'project', dir, id: '0929-1200-ccc',
     budget, journal: new Journal(), conduct, executorFor: () => execute,
   });
   return { session, budget, dir };
 };
 
-const kinds = (session: ConversationSession) => session.records().map((r) => r.kind);
+const kinds = (session: ConversationSession) => session.records().filter((r) => r.kind !== 'mode').map((r) => r.kind);
 const lastDecision = () => readDecisions().at(-1);
 
 describe('위임 취소 — primary 실행 중 (D-066)', () => {

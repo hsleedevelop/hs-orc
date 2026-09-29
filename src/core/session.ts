@@ -8,8 +8,9 @@
 import type { RowClassifier } from '../adapters/jev.ts';
 import type { Engines } from '../data/engines.ts';
 import type { Matrix } from '../data/matrix.ts';
-import { loadLimits } from '../data/limits.ts';
+import { isApprovalMode, loadLimits, type ApprovalMode } from '../data/limits.ts';
 import type { AssignmentPlan } from './assign.ts';
+import { evaluateApproval, type ApprovalCheck } from './approval.ts';
 import type { Budget, BudgetMark } from './budget.ts';
 import { buildSummaryPrompt, conductorSlot, directAnswer, nextSuggestion } from './conductor.ts';
 import { buildContext, type ContextLimits } from './context.ts';
@@ -54,6 +55,8 @@ export interface SessionDeps {
   readonly classifier?: RowClassifier;
   /** 없으면 `loadLimits()` 값 (SPEC §6.4.3). */
   readonly context?: ContextLimits;
+  /** 기록이 빈 새 세션의 시작 방식 (D-064 결정 8). 없으면 `limits.json` 의 `approvalMode`. 기록에 방식이 있으면 그것이 이긴다. */
+  readonly approvalMode?: ApprovalMode;
 }
 
 /** `plan.reason` 에 남는 출처 — 행을 고른 것이 지휘자다. `수동 지정` 이면 사람이 고른 것으로 적힌다 (`pipeline.ts` reasonLabel). */
@@ -66,7 +69,14 @@ interface Pending {
   readonly title: string;
   readonly plan: AssignmentPlan;
   readonly reason: string;
+  /** 사용자가 쓰기 위임으로 보냈다 (H2). 승인 클릭 때 켜는 쓰기와 다르다. */
+  readonly write: boolean;
+  /** 이 배정이 설 때 방식·기록·Budget 으로 계산한 승인 판정 (D-064). 이후 방식을 바꿔도 이 카드는 다시 판정하지 않는다 (결정 9). */
+  readonly check: ApprovalCheck;
 }
+
+/** `approve()`·자동 승인이 같이 타는 시작 경로. `by` 가 기록과 결정 로그 note 에 남는다 (D-064 결정 7). */
+type ApprovedBy = 'user' | 'auto';
 
 export class ConversationSession {
   readonly file: string;
@@ -78,6 +88,8 @@ export class ConversationSession {
   private delegation: AbortController | null = null;
   /** 기록은 열 때 한 번 읽고 이후엔 append 와 함께 들고 있는다 — 메시지마다 JSONL 을 다시 읽지 않는다. */
   private readonly log: TranscriptRecord[];
+  /** 지금 승인 방식 (D-064). 마지막 `mode` 기록을 재생한다 — 없으면 새 세션은 `limits.json` 기본값, 옛 세션은 `manual`. */
+  private modeValue: ApprovalMode;
 
   constructor(deps: SessionDeps) {
     this.deps = deps;
@@ -86,6 +98,38 @@ export class ConversationSession {
     // 그 사이 비용·폴더가 바뀌었을 수 있다. 화면은 그 카드를 보여주되 승인 버튼은 없다.
     this.log = readTranscript(this.file).records;
     this.turn = this.log.reduce((max, r) => Math.max(max, r.turn), 0);
+    const recorded = this.log.findLast((r) => r.kind === 'mode');
+    // 방식이 없는 기록은 이 결정 전의 세션이다 — 조용히 자동이 되지 않게 manual 로 연다 (D-064 결정 8). 빈 기록만 기본값을 받는다.
+    this.modeValue =
+      recorded?.kind === 'mode' && isApprovalMode(recorded.mode)
+        ? recorded.mode
+        : this.log.length === 0
+          ? (deps.approvalMode ?? loadLimits().approvalMode)
+          : 'manual';
+  }
+
+  get mode(): ApprovalMode {
+    return this.modeValue;
+  }
+
+  /**
+   * 승인 방식을 바꾼다 — `mode` 기록을 남긴다 (D-064 결정 8). 이미 선 카드는 자동 승인하지 않는다(결정 9): 다음 배정부터다.
+   * 같은 방식이고 이미 기록돼 있으면 아무것도 하지 않는다.
+   */
+  setMode(mode: ApprovalMode): TranscriptRecord[] {
+    if (!isApprovalMode(mode)) throw new SessionStateError(`모르는 승인 방식이다: ${String(mode)}`);
+    if (mode === this.modeValue && this.modeRecorded()) return [];
+    this.modeValue = mode;
+    return [this.append({ kind: 'mode', mode })];
+  }
+
+  private modeRecorded(): boolean {
+    return this.log.some((r) => r.kind === 'mode');
+  }
+
+  /** 첫 메시지 전에 지금 방식을 기록으로 굳힌다 — 나중에 기본값이 바뀌어도 이 세션의 방식은 변하지 않는다. */
+  private recordModeOnce(): void {
+    if (!this.modeRecorded()) this.append({ kind: 'mode', mode: this.modeValue });
   }
 
   get state(): SessionState {
@@ -134,10 +178,16 @@ export class ConversationSession {
     return last?.kind === 'approval' && last.approved;
   }
 
-  async send(message: string): Promise<TranscriptRecord[]> {
+  /**
+   * `write` — 이 메시지를 쓰기 위임으로 보낸다 (H2). 방식과 무관하게 카드가 서고 쓰기 스위치가 켜진 채다 —
+   * 자동 승인은 읽기 전용 위임만 시작한다 (D-064 결정 5).
+   */
+  async send(message: string, options: { readonly write?: boolean } = {}): Promise<TranscriptRecord[]> {
     if (this.stateValue !== 'blocked') this.require('waiting_input', '메시지 전송');
     const text = message.trim();
     if (!text) return [];
+    const write = options.write === true;
+    if (write && this.deps.kind === 'scratch') throw new SessionStateError('스크래치 세션은 쓰기를 켤 수 없다 (SPEC §6.4.1).');
     // 선 카드가 있는 채 새 메시지가 오면 그 배정은 거절로 남기고 새 메시지를 처리한다 (D-064 결정 3).
     // 위임을 시작하지 않는 쪽으로만 기운다 — 사용자가 승인 없이 다음으로 넘어간 것이다.
     const declined = this.stateValue === 'blocked' ? this.reject() : [];
@@ -147,6 +197,7 @@ export class ConversationSession {
     this.turn += 1;
     let user: TranscriptRecord;
     try {
+      this.recordModeOnce();
       user = this.append({ kind: 'user', text });
     } catch (error) {
       // 기록 자체가 안 됐다 — 화면에 남길 곳(트랜스크립트)이 없으니 에러 레코드로 삼키지 않고
@@ -155,12 +206,14 @@ export class ConversationSession {
       this.stateValue = 'waiting_input';
       throw error;
     }
-    return [...declined, user, ...(await this.route(text))];
+    return [...declined, user, ...(await this.route(text, undefined, undefined, write))];
   }
 
   /** 제안된 행(또는 사용자가 고른 행)으로 **마지막 메시지**의 배정을 받는다. 새 메시지를 만들지 않는다. */
-  async planAs(taskId: string): Promise<TranscriptRecord[]> {
+  async planAs(taskId: string, options: { readonly write?: boolean } = {}): Promise<TranscriptRecord[]> {
     this.require('waiting_input', '행 지정');
+    const write = options.write === true;
+    if (write && this.deps.kind === 'scratch') throw new SessionStateError('스크래치 세션은 쓰기를 켤 수 없다 (SPEC §6.4.1).');
     const last = this.records().findLast((r) => r.kind === 'user');
     if (last?.kind !== 'user') throw new SessionStateError('배정할 메시지가 없다.');
     // 마지막 기록이 그 행을 제안한 직접 답이면 고른 것은 지휘자다 — 카드 합치기(D-064) 전 기록을 다시 열었을 때의 경로다.
@@ -168,7 +221,8 @@ export class ConversationSession {
     const suggested = tail?.kind === 'direct' && tail.suggest === taskId;
     // send() 와 같은 이유로 첫 await 전에 바로 바꾼다 (final-review #2).
     this.stateValue = 'working';
-    return this.route(last.text, taskId, suggested ? SUGGESTED_LABEL : undefined);
+    this.recordModeOnce();
+    return this.route(last.text, taskId, suggested ? SUGGESTED_LABEL : undefined, write);
   }
 
   private append(entry: TranscriptEntry): TranscriptRecord {
@@ -189,7 +243,7 @@ export class ConversationSession {
    * 에러 기록을 남기고 입력 대기로 돌아간다 (final-review #2). assigned 는 blocked 로,
    * 그 외는 answer() 가 자신의 종료 상태(direct/error → waiting_input)를 책임진다.
    */
-  private async route(text: string, taskId?: string, reasonLabel?: string): Promise<TranscriptRecord[]> {
+  private async route(text: string, taskId?: string, reasonLabel?: string, write = false): Promise<TranscriptRecord[]> {
     const { matrix, catalog, dir } = this.deps;
     try {
       // D-033: 지휘자가 대화 맥락으로 직접 답하고 SUGGEST 로 행을 제안한다 — 맥락 없는
@@ -214,7 +268,9 @@ export class ConversationSession {
       const result = routed.result;
       // Jev 가 답했는데 행을 확정하지 않았으면(NONE·확신도 미만) 지휘자의 SUGGEST 가 그 판정을 뒤집지 못하게 한다.
       if (result.stage !== 'assigned') return this.answer(text, notes, routed.jev === 'none' || routed.jev === 'unsure');
-      return [this.stage(text, result.plan, result.reason, notes)];
+      const card = this.stage(text, result.plan, result.reason, notes, write);
+      // 방식이 허락하면 승인 클릭 없이 시작한다 — 이 메시지가 만든 이 배정 1건만이다 (D-064 결정 2). 카드는 위에 그대로 남는다.
+      return [card, ...(await this.autoApprove())];
     } catch (error) {
       this.stateValue = 'waiting_input';
       return [this.append({ kind: 'error', text: `라우팅이 끝나지 못했다: ${why(error)}` })];
@@ -222,9 +278,11 @@ export class ConversationSession {
   }
 
   /** 배정을 승인 대기로 세우고 `plan` 을 남긴다. 상태를 `blocked` 로 바꾼다. */
-  private stage(title: string, plan: AssignmentPlan, reason: string, notes: readonly string[]): TranscriptRecord {
+  private stage(title: string, plan: AssignmentPlan, reason: string, notes: readonly string[], write = false): TranscriptRecord {
     const { primary, reviewer } = plan.slots;
-    this.pending = { title, plan, reason };
+    const { catalog, budget } = this.deps;
+    const check = evaluateApproval({ mode: this.modeValue, plan, reason, write, catalog, budget, records: this.log });
+    this.pending = { title, plan, reason, write, check };
     this.stateValue = 'blocked';
     return this.append({
       kind: 'plan',
@@ -235,7 +293,19 @@ export class ConversationSession {
       reviewer: `${reviewer.label}·${reviewer.effort} → ${reviewer.engine}/${reviewer.modelId}`,
       estimateUsd: plan.cost.totalUsd,
       notes,
+      mode: check.mode,
+      asked: check.asks,
+      ...(write ? { write: true } : {}),
     });
+  }
+
+  /**
+   * 선 카드가 자동 승인 대상이면 시작한다. 판정은 `stage()` 가 이미 냈다. 카드가 서는 세 경로 중 route 만 부른다 —
+   * 지휘자 제안 카드(`suggestedPlan`)는 H1 이라 어떤 방식에서도 사람이 누르고, 다음 제안·사다리·재시도는 카드만 세운다.
+   */
+  private async autoApprove(): Promise<TranscriptRecord[]> {
+    if (!this.pending?.check.auto) return [];
+    return this.start({}, 'auto');
   }
 
   private async answer(text: string, notes: readonly string[], ignoreSuggest = false): Promise<TranscriptRecord[]> {
@@ -293,6 +363,10 @@ export class ConversationSession {
   }
 
   async approve(options: { readonly verify?: readonly string[]; readonly write?: boolean } = {}): Promise<TranscriptRecord[]> {
+    return this.start(options, 'user');
+  }
+
+  private async start(options: { readonly verify?: readonly string[]; readonly write?: boolean }, by: ApprovedBy): Promise<TranscriptRecord[]> {
     this.require('blocked', '승인');
     const pending = this.pending;
     if (!pending) throw new SessionStateError('승인할 배정이 없다.');
@@ -301,13 +375,13 @@ export class ConversationSession {
       throw new SessionStateError('스크래치 세션은 쓰기를 켤 수 없다 (SPEC §6.4.1).');
     }
     const { matrix, dir, budget, journal } = this.deps;
-    const out = [this.append({ kind: 'approval', approved: true, write })];
+    const out = [this.append({ kind: 'approval', approved: true, write, by, mode: pending.check.mode, asked: pending.check.asks.map((a) => a.code) })];
     this.pending = null;
     // answer()·summarize() 와 같은 규칙이다 — 멈출지 묻는 곳은 전부 limitReached() (D-030).
     if (budget.limitReached()) {
       this.stateValue = 'waiting_input';
       out.push(this.append({ kind: 'error', text: `누적 상한에 닿아 위임을 시작하지 않는다 (${budget.summary()}).` }));
-      this.logUnexecuted(pending, 'blocked');
+      this.logUnexecuted(pending, 'blocked', by);
       return out;
     }
     this.stateValue = 'working';
@@ -332,7 +406,7 @@ export class ConversationSession {
         execute: this.deps.executorFor(write),
         budget,
         journal,
-        note: `session ${this.deps.id}`,
+        note: `session ${this.deps.id} · 승인 ${by}`,
         signal: controller.signal,
         ...(ref ? { resumePrimary: ref.id, ...(ref.baseline ? { resumeBaseline: ref.baseline } : {}) } : {}),
       });
@@ -428,9 +502,9 @@ export class ConversationSession {
    * 제안했지만 실행되지 않은 배정도 결정 로그에 남긴다 (SPEC §8) — 1차 decided 와 2차 declined/blocked 를
    * 같은 id 로. 1차 줄 모양은 위임과 같다 (`firstLine` + 세션 id).
    */
-  private logUnexecuted(pending: Pending, status: 'declined' | 'blocked'): void {
+  private logUnexecuted(pending: Pending, status: 'declined' | 'blocked', approvedBy?: ApprovedBy): void {
     const first = firstLine(this.deps.matrix, pending.plan, pending.title, pending.reason);
-    const decision = { ...first, note: `${first.note ?? ''} · session ${this.deps.id}` };
+    const decision = { ...first, note: `${first.note ?? ''} · session ${this.deps.id}${approvedBy ? ` · 승인 ${approvedBy}` : ''}` };
     appendDecision(decision);
     appendDecision(unexecutedLine(decision, status));
   }

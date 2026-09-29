@@ -34,6 +34,7 @@ async function main(): Promise<void> {
   const budget = restoreBudget(dir, id);
   const classifier = defaultJev();
   const session = assembleSession({ kind, dir, id, budget, journal: new Journal(), ...(classifier ? { classifier } : {}) });
+  if (args.approval) session.setMode(args.approval);
   process.stdout.write(`${openingLines(session, budget).join('\n')}\n`);
   const guard = interruptGuard(session, (line) => void process.stdout.write(`${line}\n`));
   process.on('SIGINT', () => {

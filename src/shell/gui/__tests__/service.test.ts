@@ -229,7 +229,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     const service = new GuiService(fake, 20, process.cwd());
     service.startConversation('scratch');
     const view = await service.converse('넌 누구니');
-    assert.deepEqual(view.records.map((r) => r.kind), ['user', 'direct']);
+    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'direct']);
     assert.equal(view.state, 'waiting_input');
   });
 
@@ -239,7 +239,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     service.startConversation('scratch');
     await service.converse('방금 리팩터링한 부분 설명해');
     const view = await service.converseAsk();
-    assert.deepEqual(view.records.map((r) => r.kind), ['user', 'plan', 'approval', 'direct']);
+    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'plan', 'approval', 'direct']);
     assert.equal(view.state, 'waiting_input');
   });
 
@@ -252,10 +252,10 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     const service = new GuiService(suggesting, 20, process.cwd());
     service.startConversation('scratch');
     const shown = await service.converse('넌 누구니');
-    assert.deepEqual(shown.records.map((r) => r.kind), ['user', 'direct', 'plan']);
+    assert.deepEqual(shown.records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'direct', 'plan']);
     assert.equal(shown.state, 'blocked');
     const next = await service.converse('아니 그냥 얘기하자');
-    assert.deepEqual(next.records.map((r) => r.kind), ['user', 'direct', 'plan', 'approval', 'user', 'direct', 'plan']);
+    assert.deepEqual(next.records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'direct', 'plan', 'approval', 'user', 'direct', 'plan']);
   });
 
   it('스크래치에서는 쓰기 승인을 거절한다', async () => {
@@ -318,7 +318,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
   };
   const fileKinds = (view: { dir: string; id: string }) =>
     readFileSync(path.join(view.dir, '.hs-orc', 'sessions', `${view.id}.jsonl`), 'utf8')
-      .trim().split('\n').map((l) => (JSON.parse(l) as { kind: string }).kind);
+      .trim().split('\n').map((l) => (JSON.parse(l) as { kind: string }).kind).filter((k) => k !== 'mode');
 
   it('위임이 도는 중에 세션 목록으로 나갔다 같은 세션을 다시 열면 같은 실행에 붙는다 — 끊김 배너 없음', async () => {
     isolated();
@@ -339,7 +339,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     g.open();
     await running;
     const view = service.conversation();
-    assert.deepEqual(view.records.map((r) => r.kind), ['user', 'plan', 'approval', 'result', 'summary']);
+    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'plan', 'approval', 'result', 'summary']);
     assert.equal(view.state, 'waiting_input');
     assert.equal(view.interrupted, false);
     assert.deepEqual(fileKinds(a), ['user', 'plan', 'approval', 'result', 'summary', 'spend'], '기록이 겹치거나 섞이면 안 된다');
@@ -364,7 +364,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     g.open();
     await running.catch(() => {});
     const after = service.openConversation('scratch', a.dir, a.id);
-    assert.deepEqual(after.records.map((r) => r.kind), ['user', 'plan', 'approval', 'result', 'summary']);
+    assert.deepEqual(after.records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'plan', 'approval', 'result', 'summary']);
     assert.equal(after.interrupted, false);
     assert.equal(after.state, 'waiting_input');
   });
@@ -383,7 +383,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
 
     g.open();
     await running;
-    assert.deepEqual(service.conversation().records.map((r) => r.kind), ['user', 'direct']);
+    assert.deepEqual(service.conversation().records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'direct']);
     assert.deepEqual(fileKinds(a), ['user', 'direct', 'spend']);
   });
 
@@ -407,6 +407,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     const h = hangingPrimary();
     const service = new GuiService(h.exec, 20, process.cwd());
     const a = service.startConversation('scratch');
+    service.converseMode('manual'); // 취소 뒤 둘째 위임도 카드 승인으로 보려는 테스트다
     await service.converse('이 타입 에러 고쳐줘');
     const running = service.converseApprove({ verify: [], write: false });
     assert.equal(service.conversation().cancellable, true);
@@ -415,7 +416,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     assert.equal(view.state, 'waiting_input');
     assert.equal(view.cancellable, false);
     assert.equal(view.interrupted, false);
-    assert.deepEqual(view.records.map((r) => r.kind), ['user', 'plan', 'approval', 'result']);
+    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'plan', 'approval', 'result']);
     const result = view.records.at(-1);
     assert.ok(result?.kind === 'result' && result.outcome === 'cancelled');
     assert.deepEqual(h.roles, ['primary'], 'primary 중 취소면 reviewer 를 띄우지 않는다');
@@ -469,4 +470,51 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     assert.throws(() => service.openConversation('scratch', root, 'x'), /스크래치 뿌리 밖/);
     assert.throws(() => service.openConversation('scratch', path.join(root, 'link'), 'x'), /스크래치 뿌리 밖/);
   });
+  it('승인 방식 — 새 세션은 limits 기본값(auto-ask)이고 전환은 기록·뷰에 남는다 (D-064)', () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    const a = service.startConversation('scratch');
+    assert.equal(a.mode, 'auto-ask');
+    const view = service.converseMode('auto');
+    assert.equal(view.mode, 'auto');
+    assert.deepEqual(view.records.map((r) => r.kind === 'mode' && r.mode), ['auto']);
+    // 다시 열면 재생한다.
+    assert.equal(new GuiService(fake, 20, process.cwd()).openConversation('scratch', a.dir, a.id).mode, 'auto');
+  });
+
+  it('승인 방식 — auto 로 자동 시작한 위임도 도는 중에 취소되고, 그 위임만 멈춘다 (D-066·D-063)', async () => {
+    isolated();
+    const h = hangingPrimary();
+    const service = new GuiService(h.exec, 20, process.cwd());
+    const a = service.startConversation('scratch');
+    service.converseMode('auto');
+    const running = service.converse('이 타입 에러 고쳐줘');
+    for (let i = 0; i < 200 && !service.conversation().cancellable; i += 1) await new Promise<void>((r) => setImmediate(r));
+    assert.equal(service.conversation().cancellable, true, '승인 클릭 없이 시작했다');
+    // 다시 연 화면(재부착)도 같은 객체에 붙어 있어 취소할 수 있다.
+    service.closeConversation();
+    const reopened = service.openConversation('scratch', a.dir, a.id);
+    assert.equal(reopened.state, 'working');
+    assert.equal(reopened.cancellable, true);
+    const view = await service.converseCancel();
+    assert.equal(view.state, 'waiting_input');
+    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'plan', 'approval', 'result']);
+    const approval = view.records.find((r) => r.kind === 'approval');
+    assert.ok(approval?.kind === 'approval' && approval.by === 'auto');
+    assert.ok(view.records.at(-1)?.kind === 'result');
+    await running;
+    assert.deepEqual(h.roles, ['primary']);
+  });
+
+  it('승인 방식 — 쓰기 위임으로 보내면 auto 에서도 카드가 선다', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    service.startConversation('project');
+    service.converseMode('auto');
+    const view = await service.converse('이 타입 에러 고쳐줘', true);
+    assert.equal(view.state, 'blocked');
+    const plan = view.records.findLast((r) => r.kind === 'plan');
+    assert.ok(plan?.kind === 'plan' && plan.write === true);
+  });
+
 });

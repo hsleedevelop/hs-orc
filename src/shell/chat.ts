@@ -3,6 +3,7 @@
  * 여기는 기록을 터미널 줄로 그리고 입력을 세션 호출로 옮긴다.
  */
 import { createInterface } from 'node:readline';
+import { APPROVAL_MODES, isApprovalMode, type ApprovalMode } from '../data/limits.ts';
 import type { Budget } from '../core/budget.ts';
 import type { ConversationSession } from '../core/session.ts';
 import { listScratchSessions, listSessions, readTranscript, type SessionSummary, type TranscriptRecord } from '../core/transcript.ts';
@@ -28,9 +29,14 @@ export function renderRecord(r: TranscriptRecord): string[] {
         `배정   primary  ${r.primary}`,
         `       reviewer ${r.reviewer}`,
         `비용   $${r.estimateUsd} (추정)`,
+        // 묻는 카드는 걸린 조건을 이름으로 보인다 (D-064). manual 은 늘 묻고, 이유가 없으면 자동 승인이 뒤따른다.
+        ...(r.mode && r.mode !== 'manual' && r.asked && r.asked.length > 0 ? [`묻는 이유  ${r.asked.map((a) => `${a.code} ${a.text}`).join(' · ')}`] : []),
       ];
     case 'approval':
+      if (r.approved && r.by === 'auto') return [`승인   자동 승인 · ${r.mode ?? ''} · 묻는 조건 없음 — 읽기 전용`];
       return [r.approved ? `승인   ${r.write ? '쓰기 켬 — primary 가 파일을 고칠 수 있다' : '읽기 전용'}` : '거절'];
+    case 'mode':
+      return [`방식   승인 방식 → ${r.mode}`];
     case 'result':
       // 취소는 결과가 아니라 멈춤이다 (D-066) — reviewer 판정·검증이 없다. 받은 출력은 남겨 보여준다.
       if (r.outcome === 'cancelled') return [`결과   취소됨 · 결정 ${r.decisionId}`, `증거   ${r.evidence}`, ...(r.text ? [r.text] : [])];
@@ -53,7 +59,8 @@ export function renderRecord(r: TranscriptRecord): string[] {
 }
 
 export const CHAT_HELP = [
-  '명령   메시지를 그냥 쓰면 보낸다 · /task Rxx 마지막 메시지를 그 행으로 배정 · /help · /quit (Ctrl-D)',
+  '명령   메시지를 그냥 쓰면 보낸다 · /write <문장> 쓰기 위임으로 보낸다 · /task Rxx 마지막 메시지를 그 행으로 배정 · /mode [방식] · /help · /quit (Ctrl-D)',
+  '방식   /mode manual 매번 묻는다 · auto-ask 쓰기·모델이 고른 행·비싼 조합·상한 근접·첫 위임만 묻는다 · auto 쓰기·모델이 고른 행만 묻는다 — 자동은 이 메시지의 배정 1건만 시작한다',
   '승인   배정이 뜨면 y 읽기 전용 · w 쓰기 · n 거절 · a 지휘자에게 묻기 · 문장을 쓰면 거절하고 그 메시지를 보낸다',
   '취소   위임이 도는 중 Ctrl-C 한 번 — 그 위임만 멈추고 세션은 남는다 · 한 번 더 누르면 나간다',
 ].join('\n');
@@ -101,6 +108,18 @@ export async function runChat(
           break;
         } else if (line === '/help') {
           say(CHAT_HELP);
+        } else if (line === '/mode' || line.startsWith('/mode ')) {
+          const arg = line.slice('/mode'.length).trim();
+          if (!arg) say(`방식   ${session.mode} (${APPROVAL_MODES.join(' · ')})`);
+          else if (isApprovalMode(arg)) {
+            // 선 카드는 그대로 사람이 누른다 (D-064 결정 9) — 바뀐 방식은 다음 배정부터다.
+            const out = session.setMode(arg);
+            if (out.length === 0) say(`방식   이미 ${arg}`);
+            else show(out);
+            if (session.state === 'blocked') say('안내   지금 선 카드는 자동 승인하지 않는다 — 다음 배정부터 적용된다.');
+          } else say(`모르는 방식이다: ${arg} — ${APPROVAL_MODES.join(' · ')}`);
+        } else if (line.startsWith('/write ')) {
+          show(await session.send(line.slice('/write '.length), { write: true }));
         } else if (session.state === 'blocked') {
           if (line === 'y' || line === 'w') {
             show(await session.approve({ verify: options.verify, write: line === 'w' }));
@@ -139,15 +158,18 @@ export interface ChatArgs {
   readonly list: boolean;
   readonly help: boolean;
   readonly verify: readonly string[];
+  /** 시작 때 이 세션의 승인 방식을 바꾼다 (D-064). 없으면 기록·기본값 그대로. */
+  readonly approval?: ApprovalMode;
 }
 
-export const CHAT_USAGE = '사용법: hs-orc chat [--scratch | --resume <id>] [--list] [--verify "<명령>"]...';
+export const CHAT_USAGE = '사용법: hs-orc chat [--scratch | --resume <id>] [--list] [--approval manual|auto-ask|auto] [--verify "<명령>"]...';
 
 export function parseChatArgs(argv: readonly string[]): ChatArgs {
   let scratch = false;
   let list = false;
   let help = false;
   let resume: string | undefined;
+  let approval: ApprovalMode | undefined;
   const verify: string[] = [];
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -163,12 +185,18 @@ export function parseChatArgs(argv: readonly string[]): ChatArgs {
       case '--help': case '-h': help = true; break;
       case '--resume': resume = value(); break;
       case '--verify': verify.push(value()); break;
+      case '--approval': {
+        const mode = value();
+        if (!isApprovalMode(mode)) throw new Error(`--approval 은 ${APPROVAL_MODES.join('·')} 중 하나다: ${mode}`);
+        approval = mode;
+        break;
+      }
       // 조용한 폴백 금지 — 오타가 무시되면 사용자는 켠 줄 안다.
       default: throw new Error(`모르는 옵션이다: ${arg ?? ''}\n  ${CHAT_USAGE}`);
     }
   }
   if (scratch && resume !== undefined) throw new Error('--scratch 와 --resume 은 함께 쓸 수 없다 — 이어 갈 세션의 종류는 기록이 정한다.');
-  return { scratch, list, help, verify, ...(resume !== undefined ? { resume } : {}) };
+  return { scratch, list, help, verify, ...(resume !== undefined ? { resume } : {}), ...(approval ? { approval } : {}) };
 }
 
 /** 이 폴더의 project 세션을 먼저, 다음에 스크래치를 본다. 스크래치 폴더는 목록에서 오므로 뿌리 안이다. */
@@ -182,6 +210,7 @@ export function openingLines(session: ConversationSession, budget: Budget, tail 
   const broken = readTranscript(session.file).broken;
   return [
     `세션   ${session.kind} ${session.id} · ${session.dir}`,
+    `방식   승인 방식 ${session.mode}`,
     `누적   ${budget.summary()}`,
     ...(broken > 0 ? [`경고   기록에 깨진 줄 ${broken}개 — 건너뛰고 보여준다`] : []),
     ...(records.length > tail ? [`       (앞 기록 ${records.length - tail}개 생략)`] : []),
