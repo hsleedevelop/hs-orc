@@ -74,6 +74,8 @@ export class ConversationSession {
   private turn: number;
   private stateValue: SessionState = 'waiting_input';
   private pending: Pending | null = null;
+  /** 도는 위임의 취소 신호 (D-066). primary·reviewer 실행 동안만 있다 — 요약·직접 답은 취소 대상이 아니다. */
+  private delegation: AbortController | null = null;
   /** 기록은 열 때 한 번 읽고 이후엔 append 와 함께 들고 있는다 — 메시지마다 JSONL 을 다시 읽지 않는다. */
   private readonly log: TranscriptRecord[];
 
@@ -105,6 +107,21 @@ export class ConversationSession {
 
   records(): TranscriptRecord[] {
     return [...this.log];
+  }
+
+  /** 지금 취소할 수 있는 위임이 도는가 — primary·reviewer 실행 중이고 아직 취소를 보내지 않았다 (D-066). */
+  get cancellable(): boolean {
+    return this.delegation !== null && !this.delegation.signal.aborted;
+  }
+
+  /**
+   * 도는 위임을 취소한다 (D-066). 엔진 프로세스 그룹을 종료하라고 알리고 **곧바로 돌아온다** — 결과 기록은
+   * 돌던 `approve()` 가 끝나며 붙인다(`cancelled`). 세션은 그 뒤 입력 대기다. 취소할 위임이 없으면 false.
+   */
+  cancel(): boolean {
+    if (!this.cancellable) return false;
+    this.delegation?.abort();
+    return true;
   }
 
   /**
@@ -295,6 +312,8 @@ export class ConversationSession {
     }
     this.stateValue = 'working';
     const mark = budget.mark();
+    const controller = new AbortController();
+    this.delegation = controller;
     try {
       const ref = this.resumable(pending.plan, write);
       const context = buildContext(this.records(), this.contextLimits, {
@@ -314,8 +333,25 @@ export class ConversationSession {
         budget,
         journal,
         note: `session ${this.deps.id}`,
+        signal: controller.signal,
         ...(ref ? { resumePrimary: ref.id, ...(ref.baseline ? { resumeBaseline: ref.baseline } : {}) } : {}),
       });
+      this.delegation = null; // 이후(기록·요약)는 취소할 위임이 아니다.
+      if (d.outcome === 'cancelled') {
+        // 사용자가 멈췄다 (D-066). 요약을 부르지 않고(돈을 더 쓰지 않는다) 엔진 세션은 남기지 않는다 — 다음 위임은 새로 띄운다.
+        const stage = d.cancelledAt === 'reviewer' ? 'reviewer 실행 중 — primary 는 끝났고 검증은 하지 않았다' : 'primary 실행 중 — reviewer 는 시작하지 않았다';
+        out.push(this.append({
+          kind: 'result',
+          outcome: 'cancelled',
+          verdict: 'unknown',
+          text: d.text.slice(0, 4000),
+          review: '',
+          evidence: `취소됨 — ${stage}.${write ? ' 쓰기가 켜져 있었다 — 파일이 일부 바뀌었을 수 있다(git status).' : ''}`,
+          decisionId: d.decisionId,
+          ...(context.cut ? { cut: context.cut } : {}),
+        }));
+        return out;
+      }
       out.push(
         this.append({
           kind: 'result',
@@ -340,6 +376,7 @@ export class ConversationSession {
     } catch (error) {
       out.push(this.append({ kind: 'error', text: `위임이 끝나지 못했다: ${why(error)}` }));
     } finally {
+      this.delegation = null;
       this.stateValue = 'waiting_input';
       this.recordSpend(mark);
     }

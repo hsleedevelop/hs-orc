@@ -58,7 +58,8 @@ export type TranscriptEntry =
   | { readonly kind: 'approval'; readonly approved: boolean; readonly write: boolean }
   | {
       readonly kind: 'result';
-      readonly outcome: SettledOutcome;
+      /** `cancelled` — 사용자가 실행 중에 멈췄다 (D-066). 실패가 아니라 끊김도 아니다 — 잇지 않는다. */
+      readonly outcome: SettledOutcome | 'cancelled';
       readonly verdict: 'pass' | 'fail' | 'unknown';
       readonly text: string;
       readonly review: string;

@@ -75,6 +75,25 @@ export function unexecutedLine(
   return { ...first, ts: now.toISOString(), status, outcome: 'unverified', verified: '-' };
 }
 
+/**
+ * 사용자가 실행 중에 멈춘 결정의 2차 (D-066). `ran` 이 아니므로 `outcome` 은 `unverified`, `verified` 는 `-` 다 —
+ * 잘린 실행에 결과가 있을 수 없다. `ran` 통계에 섞이지 않게 status 를 따로 둔다. 어디서 멈췄는지는 `note` 에 남긴다.
+ */
+export function cancelledLine(
+  first: DecisionRecord,
+  stage: 'primary' | 'reviewer',
+  now = new Date(),
+): DecisionRecord {
+  return {
+    ...first,
+    ts: now.toISOString(),
+    status: 'cancelled',
+    outcome: 'unverified',
+    verified: '-',
+    note: `${first.note ?? ''} · 취소(${stage} 실행 중)`,
+  };
+}
+
 /** 2차 — **같은 `id`** 로 append 한다. 갱신이 아니다. */
 export function secondLine(
   first: DecisionRecord,

@@ -38,7 +38,7 @@ type Rec =
   | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string; cut?: Cut; compacted?: Compaction[] }
   | { kind: 'summary'; turn: number; text: string; next: string }
   | { kind: 'error'; turn: number; text: string };
-interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean }
+interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean }
 interface SessionSummary { id: string; dir: string; kind: SessionKind; lastAt: string; preview: string }
 
 interface Bridge {
@@ -49,6 +49,7 @@ interface Bridge {
   convSend(text: string): Promise<SessionView>;
   convPlanAs(taskId: string): Promise<SessionView>;
   convApprove(payload: { verify: string[]; write: boolean }): Promise<SessionView>;
+  convCancel(): Promise<SessionView>;
   convReject(): Promise<SessionView>;
   convAsk(): Promise<SessionView>;
   convClose(): Promise<void>;
@@ -285,6 +286,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
   const [verify, setVerify] = useState('');
   const [write, setWrite] = useState(false);
   const [busy, setBusy] = useState(false);
+  // 승인한 위임이 도는 동안의 화면 쪽 표시 (D-066). 요청이 안 끝났으니 `view.cancellable` 은 아직 갱신 전이다.
+  const [delegation, setDelegation] = useState<'' | 'running' | 'cancelling'>('');
   const [error, setError] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -298,7 +301,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     p.then(onChange, (e: unknown) => {
       setError(why(e));
       orc.convView().then(onChange, (e2: unknown) => setError(`${why(e)} · 다시 불러오지 못했다: ${why(e2)}`));
-    }).finally(() => { setBusy(false); setSending(''); });
+    }).finally(() => { setBusy(false); setSending(''); setDelegation(''); });
   };
   const send = () => {
     const t = draft.trim();
@@ -348,7 +351,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
             h('div', { className: 'row' },
               h('button', {
                 className: 'btn accent', disabled: busy,
-                onClick: () => act(orc.convApprove({ verify: lines(verify), write: write && view.kind !== 'scratch' })),
+                onClick: () => { setDelegation('running'); act(orc.convApprove({ verify: lines(verify), write: write && view.kind !== 'scratch' })); },
               }, busy ? '실행 중…' : `승인하고 실행 · 두 슬롯${write && view.kind !== 'scratch' ? ' · 쓰기 켜짐' : ''}`),
               h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convReject()) }, '거절'),
               // 규칙이 대화성 후속을 작업 행으로 잡았을 때 — 거절하고 같은 메시지를 지휘자가 답한다 (D-038).
@@ -378,7 +381,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
         return h('section', { key: i, className: 'card' },
           h('span', { className: 'label' }, `위임 결과 · ${r.decisionId}`),
           h('div', { className: 'row' },
-            h('span', { className: `chip ${r.verdict}` }, r.verdict.toUpperCase()),
+            // 취소는 판정이 없다 (D-066) — UNKNOWN 칩을 붙이면 reviewer 가 돌고 판정을 못 낸 것처럼 읽힌다.
+            r.outcome === 'cancelled' ? null : h('span', { className: `chip ${r.verdict}` }, r.verdict.toUpperCase()),
             h('span', { className: r.outcome === 'ok' ? 'good mono' : 'warn mono' }, `outcome = ${r.outcome}`)),
           h('div', { className: r.outcome === 'ok' ? 'good mono' : 'warn mono' }, r.evidence),
           h('pre', { style: { marginTop: 10 } }, r.text || '(빈 출력)'),
@@ -409,7 +413,13 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     sending ? h('div', { className: 'bubble user dim' }, sending) : null,
     // 다시 연 화면은 `busy` 를 모른다 — 서비스가 working 이면 도는 실행에 붙은 것이다 (D-063). 결과는 앞 화면이 건 요청이 돌아오며 싣는다.
     busy || view.state === 'working'
-      ? text(!sending && (view.state === 'blocked' || last?.kind === 'plan' || last?.kind === 'approval') ? '실행 중…' : '생각 중…', 'dim')
+      ? h('div', { className: 'row' },
+          text(delegation === 'cancelling' ? '취소하는 중…' : !sending && (view.state === 'blocked' || last?.kind === 'plan' || last?.kind === 'approval') ? '실행 중…' : '생각 중…', 'dim'),
+          // 위임(primary·reviewer)이 도는 동안만 뜬다 (D-066). 다시 연 화면(D-063)은 서비스가 준 `cancellable` 로 같이 뜬다.
+          // 취소는 그 위임만 멈춘다 — 세션은 남고, 돌아오는 뷰가 취소 결과 카드를 싣는다.
+          delegation === 'running' || (delegation === '' && view.cancellable)
+            ? h('button', { className: 'btn danger', onClick: () => { setDelegation('cancelling'); act(orc.convCancel()); } }, '취소')
+            : null)
       : null,
     error ? h('div', { className: 'banner error' }, error) : null,
     h('div', { ref: endRef }),

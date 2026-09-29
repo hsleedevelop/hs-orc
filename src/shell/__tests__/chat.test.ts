@@ -206,16 +206,70 @@ describe('chat — 진입', () => {
 });
 
 describe('chat — Ctrl-C', () => {
-  it('위임이 도는 중이면 첫 Ctrl-C 는 경고만 하고 기다린다, 두 번째는 나간다', () => {
+  it('취소할 위임이 아닌 실행(직접 답·요약)이 도는 중이면 첫 Ctrl-C 는 경고만 하고 기다린다, 두 번째는 나간다', () => {
     const lines: string[] = [];
-    const guard = interruptGuard({ state: 'working', records: () => [] }, (l) => lines.push(l));
+    const guard = interruptGuard({ state: 'working', records: () => [], cancel: () => false }, (l) => lines.push(l));
     assert.equal(guard(), 'wait');
     assert.match(lines.join('\n'), /엔진을 남겨 둔 채/);
     assert.equal(guard(), 'exit');
   });
 
+  it('위임이 도는 중이면 첫 Ctrl-C 는 그 위임만 취소하고, 같은 위임 중 두 번째는 나간다 (D-066)', () => {
+    const lines: string[] = [];
+    let cancels = 0;
+    const guard = interruptGuard({ state: 'working', records: () => [], cancel: () => { cancels += 1; return cancels === 1; } }, (l) => lines.push(l));
+    assert.equal(guard(), 'wait');
+    assert.equal(cancels, 1);
+    assert.match(lines.join('\n'), /위임을 취소한다/);
+    assert.doesNotMatch(lines.join('\n'), /엔진을 남겨 둔 채/);
+    assert.equal(guard(), 'exit');
+    assert.equal(cancels, 1, '두 번째는 취소를 다시 보내지 않고 나간다');
+  });
+
+  it('도는 위임을 Ctrl-C 로 취소하면 결과 줄을 찍고 세션은 다음 입력을 받는다 (D-066)', async () => {
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'hs-chat-cancel-'));
+    process.env['HS_ORC_DECISION_LOG'] = path.join(tmp, 'log.jsonl');
+    process.env['HS_ORC_RUN_STORE'] = path.join(tmp, 'runs');
+    process.env['HS_ORC_SCRATCH'] = path.join(tmp, 'scratch');
+    const roles: string[] = [];
+    const exec: SlotExecutor = (slot, prompt, options) => {
+      roles.push(slot.role);
+      if (slot.role === 'reviewer') return Promise.resolve({ ok: true, text: 'PASS', rawStdout: '', rawStderr: '', durationMs: 1 });
+      if (prompt.includes('다시')) return Promise.resolve({ ok: true, text: 'ran', rawStdout: '', rawStderr: '', durationMs: 1 });
+      return new Promise((resolve) => {
+        options?.signal?.addEventListener('abort', () => resolve({ ok: false, cancelled: true, text: '', rawStdout: '', rawStderr: '', durationMs: 1 }), { once: true });
+      });
+    };
+    const { dir, id } = prepareSession('scratch', process.cwd());
+    const budget = restoreBudget(dir, id);
+    const session = assembleSession({ kind: 'scratch', dir, id, budget, journal: new Journal(), execute: exec });
+    let out = '';
+    const output = new Writable({ write(chunk: Buffer, _enc, cb) { out += chunk.toString(); cb(); } });
+    // 입력은 두 번에 나눠 준다 — 취소 뒤 줄이 그 위임 도중에 미리 쌓이지 않게(쌓이면 승인 답으로 읽힌다).
+    const input = new Readable({ read() {} });
+    const chat = runChat(session, budget, { input, output }, { verify: [] });
+    input.push('이 타입 에러 고쳐줘\ny\n');
+    for (let i = 0; i < 200 && !session.cancellable; i += 1) await new Promise<void>((r) => setImmediate(r));
+    assert.equal(session.cancellable, true);
+
+    const guard = interruptGuard(session, (l) => { out += `${l}\n`; });
+    assert.equal(guard(), 'wait');
+    for (let i = 0; i < 200 && session.state !== 'waiting_input'; i += 1) await new Promise<void>((r) => setImmediate(r));
+    assert.equal(session.state, 'waiting_input');
+    input.push('이 타입 에러 다시 고쳐줘\ny\n');
+    for (let i = 0; i < 400 && !session.records().some((r) => r.kind === 'summary'); i += 1) await new Promise<void>((r) => setImmediate(r));
+    input.push(null);
+    await chat;
+
+    assert.match(out, /결과 {3}취소됨 · 결정 /);
+    assert.match(out, /증거 {3}취소됨 — primary 실행 중/);
+    assert.deepEqual(roles.slice(0, 1), ['primary'], '취소한 위임은 reviewer 를 띄우지 않는다');
+    const kinds = session.records().filter((r) => r.kind !== 'spend').map((r) => r.kind);
+    assert.deepEqual(kinds, ['user', 'plan', 'approval', 'result', 'user', 'plan', 'approval', 'result', 'summary'], '취소 뒤 새 위임이 돈다');
+  });
+
   it('입력 대기 중이면 바로 나간다', () => {
-    const guard = interruptGuard({ state: 'waiting_input', records: () => [] }, () => undefined);
+    const guard = interruptGuard({ state: 'waiting_input', records: () => [], cancel: () => false }, () => undefined);
     assert.equal(guard(), 'exit');
   });
 });

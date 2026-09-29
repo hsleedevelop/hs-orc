@@ -83,7 +83,7 @@ export interface RunPayload extends PlanOptions {
 export interface RunOutcome {
   readonly ok: boolean;
   readonly text: string;
-  readonly outcome?: SettledOutcome;
+  readonly outcome?: SettledOutcome | 'cancelled';
   readonly report?: EvidenceReport;
   readonly verdict?: 'pass' | 'fail' | 'unknown';
   readonly review?: string;
@@ -111,6 +111,8 @@ export interface SessionView {
   readonly appBudget: string;
   /** 위임 도중 끊긴 기록이다 — 승인 뒤 결과가 없다. 화면이 배너로 알린다. */
   readonly interrupted: boolean;
+  /** primary·reviewer 가 도는 중이라 지금 취소할 수 있다 (D-066). 화면의 '취소' 버튼이 이것을 본다. */
+  readonly cancellable: boolean;
 }
 
 export interface WorktreeState {
@@ -144,6 +146,8 @@ export class GuiService {
    * 도는 중에도 send 를 받아 같은 파일에 두 객체가 번갈아 쓴다. 호출이 끝나면 뺀다.
    */
   private readonly live = new Map<string, ConversationSession>();
+  /** `live` 세션이 돌고 있는 호출. 취소가 이것이 끝나기를 기다렸다가 취소 결과가 담긴 뷰를 돌려준다 (D-066). */
+  private readonly liveCalls = new Map<string, Promise<unknown>>();
 
   /** Jev 분류기 (D-065). 합성 루트(`gui/main.ts`)만 넘긴다 — 기본은 꺼짐이라 테스트는 외부로 나가지 않는다. */
   private readonly jev: RowClassifier | undefined;
@@ -363,6 +367,7 @@ export class GuiService {
       budget: this.sessionBudget(s.dir, s.id).summary(),
       appBudget: this.appBudgetSummary(),
       interrupted: s.interrupted,
+      cancellable: s.cancellable,
     };
   }
 
@@ -381,6 +386,17 @@ export class GuiService {
     return this.conversation();
   }
 
+  /**
+   * 도는 위임을 취소한다 (D-066). 다시 연 화면(D-063)도 같은 `live` 객체에 붙어 있으므로 여기서 멈출 수 있다.
+   * 엔진이 내려가고 결과 기록이 붙을 때까지 기다린 뒤 그 뷰를 돌려준다 — 화면이 `working` 인 뷰를 붙잡고 있지 않게.
+   * 취소할 위임이 없으면(이미 끝났거나 직접 답 중) 던지지 않고 지금 뷰를 돌려준다 — 버튼과 완료가 겹친 정상 경합이다.
+   */
+  async converseCancel(): Promise<SessionView> {
+    const s = this.requireConversation();
+    if (s.cancel()) await this.liveCalls.get(`${s.dir}::${s.id}`)?.catch(() => undefined);
+    return this.conversation();
+  }
+
   converseReject(): SessionView {
     this.requireConversation().reject();
     return this.conversation();
@@ -396,10 +412,13 @@ export class GuiService {
     const s = this.requireConversation();
     const key = `${s.dir}::${s.id}`;
     this.live.set(key, s);
+    const call = op(s);
+    this.liveCalls.set(key, call);
     try {
-      await op(s);
+      await call;
     } finally {
       if (this.live.get(key) === s) this.live.delete(key);
+      if (this.liveCalls.get(key) === call) this.liveCalls.delete(key);
     }
   }
 

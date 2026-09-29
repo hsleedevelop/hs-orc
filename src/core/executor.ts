@@ -44,6 +44,8 @@ export interface SlotRun {
   readonly reported?: EngineReport;
   /** 이 실행 중 엔진이 한 압축 (D-058). 없으면 필드가 없다. */
   readonly compactions?: readonly EngineCompaction[];
+  /** 사용자가 멈춰 프로세스 그룹이 종료됐다 (D-066). `ok` 는 false 다. 타임아웃과 다르다 — 사람이 한 일이다. */
+  readonly cancelled?: boolean;
   /** `usage` 에 압축 몫이 빠졌을 수 있다 — 엔진 선언 (D-060, codex). `Budget.countTokens` 에 그대로 넘긴다. */
   readonly compactionUncounted?: boolean;
 }
@@ -59,6 +61,8 @@ export interface SlotRunOptions {
   readonly resume?: string;
   /** 이어 붙일 세션의 직전 원본 보고 (D-057). 누적 칸은 이것을 빼서 센다. */
   readonly baseline?: EngineReport;
+  /** 신호가 서면 엔진 프로세스 그룹을 종료한다 (D-066, SPEC §3.7). 이미 서 있으면 시작하지 않는다. */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -115,6 +119,11 @@ export function createExecutor(
   options: ExecutorOptions = {},
 ): SlotExecutor {
   return async (slot, prompt, runOptions) => {
+    const signal = runOptions?.signal;
+    // 시작 전에 이미 취소됐으면 프로세스를 띄우지 않는다 — 띄우면 과금된다.
+    if (signal?.aborted) {
+      return { ok: false, cancelled: true, text: '', rawStdout: '', rawStderr: '', durationMs: 0 };
+    }
     const write = options.write === true && slot.role === 'primary';
     const handle = createAdapter(slot.engine, catalog).start({
       model: slot.model,
@@ -127,7 +136,9 @@ export function createExecutor(
       ...(options.isolate === true ? { isolate: true } : {}),
       ...(runOptions?.resume !== undefined ? { resume: runOptions.resume } : {}),
     });
-    const result = await handle.result;
+    const onAbort = (): void => handle.cancel();
+    signal?.addEventListener('abort', onAbort, { once: true });
+    const result = await handle.result.finally(() => signal?.removeEventListener('abort', onAbort));
     const reported: EngineReport = {
       ...(result.costUsd !== undefined ? { costUsd: result.costUsd } : {}),
       ...(result.usage !== undefined ? { usage: result.usage } : {}),
@@ -139,6 +150,7 @@ export function createExecutor(
     const metered = costUsd === undefined ? meteredUsd(slot.modelId, usage) : undefined;
     return {
       ok: result.outcome === 'ok',
+      ...(result.outcome === 'cancelled' ? { cancelled: true } : {}),
       text: result.text,
       rawStdout: result.rawStdout,
       rawStderr: result.rawStderr,

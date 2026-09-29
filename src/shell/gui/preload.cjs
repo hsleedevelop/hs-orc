@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('orc', {
   convSend: (text) => ipcRenderer.invoke('conv-send', text),
   convPlanAs: (taskId) => ipcRenderer.invoke('conv-plan-as', taskId),
   convApprove: (payload) => ipcRenderer.invoke('conv-approve', payload),
+  convCancel: () => ipcRenderer.invoke('conv-cancel'),
   convReject: () => ipcRenderer.invoke('conv-reject'),
   convAsk: () => ipcRenderer.invoke('conv-ask'),
   convClose: () => ipcRenderer.invoke('conv-close'),

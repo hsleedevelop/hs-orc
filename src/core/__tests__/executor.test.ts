@@ -292,3 +292,57 @@ describe('압축 창 env 는 지휘자 실행에만 싣는다 (D-061)', () => {
     });
   });
 });
+
+describe('취소 신호는 엔진 프로세스 그룹을 종료한다 (D-066, SPEC §3.7)', () => {
+  /** 손자를 띄우고 그 pid 를 stderr 에 적은 채 안 끝나는 가짜 엔진. 카탈로그의 그 엔진 바이너리만 이것으로 바꾼다. */
+  const slowCatalog = (name: string) => {
+    const file = path.join(fakeDir, name);
+    writeFileSync(file, '#!/bin/sh\nsleep 120 &\necho $! >&2\nwait\n', 'utf8');
+    chmodSync(file, 0o755);
+    const engine = plan.slots.primary.engine;
+    return { ...catalog, engines: { ...catalog.engines, [engine]: { ...catalog.engines[engine], binaries: [file] } } };
+  };
+  const alive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  it('신호가 서면 손자까지 죽고 cancelled 로 끝난다 — 좀비·고아가 없다', async () => {
+    const controller = new AbortController();
+    const running = createExecutor(slowCatalog('slow-engine'), fakeDir, 60_000)(plan.slots.primary, 'x', { signal: controller.signal });
+    await new Promise((r) => setTimeout(r, 400)); // 손자 pid 가 stderr 에 실릴 때까지
+    controller.abort();
+    const run = await running;
+
+    assert.equal(run.cancelled, true);
+    assert.equal(run.ok, false);
+    const grandchild = Number(run.rawStderr.trim().split('\n')[0]);
+    assert.ok(Number.isInteger(grandchild) && grandchild > 0, `손자 pid 를 못 읽었다: ${run.rawStderr}`);
+    const deadline = Date.now() + 5_000;
+    while (alive(grandchild) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(alive(grandchild), false, `손자 ${grandchild} 가 살아남았다 (좀비)`);
+  });
+
+  it('이미 선 신호로는 프로세스를 띄우지 않는다', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const run = await createExecutor(slowCatalog('never-started'), fakeDir, 60_000)(plan.slots.primary, 'x', { signal: controller.signal });
+    assert.equal(run.cancelled, true);
+    assert.equal(run.rawStderr, '', '띄웠다면 손자 pid 가 stderr 에 있다');
+    assert.equal(run.durationMs, 0);
+  });
+
+  it('신호 없이 끝난 실행은 cancelled 가 아니다 — 타임아웃도 취소가 아니다', async () => {
+    const run = await createExecutor(slowCatalog('times-out'), fakeDir, 300)(plan.slots.primary, 'x');
+    assert.equal(run.ok, false);
+    assert.equal(run.cancelled, undefined);
+    const grandchild = Number(run.rawStderr.trim().split('\n')[0]);
+    const deadline = Date.now() + 5_000;
+    while (alive(grandchild) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(alive(grandchild), false);
+  });
+});
