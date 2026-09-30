@@ -15,7 +15,7 @@ import { delegate } from '../../core/delegate.ts';
 import type { EvidenceReport, SettledOutcome } from '../../core/evidence.ts';
 import { reportError } from '../../core/report.ts';
 import { dashboardView, runView, titleInfo, type RunView } from '../tui/model.ts';
-import type { ConversationSession } from '../../core/session.ts';
+import type { ConversationSession, LadderOffer } from '../../core/session.ts';
 import {
   listScratchSessions,
   listSessions,
@@ -115,6 +115,8 @@ export interface SessionView {
   readonly cancellable: boolean;
   /** 이 세션의 승인 방식 (D-064). 세션 머리의 선택이 이것을 본다. */
   readonly mode: ApprovalMode;
+  /** 지금 '사다리 다음 단계로 다시 위임' 을 누를 수 있으면 그 단계 (D-068). 입력 대기 중이고 올릴 단계가 있을 때만 있다. */
+  readonly ladder: LadderOffer | null;
 }
 
 export interface WorktreeState {
@@ -371,6 +373,7 @@ export class GuiService {
       interrupted: s.interrupted,
       cancellable: s.cancellable,
       mode: s.mode,
+      ladder: s.state === 'waiting_input' ? s.ladderOffer() : null,
     };
   }
 
@@ -404,6 +407,12 @@ export class GuiService {
   /** 승인 방식을 바꾼다 (D-064). 엔진을 부르지 않으므로 `live` 에 두지 않는다 — 도는 세션에도 바로 붙는다. */
   converseMode(mode: ApprovalMode): SessionView {
     this.requireConversation().setMode(mode);
+    return this.conversation();
+  }
+
+  /** 사다리 다음 단계로 배정 카드를 세운다 (D-068). 엔진을 부르지 않고 시작하지도 않으므로 `live` 에 두지 않는다 — 승인은 카드에서다. */
+  converseEscalate(): SessionView {
+    this.requireConversation().escalate();
     return this.conversation();
   }
 

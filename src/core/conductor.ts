@@ -94,12 +94,14 @@ export function buildSummaryPrompt(title: string, d: Pick<Delegated, 'text' | 'v
 
 /**
  * 다음 제안은 **코드가 계산한다** (SPEC §6.4.4) — 상향 판단을 모델에 넘기지 않는다 (G1).
- * v2.1 세션은 상향을 **실행하지 않으므로** 언제나 사다리의 첫 단계를 제안한다 (SPEC §2.4 순서).
+ * `offer` — 세션이 기록으로 계산한 다음 단계 (D-068). 없으면(undefined) 사다리의 첫 단계, null 이면 더 올릴 곳이 없다.
  */
-export function nextSuggestion(outcome: SettledOutcome | 'cancelled', verdict: Verdict): string {
+export function nextSuggestion(outcome: SettledOutcome | 'cancelled', verdict: Verdict, offer?: { readonly label: string } | null): string {
   // 사용자가 멈춘 위임은 실패 신호가 아니다 — 상향을 권하지 않는다 (D-066).
   if (outcome === 'cancelled') return '';
   if (outcome === 'ok' && verdict !== 'fail') return '';
-  const stage = nextStage([]);
-  return stage ? `사다리 다음 단계: ${STAGE_LABEL[stage]} — 그 뒤에 다시 위임한다` : '';
+  if (offer === null) return '사다리를 더 올릴 곳이 없다 — 문제 정의를 다시 본다 (SPEC §2.4)';
+  const first = nextStage([]);
+  const label = offer?.label ?? (first ? STAGE_LABEL[first] : null);
+  return label ? `사다리 다음 단계: ${label} — 다시 위임하면 그 단계를 올린 배정 카드가 선다 (승인은 카드에서)` : '';
 }

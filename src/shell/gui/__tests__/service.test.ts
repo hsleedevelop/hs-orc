@@ -518,3 +518,25 @@ describe('GUI — 대화 세션 (v2.1)', () => {
   });
 
 });
+
+describe('GUI — 사다리 버튼 (D-068)', () => {
+  it('미검증 결과 뒤 입력 대기에만 버튼이 있고, 누르면 상향 카드가 서며 시작하지 않는다', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    service.startConversation('scratch');
+    const asked = await service.converse('이 타입 에러 고쳐줘');
+    assert.equal(asked.ladder, null, '승인 대기 중에는 없다');
+    const ran = await service.converseApprove({ verify: [], write: false });
+    assert.equal(ran.state, 'waiting_input');
+    assert.equal(ran.ladder?.stage, 'evidence');
+    const before = calls.length;
+    const view = service.converseEscalate();
+    assert.equal(view.state, 'blocked');
+    assert.equal(view.ladder, null, '카드가 선 동안은 버튼이 없다');
+    assert.equal(calls.length, before, '버튼은 엔진을 부르지 않는다');
+    const card = view.records.at(-1);
+    assert.ok(card?.kind === 'plan' && card.ladder?.stage === 'evidence' && card.asked?.some((a) => a.code === 'A3'));
+    const after = await service.converseApprove({ verify: [], write: false });
+    assert.equal(after.ladder?.stage, 'effort');
+  });
+});
