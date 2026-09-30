@@ -179,7 +179,7 @@ cursor는 `cursor-agent --list-models`, claude는 4개 id를 실제로 `-p` 실�
 |---|---|---|---|
 | Luna | codex | `gpt-5.6-luna` | `gpt-5.6-luna-{effort}` ✅ |
 | Terra | codex | `gpt-5.6-terra` | `gpt-5.6-terra-{effort}` ✅ |
-| Sol | codex | `gpt-5.6-sol` | `gpt-5.6-sol-{effort}` ✅ |
+| Sol | codex | `gpt-6.1-sol` | `gpt-5.6-sol-{effort}` ✅ (cursor 목록에 6.1 변형이 없어 5.6 유지, 2026-09-30) |
 | **Astra** | codex | `gpt-6-astra` | **없음 ❌** |
 | **Haiku** | claude | `claude-haiku-4-5-20251001` | **없음 ❌** |
 | Sonnet | claude | `claude-sonnet-5-5` | `claude-sonnet-5-5-{effort}` ✅ |
