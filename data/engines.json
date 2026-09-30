@@ -3,6 +3,7 @@
     "note": "수기 파일이다 (SPEC §9). 모델 id는 추측이 아니라 아래 출처의 실측이다.",
     "collectedAt": "2026-09-20",
     "refresh0929": "2026-09-29 모델 표 갱신: claude 2.1.284 · codex 0.159.0 · cursor-agent 2026.09.18-9a7762b. Sonnet 슬롯 claude-sonnet-5 → claude-sonnet-5-5 (platform.claude.com/docs/en/models/overview: $2/$10 per MTok, 기본 effort high, adaptive thinking, 1M 창). claude -p --model claude-sonnet-5-5 \"Reply with exactly: ok\" → ok (orc 어댑터, low, $0.1175). cursor-agent --list-models 에 claude-sonnet-5-5-{low|medium|high|xhigh|max} 5종이 있고 -thinking·-fast 변형은 없다 → idTemplate 를 claude-sonnet-5-5-{effort}, thinking:false 로 바꿨고 어댑터로 claude-sonnet-5-5-low 1회 ok. codex 0.159.0 어댑터 실행(gpt-5.6-luna low)은 unparsed 0. codex 슬롯 4개(gpt-5.6-luna·terra·sol, gpt-6-astra)의 slug 는 캐시에 그대로 있어 무변경. 미반영(보고만): 캐시에 gpt-6-sol·gpt-6-luna 가 새로 보이고, sol·terra·astra 의 supported_reasoning_levels 에 'ultra' 가 있다(Effort 유니온 밖).",
+    "refresh0930": "2026-09-30 Opus 슬롯 갱신: claude 2.1.284 · cursor-agent 2026.09.28-64d2043. Opus 슬롯 claude-opus-5 → claude-opus-5-5 (작업 지시서 인용: $4/$20 per MTok, 기본 effort medium, 1M 창 — 공식 문서 원문은 본 세션에서 미확인). claude -p --model claude-opus-5-5 --effort low \"Reply with exactly: ok\" → ok (modelUsage 에 claude-opus-5-5 확인, $0.2693 — 전역 컨텍스트 미격리 실행이라 Haiku 보조 호출 포함). cursor-agent --list-models 에 claude-opus-5-5-{low|medium|high|xhigh|max} 5종과 각 -fast 5종이 있고 -thinking 변형은 없다 → idTemplate 를 claude-opus-5-5-{effort}, thinking:false 로 바꿨고 fast 는 유지, cursor-agent -p --model claude-opus-5-5-low --trust → ok. 옛 claude-opus-5-thinking-* 는 목록에 남아 있으나 슬롯에서 뺐다. 미반영(보고만): codex 캐시(client 0.158.0, 2026-09-30) 의 gpt-6-sol·gpt-6-luna, ultra effort — PR 본문 참조.",
     "codex": "~/.codex/models_cache.json (client 0.154.0, fetched 2026-09-20T11:52:52Z; 2026-09-29 재대조는 refresh0929) 의 slug·supported_reasoning_levels",
     "cursor": "cursor-agent --list-models (2026.09.15-d2fe57e)",
     "claude": "claude -p --model <id> \"Reply with exactly: ok\" 를 4개 id로 실제 실행해 응답 확인 (claude 2.1.278; Sonnet 은 2026-09-29 claude-sonnet-5-5 로 2.1.284 에서 재확인)",
@@ -307,7 +308,7 @@
       "defaultEngine": "claude",
       "availability": {
         "claude": {
-          "id": "claude-opus-5",
+          "id": "claude-opus-5-5",
           "efforts": [
             "low",
             "medium",
@@ -317,7 +318,7 @@
           ]
         },
         "cursor": {
-          "idTemplate": "claude-opus-5-thinking-{effort}",
+          "idTemplate": "claude-opus-5-5-{effort}",
           "efforts": [
             "low",
             "medium",
@@ -325,7 +326,7 @@
             "xhigh",
             "max"
           ],
-          "thinking": true,
+          "thinking": false,
           "fast": true
         },
         "codex": null

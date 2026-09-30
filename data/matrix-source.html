@@ -216,11 +216,11 @@
             <div class="bench-bars" id="benchmarkBars">
               <div class="bench-row" data-models="astra"><div class="bench-row__label">Astra + Codex</div><div class="bench-track"><div class="bench-fill" style="--w:89.5%;--color:#34d399"></div></div><div class="bench-score">58.2% <span>±2.8</span></div></div>
               <div class="bench-row" data-models="fable"><div class="bench-row__label">Fable 5.1 + Claude Code</div><div class="bench-track"><div class="bench-fill" style="--w:89.1%;--color:#ff6b35"></div></div><div class="bench-score">57.9% <span>±3.8</span></div></div>
-              <div class="bench-row" data-models="opus"><div class="bench-row__label">Opus 5 + Claude Code</div><div class="bench-track"><div class="bench-fill" style="--w:82.9%;--color:#c4b5fd"></div></div><div class="bench-score">53.9% <span>±3.2</span></div></div>
+              <div class="bench-row" data-models="opus"><div class="bench-row__label">Opus 5.5 (5세대 수치) + Claude Code</div><div class="bench-track"><div class="bench-fill" style="--w:82.9%;--color:#c4b5fd"></div></div><div class="bench-score">53.9% <span>±3.2</span></div></div>
               <div class="bench-row" data-models="sol"><div class="bench-row__label">Sol + Codex</div><div class="bench-track"><div class="bench-fill" style="--w:57.4%;--color:#2dd4bf"></div></div><div class="bench-score">37.3% <span>±3.8</span></div></div>
               <div class="bench-row" data-models="terra"><div class="bench-row__label">Terra + Codex</div><div class="bench-track"><div class="bench-fill" style="--w:33.1%;--color:#86efac"></div></div><div class="bench-score">21.5% <span>±3.3</span></div></div>
               <div class="bench-row" data-models="luna"><div class="bench-row__label">Luna + Codex</div><div class="bench-track"><div class="bench-fill" style="--w:26.6%;--color:#bef264"></div></div><div class="bench-score">17.3% <span>±2.8</span></div></div>
-              <div class="bench-row" data-models="sonnet"><div class="bench-row__label">Sonnet 5 + Claude Code</div><div class="bench-track"><div class="bench-fill" style="--w:19.1%;--color:#fda4af"></div></div><div class="bench-score">12.4% <span>±3.1</span></div></div>
+              <div class="bench-row" data-models="sonnet"><div class="bench-row__label">Sonnet 5.5 (5세대 수치) + Claude Code</div><div class="bench-track"><div class="bench-fill" style="--w:19.1%;--color:#fda4af"></div></div><div class="bench-score">12.4% <span>±3.1</span></div></div>
               <div class="bench-row" data-models="haiku"><div class="bench-row__label">Haiku 4.5</div><div class="bench-track"><div class="bench-fill" style="--w:0%;--color:#fcd34d"></div></div><div class="bench-score">not listed <span>TB4 snapshot</span></div></div>
             </div>
             <p class="chart-note"><strong>해석:</strong> 이 snapshot의 수치는 model + agent harness 구성 결과입니다. Astra/Fable의 0.3pp만으로 모델 우열을 단정하지 않으며, Haiku는 이 TB4 snapshot에 공개 listing이 없어 점수를 표시하지 않습니다.</p>
@@ -245,8 +245,8 @@
             <button class="model-button" style="--model-color:#86efac" data-profile="terra" type="button" role="tab" aria-selected="false">GPT-5.6 Terra<span>fast balanced work · Codex</span></button>
             <button class="model-button" style="--model-color:#bef264" data-profile="luna" type="button" role="tab" aria-selected="false">GPT-5.6 Luna<span>cost-sensitive high volume</span></button>
             <button class="model-button" style="--model-color:#ff6b35" data-profile="fable" type="button" role="tab" aria-selected="false">Claude Fable 5.1<span>long horizon · Claude Code</span></button>
-            <button class="model-button" style="--model-color:#c4b5fd" data-profile="opus" type="button" role="tab" aria-selected="false">Claude Opus 5<span>strong focused reasoning</span></button>
-            <button class="model-button" style="--model-color:#fda4af" data-profile="sonnet" type="button" role="tab" aria-selected="false">Claude Sonnet 5<span>balanced daily implementation</span></button>
+            <button class="model-button" style="--model-color:#c4b5fd" data-profile="opus" type="button" role="tab" aria-selected="false">Claude Opus 5.5<span>strong focused reasoning</span></button>
+            <button class="model-button" style="--model-color:#fda4af" data-profile="sonnet" type="button" role="tab" aria-selected="false">Claude Sonnet 5.5<span>balanced daily implementation</span></button>
             <button class="model-button" style="--model-color:#fcd34d" data-profile="haiku" type="button" role="tab" aria-selected="false">Claude Haiku 4.5<span>fast lightweight work</span></button>
           </div>
           <div class="model-profile" id="modelProfile" style="--profile-color:#34d399" aria-live="polite"></div>
@@ -280,8 +280,8 @@
           <tr><td>Terra</td><td>42</td><td>$1.40</td><td>211.05s</td><td>Text + image</td></tr>
           <tr><td>Luna</td><td>37</td><td>$0.18</td><td>123.28s</td><td>Text + image</td></tr>
           <tr><td>Fable 5.1*</td><td>53</td><td>$7.63</td><td>262.21s</td><td>Text + image</td></tr>
-          <tr><td>Opus 5</td><td>51</td><td>$5.86</td><td>56.84s</td><td>Text + image</td></tr>
-          <tr><td>Sonnet 5</td><td>38</td><td>$5.09</td><td>131.49s</td><td>Text + image</td></tr>
+          <tr><td>Opus 5.5 (5세대 수치)</td><td>51</td><td>$5.86</td><td>56.84s</td><td>Text + image</td></tr>
+          <tr><td>Sonnet 5.5 (5세대 수치)</td><td>38</td><td>$5.09</td><td>131.49s</td><td>Text + image</td></tr>
           <tr><td>Haiku 4.5</td><td>17</td><td>$0.21</td><td>17.18s</td><td>Text + image</td></tr>
         </tbody></table></div>
         <div class="panel__body" style="padding-top:12px"><p class="chart-note" style="margin:0"><strong>모달리티 경계:</strong> 이 8모델 매트릭스는 text + image 입력을 기준으로 합니다. audio/video가 핵심이면 이 표에서 순위를 추정하지 말고 해당 입력을 지원하는 별도 후보를 동일 업무로 평가하세요.</p></div>
@@ -321,8 +321,8 @@
       terra: { name: 'GPT-5.6 Terra', color: '#86efac', kind: 'OpenAI · fast balanced work', summary: '짧고 명확한 구현, 구조화된 문서, 반복적인 보조 검증에 비용과 속도 균형이 좋습니다. Terminal-Bench 결과는 최상위군과 큰 간격이 있어, 복잡한 버그나 광범위한 리팩터링의 단독 담당은 피합니다.', stats: [['Best fit', 'Small changes · docs'], ['Effort', 'Mid → High'], ['Escalate when', 'root cause is unclear']] },
       luna: { name: 'GPT-5.6 Luna', color: '#bef264', kind: 'OpenAI · high-volume efficiency', summary: '반복 변환, 짧은 요약, 명확한 타입·문법 확인처럼 비용 민감하고 고빈도인 업무에 맞습니다. 결과가 바로 실행·배포 경로를 바꾸면 Terra 이상으로 올리고 관련 test를 실행합니다.', stats: [['Best fit', 'Batch · summary · routine'], ['Effort', 'Low → Mid'], ['Escalate when', 'scope expands']] },
       fable: { name: 'Claude Fable 5.1', color: '#ff6b35', kind: 'Anthropic · long-horizon exploration', summary: '모호한 아키텍처 설계, 대규모 레거시 분석, 장기 마이그레이션에서 primary로 적합합니다. Astra와 terminal coding 결과가 오차 범위 내로 가까워, 코딩 업무에서도 고위험 작업의 독립 검증자 역할이 강합니다.', stats: [['Best fit', 'Legacy · design · migration'], ['Effort', 'High → Max'], ['Reviewer', 'Astra xHigh / Max']] },
-      opus: { name: 'Claude Opus 5', color: '#c4b5fd', kind: 'Anthropic · focused reasoning', summary: '비용을 낮추면서 강한 단발 추론과 코드 경로 검토를 수행하는 대안입니다. 최신 Fable보다 장기 에이전트성은 낮지만, 리팩터링·성능 최적화의 reviewer로 실용적인 균형을 제공합니다.', stats: [['Best fit', 'Review · focused analysis'], ['Effort', 'Low → xHigh'], ['Use with', 'Astra or Terra primary']] }
-      ,sonnet: { name: 'Claude Sonnet 5', color: '#fda4af', kind: 'Anthropic · balanced daily implementation', summary: '요구사항 정리, 일상 기능 구현, 테스트 보강과 코드 리뷰에 균형 잡힌 역할입니다. 장기 탐색이나 불명확한 RCA에서는 Opus 또는 Fable로 상향하되, 먼저 로그·재현 조건을 보강합니다.', stats: [['Best fit', 'Daily feature · review'], ['Effort', 'Mid → High'], ['Escalate when', 'multi-step investigation']] },
+      opus: { name: 'Claude Opus 5.5', color: '#c4b5fd', kind: 'Anthropic · focused reasoning', summary: '비용을 낮추면서 강한 단발 추론과 코드 경로 검토를 수행하는 대안입니다. 최신 Fable보다 장기 에이전트성은 낮지만, 리팩터링·성능 최적화의 reviewer로 실용적인 균형을 제공합니다.', stats: [['Best fit', 'Review · focused analysis'], ['Effort', 'Low → xHigh'], ['Use with', 'Astra or Terra primary']] }
+      ,sonnet: { name: 'Claude Sonnet 5.5', color: '#fda4af', kind: 'Anthropic · balanced daily implementation', summary: '요구사항 정리, 일상 기능 구현, 테스트 보강과 코드 리뷰에 균형 잡힌 역할입니다. 장기 탐색이나 불명확한 RCA에서는 Opus 또는 Fable로 상향하되, 먼저 로그·재현 조건을 보강합니다.', stats: [['Best fit', 'Daily feature · review'], ['Effort', 'Mid → High'], ['Escalate when', 'multi-step investigation']] },
       haiku: { name: 'Claude Haiku 4.5', color: '#fcd34d', kind: 'Anthropic · fast lightweight work', summary: '짧은 질문, 요약, 문법과 타입 확인, 잘 분리된 작은 수정에 맞습니다. 현재 TB4 snapshot에는 공개 결과가 없으므로, 경량 역할의 실사용 검증은 작업 표본으로 확인해야 합니다.', stats: [['Best fit', 'Short questions · checks'], ['Effort', 'Low → Mid'], ['Escalate when', 'change has blast radius']] }
     };
     const rows = [
