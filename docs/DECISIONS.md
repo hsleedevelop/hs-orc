@@ -1921,6 +1921,63 @@ D-064 는 구현 순서를 (1) 카드 합치기 → (2) 취소 → (3) 방식 3�
 
 ---
 
+## D-067 — codex 신규 모델(gpt-6-sol·gpt-6-luna) 은 실측 뒤 교체를 정한다: 지금은 gpt-5.6-* 유지, ultra 는 보류 (전하 결정 2026-09-30, 선택지 A)
+
+**배경**
+PR #70 의 codex 조사(`~/.codex/models_cache.json`, client 0.158.0, 2026-09-30)에서 `gpt-6-sol`("Previous generation workhorse")·`gpt-6-luna` 가 새로 보이고, 현행 `gpt-5.6-*` 는 "Older generation" 으로 적혀 있다. sol·terra·astra 의 `supported_reasoning_levels` 에는 `ultra`("Maximum reasoning with automatic task delegation")가 있고 gpt-6-luna 에는 없다. 전하가 **선택지 A** 를 골랐다 — 지금은 `engines.json` 을 그대로 두고, 실측한 뒤 교체를 따로 정한다. ultra 는 실행하지 않는다.
+
+**결정**
+1. `engines.json` 은 이 결정에서 **바꾸지 않는다.** 아래는 근거와 권장안뿐이고, 교체 PR 은 전하가 정한 뒤에 낸다.
+2. 실측은 orc 어댑터 그대로(`createAdapter('codex')`, 읽기 전용 argv, `nonGit`)에 **임시 카탈로그 사본**의 codex `id` 만 바꿔 돌렸다 — 파일은 건드리지 않는다.
+3. ultra 는 `Effort` 유니온 밖이라 어댑터가 받지 않는다. 받게 하는 일은 아래 위험이 정리되기 전에는 하지 않는다.
+
+**실측** (2026-09-30, codex-cli 0.159.0, 구독제 — 금액은 API 환산, 스크래치 폴더 `nonGit`, 슬롯 매트릭스 기본 effort: sol=high · luna=low, 각 (모델×작업) 1회)
+작업 ① `cart.ts`(작은 TS 파일) 설명 + 위험 하나, ② `bad.ts`(타입 에러 2개) 원인과 최소 diff 제시 — 둘 다 "파일을 고치지 마라".
+
+| 모델 | 작업 | 지연 | 입력(비캐시)/캐시/출력 tok | 환산 $ | 품질 |
+|---|---|---|---|---|---|
+| gpt-5.6-sol high | ① | 40s | 32,580 / 96,384 / 475 | 0.178 | 정확, 6줄 안 |
+| gpt-5.6-sol high | ② | 90s | 33,000 / 139,776 / 1,520 | 0.218 | 에러 2개 정확, diff 정확, tsconfig 부재 부연 |
+| gpt-6-sol high | ① | 29s | 31,031 / 52,992 / 374 | 0.076 | 정확, 더 짧음 |
+| gpt-6-sol high | ② | 77s | 33,743 / 143,104 / 1,179 | 0.108 | 에러 2개·diff 동일 |
+| gpt-5.6-luna low | ① | 21s | 32,703 / 88,320 / 454 | 0.009 | 정확 |
+| gpt-5.6-luna low | ② | 33s | 33,926 / 129,024 / 981 | 0.011 | 에러 2개·diff 동일 |
+| gpt-6-luna low | ① | 11s | 28,315 / 12,032 / 60 | 0.003 | **실패** — "cart.ts 를 읽을 수 없다" (명령 실행 없음) |
+| gpt-6-luna low | ② | 21s | 34,328 / 128,000 / 462 | 0.005 | 에러 2개·diff 동일 |
+| gpt-6-luna low (①재실행) | ① | — | 33,292 / 47,616 / 174 | 0.004 | 정확 (읽기 명령 실행) |
+
+- **스트림 파싱**: 9회 전부 `unparsed` 0, outcome `ok`, 세션 id 회수. 공통 `notice` 는 `chronicle`(under development) 경고 한 줄뿐(사용자 config, 모델 무관).
+- **effort 선언 일치**: gpt-6-luna 는 캐시 `low…max` 5종 = 슬롯 선언과 일치. gpt-6-sol 은 캐시 `low…max`+`ultra` — 슬롯 선언(`low…max`)과 gpt-5.6-sol 과 같은 모양(ultra 는 선언 밖, 어댑터도 안 받음). 기본 effort 는 캐시가 gpt-6-* 둘 다 medium, gpt-5.6-sol 은 low — 매트릭스 값을 명시로 넘기므로 영향 없음.
+- **읽기 전용(D-051)**: 9회 argv 모두 `-c sandbox_mode="read-only"` 포함, 스크래치 파일 sha1 전후 동일(변경 0). gpt-6-* 에서도 인자가 유지됨.
+- **단가**(developers.openai.com/api/docs/pricing, Standard 단문, 2026-09-30 조회): gpt-6-sol $2/$0.2/$10, gpt-6-luna $0.1/$0.01/$0.5 (입력/캐시/출력 per MTok). 현행은 5.6-sol $4/$20, 5.6-luna $0.2/$1.2. `data/pricing.json` 에는 아직 gpt-6-sol·luna 가 없어 이 단가로 손 계산했다(`meteredUsd` 와 같은 식: 비캐시 입력×단가 + 캐시×캐시단가 + 출력×단가) — 실제 orc 경로로는 estimate 로 남는다.
+- **지연·금액 요약(2작업 합)**: sol 5.6→6 $0.397→$0.184(−54%), 119s→106s. luna 5.6→6 $0.019→$0.008(−59%), 54s→32s.
+- **캐시 입력이 큰 이유**: codex 가 `~/.codex` 전역 지침(호칭 "전하"·delegation-router 언급)을 싣고 뜬다 — 위임 엔진 격리 없음은 D-032 의 기존 결정(지휘자만 격리)이다. 모델 간 비교는 같은 조건이라 유효하다.
+- **비용 상한**: 9회+재실행 1회 합계 환산 약 $0.61 — 지시한 상한 $0.50 을 약 $0.11 넘겼다(sol high 4회가 대부분, 실행 전에 상한을 추정하지 못했다). 구독제라 청구되지 않는다.
+- **못 잰 것**: n=1(작업당 1회), 작업 2종은 쉬운 축이라 sol 과 luna 의 깊이·긴 작업 차이는 안 나온다. gpt-6-luna 의 ① 실패는 재실행에서 재현되지 않았다(1/2) — 원인 미상, 일회성인지 low effort 에서 파일을 안 읽는 경향인지 구분 못 함.
+
+**ultra 조사** (실행하지 않음 — 문서·캐시·CLI 설명만)
+- 캐시: `ultra` = "Maximum reasoning with automatic task delegation". gpt-6-sol·gpt-5.6-sol·terra·astra 에 있고 gpt-6-luna 에는 없다. 모델 항목의 `multi_agent_version: v2`, `codex features` 에서 `multi_agent` stable·켜짐, `multi_agent_v2` stable·꺼짐. 사용자 `config.toml` 은 데스크톱 UI 에서 ultra 를 켜 둔 상태(`enabled-reasoning-efforts` 에 ultra).
+- 공식 문서(learn.chatgpt.com/codex/agent-configuration/subagents): "Ultra … lets ChatGPT proactively delegate suitable work to subagents" — 다른 수준은 사용자가 서브에이전트를 직접 요청해야 하고 ultra 만 **묻지 않고 위임**한다. 서브에이전트는 부모의 sandbox 정책·승인 방식·model·reasoning effort 를 상속하고, 각자 토큰을 따로 쓴다("더 많은 토큰"), 동시 스레드 상한 `agents.max_concurrent_threads_per_session` 이 있다.
+- orc 관점 위험:
+  1. **예산 셈**: 서브에이전트가 각자 모델·도구 작업을 한다. codex `turn.completed.usage` 가 부모 스레드 것만 담는지 자식 몫까지 합치는지 **미확인** — D-058 에서 압축 몫도 안 잡혔다(`compactionUncounted`). 자식 몫이 빠지면 `tokenBudget`·`budgetUsd` 상한이 새는 방향으로 틀린다. 실행하지 않았으므로 어느 쪽인지 모른다.
+  2. **읽기 전용(D-051)**: 문서상 상속이라 `sandbox_mode="read-only"` 가 자식에도 걸릴 것으로 **추정**되나 미실측이다. `-c` 로 준 값이 자식 스레드에 전달되는지가 핵심 — 확인 전에는 "위임 안에서 읽기 전용이 지켜진다"고 말할 수 없다.
+  3. **승인 게이트(D-064)**: orc 는 위임 1건을 승인 단위로 본다(카드·비용 기준·상한 근접). ultra 는 그 한 건 안에서 하위 위임 수·비용을 orc 가 미리 알 수 없어 카드의 비용 추정과 비용 기준 판정이 맞지 않는다. 취소(D-066)는 프로세스 그룹 종료라 자식이 같은 그룹인지 미확인.
+  4. **증거·검증**: 하위 작업이 만든 변경·명령이 orc 의 증거 수집(git status 등)에는 결과로만 보이고, 어느 자식이 무엇을 했는지 스트림에서 읽는 어휘가 없다(`RunEvent` 에 자식 개념 없음).
+  5. **Effort 유니온 밖**: `ultra` 를 받으려면 `matrix.json`·`engines.json`·어댑터 검증·GUI 목록·사다리(ladder)에 새 값이 퍼진다 — 위 1~2 를 실측으로 닫은 뒤의 일이다.
+- 결론: **ultra 는 지금 켜지 않는다.** 켜려면 (a) 자식 토큰이 usage 에 합쳐지는지, (b) 읽기 전용 상속, (c) 취소 시 자식 종료를 격리 스크래치에서 소액으로 실측해야 하고, 그 결과에 따라 `multi_agent` 를 끄는 인자(`-c features.multi_agent=false` 류, 미검증)를 읽기 전용 argv 에 더할지도 함께 정한다.
+
+**권장안 (교체는 전하 결정 후 별도 PR)**
+- **교체 권장 — sol·luna 를 gpt-6-* 로.** 같은 (작은) 작업에서 답이 같은 품질이고 환산 비용은 sol −54%·luna −59%, 지연은 같거나 짧다. 단가표도 낮다(sol $2/$10, luna $0.1/$0.5). 캐시 설명이 5.6 을 "Older generation" 으로 적는다.
+- 조건·주의: (1) luna 는 ① 1/2 실패가 걸린다 — 교체 전 같은 작업을 몇 번 더 돌려 재현 여부를 본다(비용 $0.01 미만). (2) terra 는 gpt-6-terra 가 없어 5.6 에 남으므로 표에서 세대가 섞인다 — 매트릭스 표 이름·설명(`GPT-5.6 Sol` → `GPT-6 Sol`)과 `gen:matrix` 원본 이름, `pricing.json` 단가 추가가 같은 PR 에 필요하다. (3) `cursor` 쪽 `gpt-5.6-*-{effort}` 는 cursor 목록에 gpt-6-* 가 있는지 별도 확인 전에는 그대로 둔다. (4) astra 는 무변경.
+- **일부 교체가 안전한 경우**: 위 (1) 을 확인하기 전이라면 sol 만 먼저 교체하고 luna 는 유지하는 안이 있다.
+- ultra 는 위 결론대로 별도 결정(D-068 이후)으로 미룬다.
+
+**검증** `npm run gate`. 실측은 임시 스크립트(`/tmp/orc-eval`)로 했고 저장소에 코드를 더하지 않았다.
+
+**상태** 실측·조사 기록 — 2026-09-30. `engines.json` 무변경. PR 대기(머지는 전하).
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |
