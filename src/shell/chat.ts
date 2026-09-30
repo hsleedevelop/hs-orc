@@ -7,7 +7,7 @@ import { APPROVAL_MODES, isApprovalMode, type ApprovalMode } from '../data/limit
 import type { Budget } from '../core/budget.ts';
 import type { ConversationSession } from '../core/session.ts';
 import { listScratchSessions, listSessions, readTranscript, type SessionSummary, type TranscriptRecord } from '../core/transcript.ts';
-import { compactLines, cutLine } from './transcript-lines.ts';
+import { compactLines, cutLine, ladderLines } from './transcript-lines.ts';
 
 export function renderRecord(r: TranscriptRecord): string[] {
   switch (r.kind) {
@@ -29,6 +29,7 @@ export function renderRecord(r: TranscriptRecord): string[] {
         `배정   primary  ${r.primary}`,
         `       reviewer ${r.reviewer}`,
         `비용   $${r.estimateUsd} (추정)`,
+        ...ladderLines(r.ladder).map((l, i) => (i === 0 ? l : `       ${l}`)),
         // 묻는 카드는 걸린 조건을 이름으로 보인다 (D-064). manual 은 늘 묻고, 이유가 없으면 자동 승인이 뒤따른다.
         ...(r.mode && r.mode !== 'manual' && r.asked && r.asked.length > 0 ? [`묻는 이유  ${r.asked.map((a) => `${a.code} ${a.text}`).join(' · ')}`] : []),
       ];
@@ -59,7 +60,7 @@ export function renderRecord(r: TranscriptRecord): string[] {
 }
 
 export const CHAT_HELP = [
-  '명령   메시지를 그냥 쓰면 보낸다 · /write <문장> 쓰기 위임으로 보낸다 · /task Rxx 마지막 메시지를 그 행으로 배정 · /mode [방식] · /help · /quit (Ctrl-D)',
+  '명령   메시지를 그냥 쓰면 보낸다 · /write <문장> 쓰기 위임으로 보낸다 · /task Rxx 마지막 메시지를 그 행으로 배정 · /ladder 실패·미검증 뒤 사다리 다음 단계로 다시 위임(카드만 선다) · /mode [방식] · /help · /quit (Ctrl-D)',
   '방식   /mode manual 매번 묻는다 · auto-ask 쓰기·모델이 고른 행·비싼 조합·상한 근접·첫 위임만 묻는다 · auto 쓰기·모델이 고른 행만 묻는다 — 자동은 이 메시지의 배정 1건만 시작한다',
   '승인   배정이 뜨면 y 읽기 전용 · w 쓰기 · n 거절 · a 지휘자에게 묻기 · 문장을 쓰면 거절하고 그 메시지를 보낸다',
   '취소   위임이 도는 중 Ctrl-C 한 번 — 그 위임만 멈추고 세션은 남는다 · 한 번 더 누르면 나간다',
@@ -118,6 +119,10 @@ export async function runChat(
             else show(out);
             if (session.state === 'blocked') say('안내   지금 선 카드는 자동 승인하지 않는다 — 다음 배정부터 적용된다.');
           } else say(`모르는 방식이다: ${arg} — ${APPROVAL_MODES.join(' · ')}`);
+        } else if (line === '/ladder') {
+          // 카드만 세운다 — 시작은 y·w 로 따로 한다 (D-068). 블로킹 중에는 아래 blocked 분기가 먼저 받는다.
+          if (session.state === 'blocked') say('이미 선 배정이 있다 — 먼저 y·w·n·a 로 답한다.');
+          else show(session.escalate());
         } else if (line.startsWith('/write ')) {
           show(await session.send(line.slice('/write '.length), { write: true }));
         } else if (session.state === 'blocked') {
@@ -218,6 +223,7 @@ export function openingLines(session: ConversationSession, budget: Budget, tail 
     ...(session.interrupted ? ['끊김   지난 위임은 승인 뒤 결과가 기록되지 않았다 — 다시 보내면 새로 띄운다.'] : []),
     // Core 는 승인 안 된 배정을 되살리지 않는다 (session.ts 생성자) — 사용자에게 그 사실과 길을 알린다.
     ...(last?.kind === 'plan' ? [`안내   승인 안 된 배정은 되살리지 않는다 — 다시 보내거나 /task ${last.taskId}.`] : []),
+    ...(session.state === 'waiting_input' && session.ladderOffer() ? [`안내   /ladder — 사다리 ${session.ladderOffer()?.label}(으)로 다시 위임하는 배정 카드를 세운다.`] : []),
     // 카드 합치기(D-064) 이전 기록 — 제안만 있고 배정이 없다.
     ...(last?.kind === 'direct' && last.suggest ? [`안내   ${last.suggest} 로 위임하려면 /task ${last.suggest}.`] : []),
     CHAT_HELP,

@@ -12,7 +12,7 @@
  */
 import { createElement as h, useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { compactLines, cutLine } from '../../transcript-lines.ts';
+import { compactLines, cutLine, ladderLines } from '../../transcript-lines.ts';
 
 const SCREENS = ['Session', 'Dashboard', 'Agents', 'Reviews', 'Debug'] as const;
 type Screen = (typeof SCREENS)[number];
@@ -39,13 +39,13 @@ interface Compaction { trigger: string; preTokens?: number; postTokens?: number 
 type Rec =
   | { kind: 'user'; turn: number; text: string }
   | { kind: 'direct'; turn: number; text: string; suggest: string | null; cost: string; notes: string[]; cut?: Cut }
-  | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; estimateUsd: number; notes: string[]; mode?: ApprovalMode; asked?: { code: string; text: string }[]; write?: boolean }
+  | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; estimateUsd: number; notes: string[]; mode?: ApprovalMode; asked?: { code: string; text: string }[]; write?: boolean; ladder?: { stage: string; label: string; from: string; changes: string[] } }
   | { kind: 'approval'; turn: number; approved: boolean; write: boolean; by?: 'user' | 'auto'; mode?: ApprovalMode }
   | { kind: 'mode'; turn: number; mode: ApprovalMode }
   | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string; cut?: Cut; compacted?: Compaction[] }
   | { kind: 'summary'; turn: number; text: string; next: string }
   | { kind: 'error'; turn: number; text: string };
-interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; mode: ApprovalMode }
+interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; mode: ApprovalMode; ladder: { stage: string; label: string; changes: string[] } | null }
 interface SessionSummary { id: string; dir: string; kind: SessionKind; lastAt: string; preview: string }
 
 interface Bridge {
@@ -58,6 +58,7 @@ interface Bridge {
   convPlanAs(taskId: string): Promise<SessionView>;
   convApprove(payload: { verify: string[]; write: boolean }): Promise<SessionView>;
   convCancel(): Promise<SessionView>;
+  convEscalate(): Promise<SessionView>;
   convReject(): Promise<SessionView>;
   convAsk(): Promise<SessionView>;
   convClose(): Promise<void>;
@@ -344,6 +345,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       planLine(`primary  ${r.primary}`, 1),
       planLine(`reviewer ${r.reviewer}`, 2),
       planLine(`비용 예상 $${r.estimateUsd}`, 3),
+      // 사다리 상향 카드는 무엇이 올라갔는지 보인다 (D-068) — 같은 요청을 올려 다시 위임하는 카드임을 첫 줄이 말한다.
+      ...ladderLines(r.ladder).map((l, j) => h('div', { key: `l${j}`, className: j === 0 ? 'hint warn' : 'hint' }, l)),
       // 묻는 카드는 걸린 조건을 이름으로 보인다 (D-064) — 이유 없이 선 카드는 무엇을 봐야 할지 모른다.
       active && r.mode && r.mode !== 'manual' && r.asked && r.asked.length > 0
         ? h('div', { className: 'hint warn' }, `묻는 이유: ${r.asked.map((a) => a.text).join(' · ')}`)
@@ -443,6 +446,12 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     view.broken > 0 ? h('div', { className: 'banner error' }, `기록에 깨진 줄 ${view.broken}개 — 건너뛰고 보여준다`) : null,
     view.interrupted ? h('div', { className: 'banner error' }, '승인한 위임의 결과가 기록되지 않았다 — 실행 중 앱이 끊겼다. 결정 로그 1차 줄만 남아 있을 수 있다.') : null,
     ...view.records.map(record),
+    // 미검증·실패 뒤 사다리 다음 단계 (D-068) — 누르면 배정 카드만 선다. 시작은 카드의 승인이다(어느 방식에서도 A3 로 묻는다).
+    view.ladder && view.state === 'waiting_input' && !busy
+      ? h('div', { className: 'row' },
+          h('button', { className: 'btn accent', onClick: () => act(orc.convEscalate()) }, '사다리 다음 단계로 다시 위임'),
+          h('span', { className: 'hint' }, view.ladder.changes.at(-1) ?? view.ladder.label))
+      : null,
     // 도는 중 받은 뷰에 이미 그 메시지가 실려 있으면 임시 말풍선을 또 띄우지 않는다.
     sending && !(peek && peek.records.length > props.view.records.length) ? h('div', { className: 'bubble user dim' }, sending) : null,
     // 다시 연 화면은 `busy` 를 모른다 — 서비스가 working 이면 도는 실행에 붙은 것이다 (D-063). 결과는 앞 화면이 건 요청이 돌아오며 싣는다.

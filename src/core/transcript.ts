@@ -15,7 +15,16 @@ import type { SettledOutcome } from './evidence.ts';
 import type { EngineReport } from './executor.ts';
 import type { ApprovalMode } from '../data/limits.ts';
 import type { AskReason } from './approval.ts';
+import type { LadderApplied } from './ladder.ts';
 import type { CacheWrite, EngineCompaction } from '../adapters/types.ts';
+
+/** `plan` 기록에 남는 사다리 적용 (D-068) — 적용 내용에 더해 어느 결정에서 올랐고 원래 행 근거가 무엇이었나. */
+export interface LadderRecord extends LadderApplied {
+  /** 상향 근거가 된 직전 결과의 결정 id. */
+  readonly from: string;
+  /** 사다리 이전 배정의 근거(`plan.reason`). 사다리 배정의 reason 은 `사다리 ②… · <이것>` 이다. */
+  readonly origin: string;
+}
 
 export type SessionKind = 'project' | 'scratch';
 /** AO 어휘 (D-031). `blocked` 는 위임 승인 대기다 — 그 상태에서는 아무것도 자동으로 진행하지 않는다. */
@@ -62,6 +71,8 @@ export type TranscriptEntry =
       readonly asked?: readonly AskReason[];
       /** 사용자가 쓰기 위임으로 보냈다 — 카드의 쓰기 스위치가 켜진 채 선다. */
       readonly write?: boolean;
+      /** 사용자가 눌러 상향한 배정이다 (D-068). 사다리 상태는 이 필드와 뒤따르는 결과에서 계산한다 — 옛 기록은 없다. */
+      readonly ladder?: LadderRecord;
     }
   | {
       readonly kind: 'approval';

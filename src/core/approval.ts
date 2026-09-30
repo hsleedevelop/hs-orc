@@ -3,6 +3,7 @@
  * 판정은 Core 한 곳에만 두고 셸은 표시만 한다 (D-001·D-056).
  *
  * H — 어느 방식에서도 묻는다(`manual` 은 전부 묻는다). A — `auto-ask` 만 더 묻는다. `auto` 는 H 만 묻는다.
+ * **예외: 사다리 상향 배정(D-068)의 A3 는 `auto` 에서도 묻는다** — 비용이 바뀌는 같은 요청의 재위임이다.
  * 상한 도달은 여기서 묻는 것이 아니라 막는 것이다 (D-030) — 승인 뒤 `approve()` 가 시작하지 않는다.
  */
 import type { Engines } from '../data/engines.ts';
@@ -38,7 +39,7 @@ export interface ApprovalCheck {
  * H1 — 행을 모델이 골랐다. 확신 있는 Jev 행(`Jev Rxx …`, D-065 결정 10)·규칙 분류(`키워드 …`)·사용자의 행 지정(`수동 지정 …`)은
  * 아니다. **그 밖은 전부 모델 선택으로 본다** — 지휘자 제안·Haiku 분류, 그리고 모르는 출처(안전한 쪽으로 묻는다).
  */
-export const isModelPick = (reason: string): boolean => !/^(키워드 |Jev |수동 지정 )/.test(reason);
+export const isModelPick = (reason: string): boolean => !/^(키워드 |Jev |수동 지정 |사다리 )/.test(reason);
 
 const isFailure = (r: TranscriptRecord): boolean =>
   r.kind === 'result' && (r.outcome === 'wrong' || r.outcome === 'rework' || r.verdict === 'fail');
@@ -53,10 +54,12 @@ export interface ApprovalInput {
   readonly budget: Budget;
   /** 이 세션의 기록 — 배정을 세우기 **전** 상태다(직전 위임·첫 위임 판정). */
   readonly records: readonly TranscriptRecord[];
+  /** 사용자가 누른 사다리 상향 배정이다 (D-068). 행은 이미 승인해 돌린 행이라 H1 이 아니지만, 방식과 무관하게 A3 로 묻는다. */
+  readonly ladder?: boolean;
 }
 
 export function evaluateApproval(input: ApprovalInput): ApprovalCheck {
-  const { mode, plan, reason, write, catalog, budget, records } = input;
+  const { mode, plan, reason, write, catalog, budget, records, ladder = false } = input;
   if (mode === 'manual') return { mode, asks: [], auto: false };
   const asks: AskReason[] = [];
   const primary = plan.slots.primary;
@@ -66,6 +69,9 @@ export function evaluateApproval(input: ApprovalInput): ApprovalCheck {
   if (catalog.engines[primary.engine].readOnlyArgv === undefined) {
     asks.push({ code: 'H3', text: `${primary.engine} 는 읽기 전용이 인자로 보장되지 않는다` });
   }
+
+  // 사다리 상향 (D-068) — `auto` 에서도 묻는다. 버튼은 "이 단계를 보겠다", 카드 승인은 "이 비용으로 돌려라" 다 (D-033).
+  if (ladder) asks.push({ code: 'A3', text: '사다리 상향 배정 — 같은 요청의 재위임이고 예상 비용이 바뀐다' });
 
   if (mode === 'auto-ask') {
     const usd = plan.cost.totalUsd;
@@ -80,15 +86,18 @@ export function evaluateApproval(input: ApprovalInput): ApprovalCheck {
     }
 
     // A3 — 직전 위임이 실패했는데 같은 행이거나, 행 기본보다 높은 effort. 취소는 실패가 아니다 (D-066). `unverified` 는 넣지 않는다 (SPEC §8).
-    const lastResult = records.findLastIndex((r) => r.kind === 'result');
-    const failed = lastResult >= 0 && isFailure(records[lastResult] as TranscriptRecord);
-    const before = lastResult >= 0 ? records.slice(0, lastResult).findLast((r) => r.kind === 'plan') : undefined;
-    if (failed && before?.kind === 'plan' && before.taskId === plan.assignment.id) {
-      asks.push({ code: 'A3', text: `직전 위임이 실패했는데 같은 행 ${plan.assignment.id}` });
+    // 사다리 배정은 위의 A3 한 줄이 이 둘을 덮는다 — 이유를 겹쳐 적지 않는다.
+    if (!ladder) {
+      const lastResult = records.findLastIndex((r) => r.kind === 'result');
+      const failed = lastResult >= 0 && isFailure(records[lastResult] as TranscriptRecord);
+      const before = lastResult >= 0 ? records.slice(0, lastResult).findLast((r) => r.kind === 'plan') : undefined;
+      if (failed && before?.kind === 'plan' && before.taskId === plan.assignment.id) {
+        asks.push({ code: 'A3', text: `직전 위임이 실패했는데 같은 행 ${plan.assignment.id}` });
+      }
+      const base = plan.assignment;
+      const raised = (slot: 'primary' | 'reviewer'): boolean => plan.slots[slot].effort !== base[slot].efforts[0];
+      if (raised('primary') || raised('reviewer')) asks.push({ code: 'A3', text: '행 기본보다 높은 effort' });
     }
-    const base = plan.assignment;
-    const raised = (slot: 'primary' | 'reviewer'): boolean => plan.slots[slot].effort !== base[slot].efforts[0];
-    if (raised('primary') || raised('reviewer')) asks.push({ code: 'A3', text: '행 기본보다 높은 effort' });
 
     // A4 — 이 세션에서 승인된 위임이 아직 없다. 폴더 단위는 세션 목록을 훑어야 해 넣지 않는다.
     if (!records.some((r) => r.kind === 'approval' && r.approved)) asks.push({ code: 'A4', text: '이 세션의 첫 위임' });

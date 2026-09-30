@@ -74,6 +74,7 @@ ipcMain.handle('conv-mode', (_e, mode: ApprovalMode) => service.converseMode(mod
 ipcMain.handle('conv-plan-as', (_e, taskId: string) => service.conversePlanAs(taskId));
 ipcMain.handle('conv-approve', (_e, p: { verify: string[]; write: boolean }) => service.converseApprove(p));
 ipcMain.handle('conv-cancel', () => service.converseCancel());
+ipcMain.handle('conv-escalate', () => service.converseEscalate());
 ipcMain.handle('conv-reject', () => service.converseReject());
 ipcMain.handle('conv-ask', () => service.converseAsk());
 ipcMain.handle('conv-close', () => service.closeConversation());

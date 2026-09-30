@@ -19,11 +19,13 @@ import { firstLine, unexecutedLine } from './decide.ts';
 import { delegate, type Delegated } from './delegate.ts';
 import { estimateUsd, type EngineReport, type SlotExecutor } from './executor.ts';
 import type { Journal } from './journal.ts';
+import { LadderError, planLadder, requestStage, type EscalationStage } from './ladder.ts';
 import { route as routeTask, routeWithFallback } from './pipeline.ts';
 import {
   appendRecord,
   readTranscript,
   transcriptPath,
+  type LadderRecord,
   type SessionKind,
   type SessionState,
   type TranscriptEntry,
@@ -73,6 +75,17 @@ interface Pending {
   readonly write: boolean;
   /** 이 배정이 설 때 방식·기록·Budget 으로 계산한 승인 판정 (D-064). 이후 방식을 바꿔도 이 카드는 다시 판정하지 않는다 (결정 9). */
   readonly check: ApprovalCheck;
+  /** 사용자가 누른 사다리 상향 배정이다 (D-068). 위임은 새 엔진 세션으로 돌고 직전 실패 근거가 프롬프트에 실린다. */
+  readonly ladder?: LadderRecord;
+}
+
+/** 사다리가 다음에 올릴 단계 (D-068). 화면의 버튼과 chat `/ladder` 가 이것을 본다. */
+export interface LadderOffer {
+  readonly stage: EscalationStage;
+  /** `②effort 상향` */
+  readonly label: string;
+  /** 행 기본 대비 무엇이 오르나 — 카드에 서는 줄과 같다. */
+  readonly changes: readonly string[];
 }
 
 /** `approve()`·자동 승인이 같이 타는 시작 경로. `by` 가 기록과 결정 로그 note 에 남는다 (D-064 결정 7). */
@@ -278,11 +291,11 @@ export class ConversationSession {
   }
 
   /** 배정을 승인 대기로 세우고 `plan` 을 남긴다. 상태를 `blocked` 로 바꾼다. */
-  private stage(title: string, plan: AssignmentPlan, reason: string, notes: readonly string[], write = false): TranscriptRecord {
+  private stage(title: string, plan: AssignmentPlan, reason: string, notes: readonly string[], write = false, ladder?: LadderRecord): TranscriptRecord {
     const { primary, reviewer } = plan.slots;
     const { catalog, budget } = this.deps;
-    const check = evaluateApproval({ mode: this.modeValue, plan, reason, write, catalog, budget, records: this.log });
-    this.pending = { title, plan, reason, write, check };
+    const check = evaluateApproval({ mode: this.modeValue, plan, reason, write, catalog, budget, records: this.log, ...(ladder ? { ladder: true } : {}) });
+    this.pending = { title, plan, reason, write, check, ...(ladder ? { ladder } : {}) };
     this.stateValue = 'blocked';
     return this.append({
       kind: 'plan',
@@ -296,6 +309,7 @@ export class ConversationSession {
       mode: check.mode,
       asked: check.asks,
       ...(write ? { write: true } : {}),
+      ...(ladder ? { ladder } : {}),
     });
   }
 
@@ -389,12 +403,14 @@ export class ConversationSession {
     const controller = new AbortController();
     this.delegation = controller;
     try {
-      const ref = this.resumable(pending.plan, write);
+      // 사다리 위임은 잇지 않는다 — 같은 실패를 같은 방식으로 재시도하지 않고, 실패 근거는 프롬프트에 명시해 싣는다 (D-068 결정 9).
+      const ref = pending.ladder ? null : this.resumable(pending.plan, write);
       const context = buildContext(this.records(), this.contextLimits, {
         before: this.turn,
         ...(ref ? { after: ref.turn } : {}),
       });
-      const prompt = context.text ? `[최근 대화]\n${context.text}\n\n[이번 요청]\n${pending.title}` : pending.title;
+      const head = [context.text && `[최근 대화]\n${context.text}`, pending.ladder && this.failureEvidence(pending.ladder)].filter(Boolean);
+      const prompt = head.length > 0 ? `${head.join('\n\n')}\n\n[이번 요청]\n${pending.title}` : pending.title;
       const d = await delegate({
         matrix,
         plan: pending.plan,
@@ -406,7 +422,7 @@ export class ConversationSession {
         execute: this.deps.executorFor(write),
         budget,
         journal,
-        note: `session ${this.deps.id} · 승인 ${by}`,
+        note: this.noteOf(pending, by),
         signal: controller.signal,
         ...(ref ? { resumePrimary: ref.id, ...(ref.baseline ? { resumeBaseline: ref.baseline } : {}) } : {}),
       });
@@ -488,6 +504,75 @@ export class ConversationSession {
     return { id: s.id, turn: last.turn, ...(s.reported ? { baseline: s.reported } : {}) };
   }
 
+  /** 결정 로그 `note` 끝 — 세션 id·승인자, 사다리 배정이면 어느 결정에서 올랐나 (D-068 결정 11). */
+  private noteOf(pending: Pending, by?: ApprovedBy): string {
+    return `session ${this.deps.id}${by ? ` · 승인 ${by}` : ''}${pending.ladder ? ` · 사다리 이전 결정 ${pending.ladder.from}` : ''}`;
+  }
+
+  /** ① 근거 보강 — 직전 결과의 reviewer 검증·증거를 위임 프롬프트에 싣는다. 사다리 배정은 단계와 무관하게 계속 싣는다(누적). */
+  private failureEvidence(ladder: LadderRecord): string {
+    const r = this.log.find((x) => x.kind === 'result' && x.decisionId === ladder.from);
+    if (r?.kind !== 'result') return '';
+    return [
+      `[직전 시도 실패 근거 — 사다리 ${ladder.label}]`,
+      `직전 결과: ${r.outcome} · reviewer ${r.verdict.toUpperCase()}`,
+      `증거: ${r.evidence}`,
+      ...(r.review ? [`reviewer 검증: ${r.review.slice(0, 1500)}`] : []),
+      '같은 접근을 되풀이하지 말고 위 근거를 해소한다.',
+    ].join('\n');
+  }
+
+  /**
+   * 사다리 상태는 **기록에서 계산한다** (D-068 결정 10) — 마지막 **취소 아닌** 결과가 사다리를 제안하는 것이고 그 뒤에 사용자 메시지가 없으면
+   * 상향할 수 있다. 취소(D-066)는 건너뛴다 — 단계를 쓰지 않는다. 직전 배정의 `ladder.done` 이 지나온 단계다.
+   */
+  private ladderBase(): { readonly from: string; readonly plan: Extract<TranscriptRecord, { kind: 'plan' }>; readonly title: string; readonly done: readonly EscalationStage[] } | null {
+    const i = this.log.findLastIndex((r) => r.kind === 'result' && r.outcome !== 'cancelled');
+    const result = this.log[i];
+    if (result?.kind !== 'result' || nextSuggestion(result.outcome, result.verdict) === '') return null;
+    if (this.log.slice(i + 1).some((r) => r.kind === 'user')) return null;
+    const before = this.log.slice(0, i);
+    const plan = before.findLast((r) => r.kind === 'plan');
+    const user = before.findLast((r) => r.kind === 'user');
+    if (plan?.kind !== 'plan' || user?.kind !== 'user') return null;
+    return { from: result.decisionId, plan, title: user.text, done: plan.ladder?.done ?? [] };
+  }
+
+  /** 다음에 올릴 수 있는 단계가 있으면 돌려준다. 배정 계산을 못 하면(매트릭스가 바뀜 등) 없는 것으로 본다 — 화면을 깨지 않는다. */
+  ladderOffer(): LadderOffer | null {
+    const base = this.ladderBase();
+    if (!base) return null;
+    try {
+      const step = this.ladderStep(base);
+      return step ? { stage: step.applied.stage, label: step.applied.label, changes: step.applied.changes } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private ladderStep(base: NonNullable<ReturnType<ConversationSession['ladderBase']>>): ReturnType<typeof planLadder> {
+    const { matrix, catalog } = this.deps;
+    const row = matrix.assignments.find((a) => a.id === base.plan.taskId);
+    return row ? planLadder(matrix, catalog, row, base.done) : null;
+  }
+
+  /**
+   * 사다리를 한 칸 올린 배정 카드를 세운다 (D-068). **카드만 세우고 시작하지 않는다** — 승인은 카드에서 따로고,
+   * 어느 방식에서도 A3 로 묻는다(자동 승인 경로를 타지 않는다). 같은 요청(그 결과를 낳은 사용자 메시지)·같은 턴이다.
+   * `requested` 를 주면 그 단계가 다음 단계여야 한다 — 순서를 건너뛰는 요청(L5 직행 등)은 던진다.
+   */
+  escalate(requested?: EscalationStage): TranscriptRecord[] {
+    this.require('waiting_input', '사다리 상향');
+    const base = this.ladderBase();
+    if (!base) throw new SessionStateError('상향할 결과가 없다 — 사다리는 위임이 미검증·실패로 끝난 직후에만 선다 (취소와 새 메시지 뒤에는 없다).');
+    if (requested) requestStage(base.done, requested);
+    const step = this.ladderStep(base);
+    if (!step) throw new LadderError('더 올릴 단계가 없다. 여기서도 안 되면 문제 정의를 다시 본다.');
+    const origin = base.plan.ladder?.origin ?? base.plan.reason;
+    const ladder: LadderRecord = { ...step.applied, from: base.from, origin };
+    return [this.stage(base.title, step.plan, `사다리 ${step.applied.label} · ${origin}`, [], false, ladder)];
+  }
+
   reject(): TranscriptRecord[] {
     this.require('blocked', '거절');
     const pending = this.pending;
@@ -504,7 +589,7 @@ export class ConversationSession {
    */
   private logUnexecuted(pending: Pending, status: 'declined' | 'blocked', approvedBy?: ApprovedBy): void {
     const first = firstLine(this.deps.matrix, pending.plan, pending.title, pending.reason);
-    const decision = { ...first, note: `${first.note ?? ''} · session ${this.deps.id}${approvedBy ? ` · 승인 ${approvedBy}` : ''}` };
+    const decision = { ...first, note: `${first.note ?? ''} · ${this.noteOf(pending, approvedBy)}` };
     appendDecision(decision);
     appendDecision(unexecutedLine(decision, status));
   }
@@ -523,7 +608,8 @@ export class ConversationSession {
 
   /** 모델은 요약만 한다. 다음 제안은 코드가 계산한다 (SPEC §6.4.4). 요약이 실패해도 제안은 남긴다. */
   private async summarize(title: string, d: Delegated): Promise<TranscriptRecord[]> {
-    const next = nextSuggestion(d.outcome, d.verdict);
+    // 결과가 이미 기록에 붙은 뒤다 — 사다리 상태(다음에 올릴 수 있는 단계)가 이 결과를 본다.
+    const next = nextSuggestion(d.outcome, d.verdict, this.ladderOffer());
     const { matrix, catalog, budget, conduct } = this.deps;
     if (budget.limitReached()) {
       return [

@@ -77,4 +77,11 @@ describe('지휘자 — 결과 처리 (SPEC §6.4.4)', () => {
       assert.match(nextSuggestion(outcome, verdict), /코드·로그·재현 조건 보강/);
     }
   });
+
+  it('세션이 계산한 다음 단계를 그대로 안내하고, 올릴 곳이 없으면 그렇게 말한다 (D-068) — 취소·성공은 여전히 비어 있다', () => {
+    assert.match(nextSuggestion('rework', 'fail', { label: '②effort 상향' }), /사다리 다음 단계: ②effort 상향/);
+    assert.match(nextSuggestion('rework', 'fail', null), /더 올릴 곳이 없다/);
+    assert.equal(nextSuggestion('cancelled', 'unknown', { label: '②effort 상향' }), '');
+    assert.equal(nextSuggestion('ok', 'pass', null), '');
+  });
 });

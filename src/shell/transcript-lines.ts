@@ -6,6 +6,12 @@
 interface Cut { readonly turns: number; readonly chars: number }
 interface Compaction { readonly trigger: string; readonly preTokens?: number; readonly postTokens?: number }
 
+interface Ladder { readonly label: string; readonly from: string; readonly changes: readonly string[] }
+
+/** 사다리 상향 카드 (D-068) — 무엇이 올라갔나. chat 과 GUI 가 같은 문구를 쓴다. */
+export const ladderLines = (ladder: Ladder | undefined): string[] =>
+  ladder ? [`사다리 ${ladder.label} — 결정 ${ladder.from} 의 같은 요청을 상향한다`, ...ladder.changes] : [];
+
 export const cutLine = (cut: Cut | undefined): string[] => (cut ? [`맥락   앞 대화 ${cut.turns}턴·${cut.chars}자를 싣지 못했다`] : []);
 
 export const compactLines = (compacted: readonly Compaction[] | undefined): string[] =>

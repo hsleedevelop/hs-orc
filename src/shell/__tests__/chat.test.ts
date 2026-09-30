@@ -275,6 +275,31 @@ describe('chat — Ctrl-C', () => {
   });
 });
 
+describe('chat — 사다리 (D-068)', () => {
+  it('/ladder 는 실패·미검증 뒤 상향 카드만 세운다 — y 로 승인하기 전에는 엔진을 더 띄우지 않고, 카드에 올라간 것이 찍힌다', async () => {
+    const { out, calls, session } = await drive(['이 타입 에러 고쳐줘', 'y', '/ladder']);
+    assert.match(out, /다음 {3}사다리 다음 단계: ①코드·로그·재현 조건 보강/);
+    assert.match(out, /사다리 ①코드·로그·재현 조건 보강 — 결정 \S+ 의 같은 요청을 상향한다/);
+    assert.match(out, / {7}①코드·로그·재현 조건 보강 — 직전 실패의 reviewer 검증·증거/);
+    assert.equal(session.state, 'blocked');
+    assert.equal(calls.filter((c) => c === 'Luna').length, 1, '상향 카드는 시작하지 않는다');
+  });
+
+  it('auto 에서도 사다리 카드는 묻는 이유 A3 를 찍고 자동 시작하지 않는다', async () => {
+    const { out, calls, session } = await drive(['/mode auto', '이 타입 에러 고쳐줘', '/ladder']);
+    assert.match(out, /묻는 이유 {2}A3 사다리 상향 배정/);
+    assert.equal(calls.filter((c) => c === 'Luna').length, 1);
+    assert.equal(session.state, 'blocked');
+  });
+
+  it('결과가 없거나 카드가 선 채면 세우지 않고 이유를 말한다', async () => {
+    const none = await drive(['/ladder']);
+    assert.match(none.out, /오류 {3}.*상향할 결과가 없다/);
+    const blocked = await drive(['이 타입 에러 고쳐줘', '/ladder']);
+    assert.match(blocked.out, /이미 선 배정이 있다/);
+  });
+});
+
 describe('chat — 승인 방식 (D-064)', () => {
   it('/mode 는 지금 방식을 보이고, 바꾸면 기록에 남는다 — 모르는 방식은 거절한다', async () => {
     const { out, session } = await drive(['/mode', '/mode auto', '/mode auto', '/mode yolo'], undefined, 'manual');
