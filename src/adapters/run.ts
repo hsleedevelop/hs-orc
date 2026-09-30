@@ -21,6 +21,27 @@ export interface SpawnSpec {
 /** SIGTERM 후 이 시간 안에 안 죽으면 그룹째 SIGKILL. */
 const KILL_GRACE_MS = 2_000;
 
+/**
+ * 종료 신호(SIGTERM)는 보냈지만 아직 안 끝난 프로세스 그룹. 호스트가 유예 타이머(unref)를 기다리지 않고 나가도
+ * SIGTERM 을 무시하는 엔진이 남지 않게, 프로세스 종료 시점에 동기로 그룹 SIGKILL 을 보낸다 (D-066).
+ * 종료 신호를 보내지 않은 실행은 건드리지 않는다 — 그 실행을 남겨 두고 나가는 것은 호출자가 고른 것이다.
+ */
+const terminating = new Set<number>();
+let exitHookInstalled = false;
+const installExitHook = (): void => {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  process.once('exit', () => {
+    for (const pid of terminating) {
+      try {
+        process.kill(-pid, 'SIGKILL');
+      } catch {
+        // 이미 사라졌다.
+      }
+    }
+  });
+};
+
 export function runProcess(spec: SpawnSpec, onEvent?: (event: RunEvent) => void): RunHandle {
   const startedAt = Date.now();
   const child = spawn(spec.bin, [...spec.argv], {
@@ -103,6 +124,10 @@ export function runProcess(spec: SpawnSpec, onEvent?: (event: RunEvent) => void)
   let killTimer: NodeJS.Timeout | undefined;
   const terminate = (reason: RunOutcome): void => {
     outcome ??= reason;
+    if (child.pid !== undefined) {
+      terminating.add(child.pid);
+      installExitHook();
+    }
     killGroup('SIGTERM');
     killTimer ??= setTimeout(() => killGroup('SIGKILL'), KILL_GRACE_MS).unref();
   };
@@ -114,6 +139,7 @@ export function runProcess(spec: SpawnSpec, onEvent?: (event: RunEvent) => void)
     const finish = (exitCode: number | null, signal: NodeJS.Signals | null): void => {
       clearTimeout(timeoutTimer);
       if (killTimer) clearTimeout(killTimer);
+      if (child.pid !== undefined) terminating.delete(child.pid);
       // 마지막 줄에 개행이 없을 수 있다.
       for (const line of splitStdout('\n')) for (const event of parseLine(spec.format, line)) emit(event);
 

@@ -47,4 +47,18 @@ describe('맥락 자르기 (SPEC §6.4.3)', () => {
     assert.match(text, /타입 고쳐줘/);
     assert.equal(cut, null, 'resume 으로 엔진이 가진 턴은 버린 것이 아니다');
   });
+
+  it('취소된 위임은 행·단계와 함께 한 줄로 싣는다 — 단계가 없는 옛 기록도 싣는다 (D-066)', () => {
+    const cancelled = (evidence: string): TranscriptRecord[] => [
+      { v: 1, at, turn: 1, kind: 'user', text: '리팩터링해줘' },
+      { v: 1, at, turn: 1, kind: 'plan', taskId: 'R07', title: 't', reason: 'r', primary: 'p', reviewer: 'v', estimateUsd: 1, notes: [] },
+      { v: 1, at, turn: 1, kind: 'result', outcome: 'cancelled', verdict: 'unknown', text: '엔진 원문', review: '', evidence, decisionId: 'd' },
+    ];
+    const reviewer = buildContext(cancelled('취소됨 — reviewer 실행 중 — primary 는 끝났다.'), wide, { before: 2 }).text;
+    assert.match(reviewer, /orc\(위임 취소\): 사용자가 앞 위임을 취소했다\(행 R07 · reviewer 실행 중\)/);
+    assert.doesNotMatch(reviewer, /엔진 원문/);
+    const old = buildContext(cancelled('알 수 없는 형태'), wide, { before: 2 }).text;
+    assert.match(old, /앞 위임을 취소했다\(행 R07\)/);
+    assert.equal(buildContext(records, wide, { before: 3 }).text.includes('취소'), false, '정상 결과는 여전히 싣지 않는다');
+  });
 });

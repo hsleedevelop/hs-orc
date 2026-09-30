@@ -1,7 +1,7 @@
 /**
  * 맥락 자르기 (SPEC §6.4.3).
  * rolling 요약은 두지 않는다 — 최근 N턴 자르기로 시작하고, 부족하다는 실측이 나오면 연다.
- * 엔진 원시 출력(`result` 본문)은 싣지 않는다. 요약이 그 자리를 대신한다.
+ * 엔진 원시 출력(`result` 본문)은 싣지 않는다. 요약이 그 자리를 대신한다. 취소된 위임만 한 줄로 싣는다(D-066).
  * 무엇을 잘랐는지 돌려준다 — rolling 요약을 열 근거는 이 기록이다 (D-053).
  */
 import type { TranscriptRecord } from './transcript.ts';
@@ -11,7 +11,16 @@ export interface ContextLimits {
   readonly contextChars: number;
 }
 
-function line(r: TranscriptRecord): string | null {
+/** 취소된 위임 한 줄 (D-066). 행은 같은 턴의 배정에서, 단계는 결과 evidence("취소됨 — primary|reviewer 실행 중")에서 읽는다 — 없으면 뺀다. */
+function cancelledLine(r: Extract<TranscriptRecord, { kind: 'result' }>, records: readonly TranscriptRecord[]): string {
+  const plan = records.find((p) => p.turn === r.turn && p.kind === 'plan');
+  const row = plan?.kind === 'plan' ? plan.taskId : null;
+  const stage = /^취소됨 — (primary|reviewer)/.exec(r.evidence)?.[1] ?? null;
+  const where = [row && `행 ${row}`, stage && `${stage} 실행 중`].filter(Boolean).join(' · ');
+  return `orc(위임 취소): 사용자가 앞 위임을 취소했다${where ? `(${where})` : ''} — 결과·요약은 없다`;
+}
+
+function line(r: TranscriptRecord, records: readonly TranscriptRecord[]): string | null {
   switch (r.kind) {
     case 'user':
       return `사용자: ${r.text}`;
@@ -19,6 +28,8 @@ function line(r: TranscriptRecord): string | null {
       return `orc: ${r.text}`;
     case 'summary':
       return r.text ? `orc(위임 결과 요약): ${r.text}${r.next ? ` · 다음 제안: ${r.next}` : ''}` : null;
+    case 'result':
+      return r.outcome === 'cancelled' ? cancelledLine(r, records) : null;
     default:
       return null;
   }
@@ -36,12 +47,12 @@ export function buildContext(
   range: { readonly before: number; readonly after?: number },
 ): { readonly text: string; readonly cut: ContextCut | null } {
   const after = range.after ?? 0;
-  const picked = records.filter((r) => r.turn < range.before && r.turn > after && line(r) !== null);
+  const picked = records.filter((r) => r.turn < range.before && r.turn > after && line(r, records) !== null);
   const all = [...new Set(picked.map((r) => r.turn))];
   const turns = new Set(all.slice(-limits.contextTurns));
   const joined = picked
     .filter((r) => turns.has(r.turn))
-    .map(line)
+    .map((r) => line(r, records))
     .join('\n');
   const kept = limits.contextChars - 1; // 앞의 '…' 한 자
   const over = joined.length > limits.contextChars;
