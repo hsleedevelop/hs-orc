@@ -113,7 +113,7 @@ export function assign(
       reviewerUsd,
       totalUsd: Number((primaryUsd + reviewerUsd).toFixed(4)),
       grade: 'independent',
-      note: 'Artificial Analysis max-effort 벤치마크 작업당 비용. 실제 지출이 아니다.',
+      note: 'Artificial Analysis max-effort 벤치마크 작업당 비용(모델 단위 — effort 는 반영하지 않는다). 실제 지출이 아니다.',
     },
   };
 }
