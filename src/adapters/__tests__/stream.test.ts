@@ -201,3 +201,28 @@ describe('실패한 압축 시도는 압축으로 세지 않는다 (D-058, Q18 �
     ]);
   });
 });
+
+describe('캐시 읽기 칸이 없으면 0 과 구분해 남긴다 (D-070)', () => {
+  const usageOf = (format: 'claude' | 'codex', line: string) =>
+    parseLine(format, line).find((e) => e.kind === 'usage')?.usage;
+
+  it('칸이 있으면(0 이라도) 표시를 달지 않는다 — claude modelUsage·cursor·codex 실측 줄', () => {
+    const turn1 = fixture('claude-q17-turn1.jsonl').flatMap((l) => parseLine('claude', l)).find((e) => e.kind === 'usage')?.usage;
+    assert.equal(turn1?.cachedInputTokens, 12972);
+    assert.equal(turn1?.cachedInputUnreported, undefined);
+    assert.equal(usageOf('claude', CURSOR_RESULT)?.cachedInputUnreported, undefined, 'cursor 의 cacheReadTokens: 0 은 보고다');
+    assert.equal(usageOf('codex', CODEX_USAGE)?.cachedInputTokens, 11008);
+    assert.equal(usageOf('codex', CODEX_USAGE)?.cachedInputUnreported, undefined);
+  });
+
+  it('칸이 없으면 cachedInputUnreported 다 — claude usage·modelUsage, codex turn.completed', () => {
+    const claudeUsage = JSON.stringify({ type: 'result', result: 'ok', usage: { input_tokens: 10, output_tokens: 5 } });
+    const claudeModels = JSON.stringify({ type: 'result', result: 'ok', modelUsage: { 'claude-haiku-4-5-20251001': { inputTokens: 10, outputTokens: 5 } } });
+    const codex = JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100, output_tokens: 5 } });
+    for (const [format, line] of [['claude', claudeUsage], ['claude', claudeModels], ['codex', codex]] as const) {
+      const usage = usageOf(format, line);
+      assert.equal(usage?.cachedInputTokens, 0);
+      assert.equal(usage?.cachedInputUnreported, true, line);
+    }
+  });
+});

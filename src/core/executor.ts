@@ -87,7 +87,8 @@ export function sinceBaseline(
       cachedInputTokens: usage.cachedInputTokens - base.cachedInputTokens,
       cacheWriteTokens: usage.cacheWriteTokens - base.cacheWriteTokens,
     };
-    if (Object.values(delta).every((n) => n >= 0)) usage = delta;
+    if (Object.values(delta).every((n) => n >= 0))
+      usage = usage.cachedInputUnreported ? { ...delta, cachedInputUnreported: true } : delta;
   }
   return { ...(costUsd !== undefined ? { costUsd } : {}), ...(usage !== undefined ? { usage } : {}) };
 }

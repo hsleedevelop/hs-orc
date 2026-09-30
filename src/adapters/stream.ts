@@ -15,6 +15,10 @@ export type StreamFormat = 'claude' | 'codex';
 
 const num = (value: unknown): number => (typeof value === 'number' ? value : 0);
 
+/** D-070: 캐시 읽기 칸이 숫자로 오지 않았으면 0 과 구분해 남긴다 — 표시가 "모른다" 를 말하게. */
+const cacheReadMissing = (...values: unknown[]): { cachedInputUnreported?: true } =>
+  values.some((v) => typeof v === 'number') ? {} : { cachedInputUnreported: true };
+
 /** 배열도 `typeof === 'object'` 라 명시적으로 걸러낸다. */
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -37,6 +41,7 @@ function claudeEvents(event: Record<string, unknown>): RunEvent[] {
       outputTokens: num(usage['output_tokens'] ?? usage['outputTokens']),
       cachedInputTokens: num(usage['cache_read_input_tokens'] ?? usage['cacheReadTokens']),
       cacheWriteTokens: num(usage['cache_creation_input_tokens'] ?? usage['cacheWriteTokens']),
+      ...cacheReadMissing(usage['cache_read_input_tokens'], usage['cacheReadTokens']),
     };
     out.push({ kind: 'usage', usage: normalized });
   }
@@ -71,6 +76,7 @@ function modelUsageTotal(value: unknown): Usage | undefined {
     outputTokens: sum('outputTokens'),
     cachedInputTokens: sum('cacheReadInputTokens'),
     cacheWriteTokens: sum('cacheCreationInputTokens'),
+    ...cacheReadMissing(...models.map((m) => m['cacheReadInputTokens'])),
   };
 }
 
@@ -134,6 +140,7 @@ function codexEvents(event: Record<string, unknown>): RunEvent[] {
             outputTokens: num(usage['output_tokens']),
             cachedInputTokens,
             cacheWriteTokens: num(usage['cache_write_input_tokens']),
+            ...cacheReadMissing(usage['cached_input_tokens']),
           },
         },
       ];

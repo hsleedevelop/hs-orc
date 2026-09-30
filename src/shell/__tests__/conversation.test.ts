@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { SlotExecutor } from '../../core/executor.ts';
 import { Journal } from '../../core/journal.ts';
-import { prepareSession } from '../../core/transcript.ts';
+import { appendRecord, prepareSession, transcriptPath } from '../../core/transcript.ts';
 import { assembleSession, restoreBudget } from '../conversation.ts';
 
 const isolated = () => {
@@ -45,5 +45,17 @@ describe('세션 조립 (D-056)', () => {
     const budget = restoreBudget(dir, id);
     await assembleSession({ approvalMode: 'manual', kind: 'scratch', dir, id, budget, journal: new Journal(), execute: exec }).send('넌 누구니');
     assert.equal(restoreBudget(dir, id).summary(), budget.summary());
+  });
+
+  it('기록의 spend 재생에 캐시 읽기 누계가 되살아난다 — 옛 줄은 내역 없음 (D-070)', () => {
+    isolated();
+    const { dir, id } = prepareSession('scratch', process.cwd());
+    const file = transcriptPath(dir, id);
+    const at = { v: 1 as const, at: '2026-10-01T00:00:00.000Z', turn: 1 };
+    appendRecord(file, { ...at, kind: 'spend', charges: [], tokens: 120000, unreported: 0 });
+    appendRecord(file, { ...at, turn: 2, kind: 'spend', charges: [], tokens: 1060322, unreported: 0, cacheReadTokens: 943872 });
+    const budget = restoreBudget(dir, id);
+    assert.equal(budget.spentTokens, 1180322);
+    assert.match(budget.summary(), /\(캐시 읽기 943872 · 그 외 116450 · 내역 없음 120000\)/);
   });
 });
