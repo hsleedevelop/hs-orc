@@ -14,7 +14,7 @@ import { Budget } from '../budget.ts';
 import { readDecisions } from '../decision-log.ts';
 import type { SlotExecutor, SlotRun, SlotRunOptions } from '../executor.ts';
 import { Journal } from '../journal.ts';
-import { ESCALATION_ORDER, LadderError, planLadder, type EscalationStage } from '../ladder.ts';
+import { EFFORT_COST_NOTE, ESCALATION_ORDER, LadderError, planLadder, type EscalationStage } from '../ladder.ts';
 import { ConversationSession, SessionStateError } from '../session.ts';
 
 const isolate = () => {
@@ -81,6 +81,20 @@ describe('사다리 — 단계 적용 (결정론)', () => {
     assert.deepEqual(steps, [...ESCALATION_ORDER]);
     assert.deepEqual(seen, ['luna/medium+haiku/low', 'luna/high+haiku/low', 'terra/high+haiku/low', 'terra/high+sonnet/low']);
     assert.deepEqual(cost, [0.39, 0.39, 1.61, 6.49], '모델이 오른 단계부터 economics 로 다시 계산한다');
+  });
+
+  it('②effort 상향은 예상 비용을 바꾸지 않고, 카드가 그 이유(AA 측정치는 모델 단위)를 말한다 — effort 별 비용을 지어내지 않는다', () => {
+    const base = row('R01'); // Luna medium / Haiku low, $0.39
+    const effort = planLadder(matrix, catalog, base, ['evidence']);
+    assert.equal(effort?.applied.stage, 'effort');
+    assert.equal(effort?.plan.slots.primary.effort, 'high');
+    assert.equal(effort?.plan.cost.totalUsd, 0.39, 'AA economics 는 모델당 한 값이다');
+    // `changes` 는 카드(GUI·chat `ladderLines`)가 그대로 보이는 줄이다.
+    const card = effort?.applied.changes ?? [];
+    assert.ok(card.some((l) => l.includes('②effort 상향') && l.includes(EFFORT_COST_NOTE)), card.join('\n'));
+    // ③ 부터 모델이 바뀌어 비용이 다시 잡혀도 ② 줄의 표시는 사실이다 — 올린 effort 몫은 여전히 빠져 있다.
+    const model = planLadder(matrix, catalog, base, effort?.applied.done ?? []);
+    assert.ok(model?.applied.changes.some((l) => l.includes(EFFORT_COST_NOTE)));
   });
 
   it('L5(Astra·Fable) 로 직행하는 경로가 없다 — 어느 행·어느 단계든 모델은 자기 벤더에서 한 칸만 오르고 INV-1 이 유지된다', () => {
@@ -237,6 +251,9 @@ describe('사다리 — 승인 방식과 A3 (D-064 ↔ D-068)', () => {
     assert.equal(session.state, 'blocked');
     assert.deepEqual(codes(session), ['A3']);
     assert.match(lastPlan(session).asked?.[0]?.text ?? '', /사다리 상향/);
+    // ①근거 보강은 비용이 그대로다 — A3 문구가 "예상 비용이 바뀐다" 고 단정하지 않는다.
+    assert.doesNotMatch(lastPlan(session).asked?.[0]?.text ?? '', /예상 비용이 바뀐다/);
+    assert.match(lastPlan(session).asked?.[0]?.text ?? '', /effort 상향은 반영되지 않는다/);
     assert.equal(primaries().length, ran, '자동 승인 경로를 타지 않는다');
     await session.approve();
     const approval = session.records().findLast((r) => r.kind === 'approval');

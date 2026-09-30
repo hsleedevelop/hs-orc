@@ -110,6 +110,9 @@ const modelAbove = (matrix: Matrix, model: ModelKey): ModelKey | null => {
 const supported = (catalog: Engines, model: ModelKey, effort: Effort): boolean =>
   createAdapter(catalog.models[model].defaultEngine, catalog).supports(model, effort);
 
+/** 예상 비용은 AA max-effort 측정치(모델당 한 값)라 effort 를 반영하지 않는다 — 비용이 그대로인 이유를 카드가 말한다. effort 별 비용을 지어내지 않는다. */
+export const EFFORT_COST_NOTE = 'effort 는 예상 비용에 반영되지 않음 (AA 측정치는 모델 단위)';
+
 function applyStage(matrix: Matrix, catalog: Engines, rungs: Rungs, stage: EscalationStage): StageResult {
   const name = stageName(stage);
   const skip = (why: string): StageResult => ({ rungs, change: `${name} — 건너뜀: ${why}`, applied: false });
@@ -120,7 +123,7 @@ function applyStage(matrix: Matrix, catalog: Engines, rungs: Rungs, stage: Escal
     case 'effort': {
       const next = EFFORTS.slice(EFFORTS.indexOf(primary.effort) + 1).find((e) => supported(catalog, primary.model, e));
       if (!next) return skip(`primary ${modelLabel(primary.model)} ${primary.effort} 는 더 올릴 effort 가 없다`);
-      return { rungs: { ...rungs, primary: { ...primary, effort: next } }, change: `${name} — primary ${modelLabel(primary.model)} ${primary.effort} → ${next}`, applied: true };
+      return { rungs: { ...rungs, primary: { ...primary, effort: next } }, change: `${name} — primary ${modelLabel(primary.model)} ${primary.effort} → ${next} · ${EFFORT_COST_NOTE}`, applied: true };
     }
     case 'model': {
       const next = modelAbove(matrix, primary.model);

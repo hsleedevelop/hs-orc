@@ -3,7 +3,8 @@
  * 판정은 Core 한 곳에만 두고 셸은 표시만 한다 (D-001·D-056).
  *
  * H — 어느 방식에서도 묻는다(`manual` 은 전부 묻는다). A — `auto-ask` 만 더 묻는다. `auto` 는 H 만 묻는다.
- * **예외: 사다리 상향 배정(D-068)의 A3 는 `auto` 에서도 묻는다** — 비용이 바뀌는 같은 요청의 재위임이다.
+ * **예외: 사다리 상향 배정(D-068)의 A3 는 `auto` 에서도 묻는다** — 같은 요청을 더 무겁게 다시 돌리는 재위임이다.
+ * 예상 비용(AA)은 모델 단위라 ③모델·④reviewer 에서만 바뀌고 ②effort 상향은 반영되지 않는다 — 문구가 그렇게 말하지 않는다.
  * 상한 도달은 여기서 묻는 것이 아니라 막는 것이다 (D-030) — 승인 뒤 `approve()` 가 시작하지 않는다.
  */
 import type { Engines } from '../data/engines.ts';
@@ -71,7 +72,7 @@ export function evaluateApproval(input: ApprovalInput): ApprovalCheck {
   }
 
   // 사다리 상향 (D-068) — `auto` 에서도 묻는다. 버튼은 "이 단계를 보겠다", 카드 승인은 "이 비용으로 돌려라" 다 (D-033).
-  if (ladder) asks.push({ code: 'A3', text: '사다리 상향 배정 — 같은 요청의 재위임이고 예상 비용이 바뀐다' });
+  if (ladder) asks.push({ code: 'A3', text: '사다리 상향 배정 — 같은 요청을 올려 다시 위임한다 (예상 비용은 모델이 바뀔 때만 바뀐다 — effort 상향은 반영되지 않는다)' });
 
   if (mode === 'auto-ask') {
     const usd = plan.cost.totalUsd;
