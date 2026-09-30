@@ -2046,6 +2046,70 @@ D-064 는 "사다리는 `nextSuggestion()` 이 글로만 제안한다 — 배정
 
 ---
 
+## Q20 — 위임 1회의 고정비(격리하지 않은 claude·codex 실행이 싣는 것)를 줄일까, D-032 를 유지할까 (조사, 미결)
+
+**배경**
+격리하지 않은 claude 실행은 `Reply with exactly: ok` 한 줄에도 API 환산 Sonnet 5.5 $0.1175(`engines.json` `refresh0929`), Opus 5.5 $0.2693(`refresh0930`, Haiku 보조 호출 포함)이 든다. 2026-09-29 실사용(`rn_temp` 세션)에서는 위임 1회가 1,060,322 토큰으로 세션 상한 200만(D-030·D-032 A2)의 절반이었다. D-032 는 primary·reviewer 가 사용자 전역 환경(CLAUDE.md·rules·skills·hooks·MCP)을 싣는 것을 의도로 정했고 지휘자만 격리했다(D-050). 이 문서는 기존 자료만으로 그 고정비를 분해한다 — **새 엔진 실행은 하지 않았다.** 근거는 각 항목에 (측정) · (파생: 측정값에서 계산) · (추론) · (미검증)으로 적는다. 사용자 전역 설정은 내용을 옮기지 않고 크기·항목 수만 쓴다.
+
+**1. 쓴 자료와 빈 곳**
+- 저장소 fixture: `claude-q17-turn1`·`claude-d060-chain-1..5`(project,local + strict-mcp, safe-mode 아님)·`claude-q18-*`·`claude-d062-chat-{cold,warm}`(safe-mode 격리). 전부 **Haiku·low** 이고 **격리하지 않은 claude 캡처는 하나도 없다** — 전역 환경이 얼마인지 fixture 만으로는 잴 수 없다.
+- 사용자 로컬: `rn_temp/.hs-orc/{sessions,runs}`(세션 1개, run 1개 = codex Luna), `~/.hs-orc/runs`(2026-09-23 codex Luna 1개), `~/.hs-orc/scratch`(기록 없음). claude 위임의 `meta.json` usage 는 없다(codex meta 는 `durationMs`·verdict 뿐이고 토큰은 `stdout`의 `turn.completed`·세션 `result.engineSession.reported`에 있다).
+- 전역 설정 크기·항목 수(내용 아님): `~/.claude/CLAUDE.md` 4,974 B · rules 1개 1,440 B · `settings.json` 6,055 B · hook 8개(SessionStart 4·UserPromptSubmit 3·Stop 1) · 켜진 plugin 14 · user-scope MCP 3 · `~/.codex/AGENTS.md` 5,985 B · codex skills 8.
+
+**2. 분해 — claude**
+
+| 항목 | 값 | 근거 |
+|---|---|---|
+| 격리(safe-mode) 지휘자 첫 호출의 프롬프트 전체 | 20,216 tok (캐시 쓰기 20,206 + 입력 10), 2.1.283 | 측정 `d062-chat-cold` |
+| 비safe-mode(project,local + strict-mcp) 첫 호출 | 20,120 tok (읽기 12,972 + 쓰기 7,138 + 입력 10), 2.1.283 | 측정 `d060-chain-1` |
+| 같은 격리 프롬프트, 2.1.281 | 32,385 tok | D-050 (이 fixture 와 다른 버전 — 10k 가 줄어든 원인은 D-062 도 보지 않았다) |
+| 보조 호출(`source=generate_session_title`, Haiku) | 입력 914~1,281 · 출력 16~21 tok, **새 세션 첫 턴에만**(resume 에는 없다) | 파생 `modelUsage − usage` (`d060-chain-1`·`d062-chat-cold`), 정체는 D-060 곁가지의 디버그 로그 |
+| 전역 환경이 얹는 몫 | 약 **+9.9k tok**(44,438 → 34,514), +$0.031(2.7배) | 측정 D-032 (Haiku·low, 스크래치, n=1, 캐시 상태 미통제) |
+| 〃, 다른 각도 | Sonnet 5.5 $0.1175 ÷ 1h 쓰기 $4/MTok ≈ 29k · Opus 5.5 $0.2693 ÷ $8/MTok ≈ 33k, 격리 Haiku 20k 대비 +9~13k | 추론 (전부 1h 쓰기라 가정, 모델마다 토크나이저·기본 프롬프트가 달라 ±) |
+| 전역 몫의 구성 | CLAUDE.md+rules ≈ 2~3k · SessionStart hook 주입 ≈ 2~3k · 스킬 목록(plugin 14, 이 세션 목록 약 130개) ≈ 5~7k · MCP 도구 이름 목록(지연 로드라 스키마는 제외) ≈ 3~4k → 합 12~17k | 추론 (바이트·항목 수로 어림, 위 측정 +9.9k 와 2배 안) |
+
+- **fixture 가 못 보여주는 것**: `d060-chain-1`(비safe-mode)이 격리와 사실상 같은 크기(20.1k ≈ 20.2k)인 것은 "전역이 안 얹힌다" 의 증거가 아니다 — 그 캡처는 PATH shim 이 `--setting-sources project,local --strict-mcp-config` 를 앞에 붙인 격리에 가까운 실행이고(D-060), D-050 은 그 인자로도 CLAUDE.md·rules 가 샜다고 했다. 2.1.281 → 2.1.283 사이에 무엇이 바뀌었는지는 모른다(미검증).
+- **비용은 캐시 상태가 정한다**: 같은 20k 프롬프트가 콜드면 1h 쓰기($2/MTok Haiku), 웜이면 읽기($0.10/MTok) — 4.8배(D-062 측정, $0.0438 vs $0.0091). 전역 몫 10k 는 Haiku 기준 콜드 ≈ $0.02, 웜 ≈ $0.001, Sonnet 5.5 는 ≈ $0.04 / $0.002, Opus 5.5 는 ≈ $0.08 / $0.004 (파생: 공시 단가 × 10k). 1시간 TTL 안에 같은 슬롯을 다시 돌려야 웜이다.
+- **`rn_temp` 위임 1회의 claude 쪽 금액**(측정, 세션 `spend`): reviewer Haiku·low **$0.0787**, 지휘자 요약 $0.0108, 앞선 지휘자 직접 답 $0.0429. reviewer 한 번이 같은 규모의 격리 직접 답(콜드 $0.0429)보다 약 $0.036 비싸다(파생) — 전역 몫이 콜드로 쓰인 자국과 맞지만 라운드 수를 몰라 단정하지 않는다(추론).
+
+**3. 분해 — codex (`rn_temp` 1,060,322 tok 의 실체)**
+- 그 위임의 primary 는 **claude 가 아니라 codex `gpt-5.6-luna`·medium** 이었다(측정 `result.engineSession`). `turn.completed.usage` = 입력 997,701(캐시 943,872 · 비캐시 53,829) · 출력 3,899 → **1,001,600 tok 이 codex 한 실행**이고 나머지 58,722 는 reviewer Haiku + 지휘자 요약(파생: `spend` 1,060,322 − codex).
+- 스트림 라운드: `command_execution` 15(완료 10 · 실패 5), 메시지 9 → 모델 호출은 **약 16회**(추론: 도구 호출 + 마지막 답). 캐시 읽기 943,872 ÷ 16 ≈ **59k/라운드**(파생).
+- 첫 라운드 프롬프트는 약 **40k**다(측정: D-067 `gpt-6-luna` low, 명령 0회 실행한 1라운드가 비캐시 28,315 + 캐시 12,032 = 40.3k · `gpt-5.6-luna` ① 은 합 121k 이나 라운드 수를 기록하지 않아 쓰지 않는다 — 1라운드 측정은 이 한 건이다). 40k × 16 = **약 640k ≈ 이 위임의 64%** 가 "매 라운드 다시 읽는 엔진 기본 프롬프트·도구 정의·전역 지침"이고(파생·추론), 나머지가 라운드마다 쌓이는 도구 출력·이력이다.
+- codex 의 전역 몫은 `~/.codex/AGENTS.md` 5,985 B ≈ 2~3k tok(추론) × 16 라운드 ≈ 40k ≈ **이 위임의 4%**. 나머지 대부분은 codex 자체 몫이라 어떤 격리를 해도 안 사라진다(codex 는 격리 수단도 없다 — D-032 B2·B3 기각).
+- 금액은 정반대다: codex Luna metered **$0.0343**(캐시 읽기가 싸다) — 같은 위임의 claude 쪽 합계 $0.132 의 4분의 1. **토큰 상한(200만)에서는 codex 라운드가, 금액에서는 claude 콜드 프롬프트가 큰 몫이다.**
+
+**4. 결론(사실)**
+1. 상한 200만의 절반이 된 원인은 **전역 환경이 아니라 라운드 수 × 엔진 기본 프롬프트**다(codex 위임 1건 16라운드). 캐시 읽기를 1:1 로 세는 Budget(D-032 A4 는 근거 부족으로 기각)이 이를 그대로 상한에 반영한다.
+2. claude 쪽 격리하지 않은 고정비는 첫 호출 기준 약 +10k tok(≈ 프롬프트의 30%)이고 금액은 **콜드일 때만** 눈에 띈다(Haiku $0.02 ~ Opus $0.08).
+3. 보조 Haiku 호출은 새 세션 첫 턴 한 번, 약 1k tok·$0.001 — 프롬프트의 4%, 위임 1M 토큰의 0.1%.
+4. 미검증: 전역 몫의 **구성별** 크기(위 추정 12~17k 는 어림), Sonnet·Opus 실제 프롬프트 크기, 격리 프롬프트가 2.1.281→2.1.283 에서 32k→20k 로 준 원인, 2.1.285(현 설치) 값.
+
+**5. 선택지** (절감은 위 (파생·추론)으로, 품질 영향의 측정은 없다)
+
+| # | 선택지 | 절감 | 품질 영향 | 구현 비용 |
+|---|---|---|---|---|
+| 1 | **D-032 유지** — primary·reviewer 비격리 | 0 | 없음(의도한 상태) | 0 |
+| 2 | **claude reviewer 만 격리** (지휘자와 같은 `isolate`·`isolateArgv`) | 리뷰 1회 첫 호출 약 −7~10k tok / 콜드 −$0.02(Haiku)~−$0.08(Opus), 웜 거의 0. 위임 1M 토큰 중 <1% | **불리할 수 있다**: safe-mode 는 프로젝트 CLAUDE.md 도 끈다(D-050) — 지휘자는 수용했지만 reviewer 는 프로젝트 관례가 판정 근거다. 사용자 전역 중 "리뷰는 결함을 심각도·위치·조건과 함께 먼저" 도 사라진다. 판정 형식(PASS/FAIL)은 orc 프롬프트가 정하므로 파싱은 영향이 적다(추론). codex reviewer 는 격리 수단이 없어 슬롯에 따라 일관성이 깨진다 | 작다(실행기 reviewer 경로에 `isolate` 전달 + 테스트). 단 `--disallowedTools`(D-052) 가 safe-mode 아래서도 유지되는지, reviewer 가 읽기 도구를 쓰는지 실측 필요 |
+| 3 | **primary·reviewer 에 부분 플래그** | `--strict-mcp-config` 약 −3~4k(MCP 이름 목록) + MCP 서버 기동 시간 · `--disable-slash-commands` 약 −5~7k(스킬 목록) · `--setting-sources project,local` 은 hook·plugin·permissions·`autoCompactWindow` 를 뺀다 | `strict-mcp`: 프론트엔드 위임이 playwright·chrome-devtools·figma 를 못 쓴다. `disable-slash-commands`: 사용자 스킬을 못 쓴다 — D-032 가 "작업 규칙이 품질의 일부" 라 한 그 부분. `setting-sources`: **위험** — D-052 읽기 전용이 사용자 `defaultMode`·allow 규칙에 달려 있고, `autoCompactWindow` 가 빠지면 임계값 압축이 안 돈다(D-060 실엔진 5번, D-061). CLAUDE.md·rules 는 안 빠진다(D-050) | 중간 — 플래그 3개를 `engines.json` 에 선언하고 primary·reviewer 별로 켜는 스위치 + 위 부작용 각각의 실측 |
+| 4 | **세션 제목 생성 끄기** | 새 세션 첫 턴 약 −1k tok · −$0.001 | 없음(추정) | 수단이 불명확: 문서화된 플래그가 없다. 2.1.285 바이너리에 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` 이름이 있으나 제목 호출을 끄는지·텔레메트리·자동 업데이트 등 다른 부작용이 있는지 미검증. 문서화되지 않은 env 는 D-061 처럼 조용히 사라질 위험을 진다 |
+
+**6. 권장안: 1(유지) + 2 는 실측 뒤에만**
+- 상한을 태우는 주범(codex 라운드)은 어느 선택지로도 안 준다. claude 쪽 최대 절감은 콜드 reviewer 한 번 $0.02~0.08 이고 2·3 은 품질 위험을 지불하며 얻는다 — 절감이 작고 손실은 측정한 적이 없다.
+- 4 는 절감이 0.1% 이고 수단이 문서화되지 않아 하지 않는다.
+- 2 가 필요하다고 보면 아래 실측을 먼저 하고 결정한다.
+- 이 조사가 드러낸 더 큰 문제는 **상한 셈**이다 — 토큰 상한이 캐시 읽기를 1:1 로 세서 codex 16라운드 위임 1건이 절반을 쓴다(금액은 $0.034). 별도 Q 로 볼 만하다(D-032 A4 재검토, 벤더가 구독 한도에서 캐시 읽기를 어떻게 세는지가 관건 — 이 PR 에서는 열지 않는다).
+
+**7. 필요하면 할 실측 (실행하지 않았다 — 설계와 예상 비용)**
+- **7-1 구성별 분해**: 스크래치 폴더에서 `claude -p --model claude-haiku-4-5 --effort low "Reply with exactly: ok" --output-format stream-json --verbose` 를 6가지 인자로 각 1회 — ① 없음 ② `--strict-mcp-config` ③ `--disable-slash-commands` ④ `--setting-sources project,local` ⑤ `--safe-mode` ⑥ ②③⑤ 전부. 첫 호출 프롬프트 = `usage` 입력 + 캐시 읽기 + 쓰기(보조 호출은 `modelUsage − usage` 로 뺀다). 캐시 상태와 무관하게 크기를 읽는다. 예상 API 환산 $0.05~0.08 × 6 = **약 $0.3~0.5**(구독제 청구 없음).
+- **7-2 reviewer 품질 A/B**: `rn_temp` 세션의 실제 reviewer 입력(결과 1,430자 + 근거) 같은 판정 기지의 케이스 5개 × {비격리, 격리} × Haiku·low = 10회. 판정 일치와 지적 내용을 사람이 본다. 약 **$0.5~0.8**. n 이 작아 "차이 없음" 만 말할 수 있고 "격리해도 안전" 은 못 말한다.
+- 둘 다 전하 승인 뒤에 한다. 2.1.285(현 설치)에서 다시 재야 위 표가 갱신된다.
+
+**8. 결정 대기**
+전하 몫: (1) 유지 / (2) reviewer 만 격리(실측 뒤) / (3) 부분 플래그 / (4) 제목 생성 끄기 중 선택, 실측 7-1·7-2 진행 여부, 상한 셈(캐시 읽기 가중)을 별도 Q 로 열지. 이 결정 전에는 코드·`engines.json` 을 바꾸지 않는다.
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |
@@ -2069,3 +2133,4 @@ D-064 는 "사다리는 `nextSuggestion()` 이 글로만 제안한다 — 배정
 | ~~Q15~~ | → **D-058** (`compact_boundary` 를 읽어 `result.compacted` 에 남긴다, 동작은 그대로). 원래 질문: resume 체인에서 엔진이 압축하면 orc 가 모른다. claude 는 `system`·`compact_boundary` (`compact_metadata.trigger·pre_tokens·post_tokens`) 를 흘린다 (D-031 Q10 후속 압축 탐색). 선택지 — 어댑터가 notice 로 읽어 `result` 기록에 남긴다(`cut` 과 같은 자리) / 압축된 세션은 다음부터 잇지 않는다 / 두지 않는다. 자동 압축(`trigger: "auto"`)·codex 는 미실측 | — |
 | ~~Q14~~ | → **D-057** (engines.json `resume.cumulative` 선언 + 기록의 직전 원본 보고를 빼서 과금). 원래 질문: resume 한 위임의 과금이 앞 턴들을 다시 센다 (D-031 Q10 후속 실측): claude `total_cost_usd`, codex `turn.completed.usage` 가 세션 누적이다. 고치는 방법 — 이을 세션의 직전 누적값을 `engineSession` 에 남겨 빼기 / claude 는 `usage` 로 단가 계산 / 엔진 세션 로그 읽기(D-020 과 같은 비공식 경로라 비권장) | — |
 | ~~Q19~~ | → **D-064 확정** (기본 `auto-ask` · 쓰기는 항상 묻기 · 비용 기준 $10 · 상한 근접 2배/20% · 기본값 `limits.json` · 구현 순서 카드 합치기 → 취소 → 방식 3종). 원래 질문: 대화 세션 승인 방식 3종의 기본 방식·`auto` 쓰기 처리·비용 기준·상한 근접 기준·기본값 위치·취소 선행·카드 합치기 분리 | — |
+| Q20 | 위임 1회 고정비 — 격리하지 않은 primary·reviewer 의 전역 환경 적재(약 +10k tok/콜드 $0.02~0.08)를 줄일까, D-032 를 유지할까. 조사 결과는 위 **Q20** 절 — 권장: 유지, reviewer 격리는 실측(7-1·7-2) 뒤에만. 상한 200만의 절반을 쓴 원인은 전역 환경이 아니라 codex 16라운드(캐시 읽기 1:1 셈)다 | 전하 결정 |
