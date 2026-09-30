@@ -288,7 +288,10 @@ function SessionList(props: { onOpen: (v: SessionView) => void; onError: (m: str
 }
 
 function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v: SessionView) => void; onClose: () => void }): ReactElement {
-  const { view, onChange } = props;
+  const { onChange } = props;
+  // 요청이 도는 동안 받은 뷰. 자동 승인 위임은 send 하나가 카드·승인·실행·결과를 모두 지나므로 (D-064 결정 7) 끝나기 전에는 카드도 취소 버튼(D-066)도 없다.
+  const [peek, setPeek] = useState<SessionView | null>(null);
+  const view = peek ?? props.view;
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState('');
   const [verify, setVerify] = useState('');
@@ -300,6 +303,14 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
   const [delegation, setDelegation] = useState<'' | 'running' | 'cancelling'>('');
   const [error, setError] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
+
+  // 요청이 도는 동안 뷰를 다시 읽는다 — 서비스의 뷰는 읽기뿐이라 도는 실행을 건드리지 않는다. 끝나면 요청이 돌려준 뷰가 이긴다.
+  useEffect(() => {
+    if (!busy) { setPeek(null); return; }
+    let live = true;
+    const t = setInterval(() => { orc.convView().then((v) => { if (live) setPeek(v); }, () => undefined); }, 400);
+    return () => { live = false; clearInterval(t); };
+  }, [busy]);
 
   // 새 기록·진행 표시가 뜨면 그 자리로 간다 — 입력 아래에 가려 "아무 일 없음"으로 보이지 않게.
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [view.records.length, busy]);
@@ -432,11 +443,12 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     view.broken > 0 ? h('div', { className: 'banner error' }, `기록에 깨진 줄 ${view.broken}개 — 건너뛰고 보여준다`) : null,
     view.interrupted ? h('div', { className: 'banner error' }, '승인한 위임의 결과가 기록되지 않았다 — 실행 중 앱이 끊겼다. 결정 로그 1차 줄만 남아 있을 수 있다.') : null,
     ...view.records.map(record),
-    sending ? h('div', { className: 'bubble user dim' }, sending) : null,
+    // 도는 중 받은 뷰에 이미 그 메시지가 실려 있으면 임시 말풍선을 또 띄우지 않는다.
+    sending && !(peek && peek.records.length > props.view.records.length) ? h('div', { className: 'bubble user dim' }, sending) : null,
     // 다시 연 화면은 `busy` 를 모른다 — 서비스가 working 이면 도는 실행에 붙은 것이다 (D-063). 결과는 앞 화면이 건 요청이 돌아오며 싣는다.
     busy || view.state === 'working'
       ? h('div', { className: 'row' },
-          text(delegation === 'cancelling' ? '취소하는 중…' : !sending && (view.state === 'blocked' || last?.kind === 'plan' || last?.kind === 'approval') ? '실행 중…' : '생각 중…', 'dim'),
+          text(delegation === 'cancelling' ? '취소하는 중…' : (view.state === 'blocked' || last?.kind === 'plan' || last?.kind === 'approval') ? '실행 중…' : '생각 중…', 'dim'),
           // 위임(primary·reviewer)이 도는 동안만 뜬다 (D-066). 다시 연 화면(D-063)은 서비스가 준 `cancellable` 로 같이 뜬다.
           // 취소는 그 위임만 멈춘다 — 세션은 남고, 돌아오는 뷰가 취소 결과 카드를 싣는다.
           delegation === 'running' || (delegation === '' && view.cancellable)
