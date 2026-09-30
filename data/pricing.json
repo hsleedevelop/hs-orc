@@ -21,10 +21,10 @@
       "cachedInputPerMTok": 0.2,
       "outputPerMTok": 12
     },
-    "gpt-5.6-sol": {
-      "inputPerMTok": 4,
-      "cachedInputPerMTok": 0.4,
-      "outputPerMTok": 20
+    "gpt-6.1-sol": {
+      "inputPerMTok": 2,
+      "cachedInputPerMTok": 0.1,
+      "outputPerMTok": 10
     },
     "gpt-6-astra": {
       "inputPerMTok": 10,
@@ -35,6 +35,7 @@
   "$evidence": {
     "collectedAt": "2026-09-22",
     "source": "https://developers.openai.com/api/docs/pricing (Standard, short context)",
+    "sol": "2026-09-30 gpt-5.6-sol($4/$20) → gpt-6.1-sol($2/$0.1/$10) — developers.openai.com/api/docs/pricing Standard 단문 표(D-067 추가 실측이 같은 날 조회). 키는 codex 슬롯의 id 라 cursor 의 gpt-5.6-sol-{effort} 는 원래 매칭되지 않는다(estimate).",
     "note": "2차 자료(블로그 다수)가 sol 을 $5/$30 으로 적었으나 공식 표는 $4/$20 이다. 1차 자료를 따랐다.",
     "plan": "**구독제로 쓰면 이 단가는 청구되지 않는다.** 이 값은 API 로 썼다면 들었을 비용이고, metered 등급의 쓸모는 절대 금액이 아니라 **배정 간 상대 비교**다 (첫 실사용에서 R03 $7.08 vs R01 $0.39 같은 18배 과잉 배정을 잡아낸 그 판단). 요금제 축 자체는 별도 결정으로 다룬다.",
     "claude": "claude 모델(haiku·sonnet·opus·fable)은 **일부러 비워 둔다.** CLI 가 total_cost_usd 를 돌려주므로 이미 actual 등급이다. 단가를 적으면 신뢰도가 낮은 값이 끼어들 자리만 생긴다.",

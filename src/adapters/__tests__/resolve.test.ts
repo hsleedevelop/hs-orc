@@ -56,7 +56,7 @@ describe('쓰기 권한 (D-025)', () => {
 describe('argv 생성', () => {
   it('codex 는 exec 서브커맨드와 -c model_reasoning_effort 를 쓴다', () => {
     assert.deepEqual(build('sol', 'xhigh').argv, [
-      'exec', 'PROMPT', '-m', 'gpt-5.6-sol', '-c', 'model_reasoning_effort="xhigh"', '-c', 'sandbox_mode="read-only"',
+      'exec', 'PROMPT', '-m', 'gpt-6.1-sol', '-c', 'model_reasoning_effort="xhigh"', '-c', 'sandbox_mode="read-only"',
     ]);
   });
 

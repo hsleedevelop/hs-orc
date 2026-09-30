@@ -2,7 +2,7 @@
   "$generated": {
     "note": "GENERATED — 수기 편집하지 않는다. `npm run gen:matrix` 로 재생성한다.",
     "source": "data/matrix-source.html",
-    "sourceSha256": "3e9c04017cb4ec585a47760af47249e738073af06051b9e69eb92422dabf411c",
+    "sourceSha256": "df51eb7c82a352f488b3a402434e905d90054e3ff602df85c209ac2f205a8245",
     "generator": "scripts/gen-matrix.mjs"
   },
   "tiers": {
@@ -40,7 +40,7 @@
       ]
     },
     "sol": {
-      "name": "GPT-5.6 Sol",
+      "name": "GPT-6.1 Sol",
       "kind": "OpenAI · complex professional work",
       "summary": "일반 구현보다 한 단계 깊은 복합 기능, 여러 파일 리팩터링, 테스트 설계의 primary로 적합합니다. Astra가 필요한지 판단하기 전에 명확한 수용 기준과 실행 로그를 먼저 보강하는 기본 상향 지점입니다.",
       "stats": [

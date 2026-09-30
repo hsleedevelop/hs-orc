@@ -1994,6 +1994,8 @@ PR #70 의 codex 조사(`~/.codex/models_cache.json`, client 0.158.0, 2026-09-30
 
 **상태** 실측·조사 기록 — 2026-09-30(추가 실측 포함, 누적 환산 $0.325 + 앞선 $0.61). `engines.json` 무변경. PR 대기(머지는 전하).
 
+**교체 반영(PR #PRNUM, 2026-09-30)** — sol 슬롯 codex id `gpt-5.6-sol` → `gpt-6.1-sol` (전하 결정, 권장안 그대로). cursor 는 0.159.2 시점 `--list-models` 에 6.1 변형이 없어 `gpt-5.6-sol-{effort}` 유지. 단가는 공식 표 $2/$0.1/$10 을 `pricing.json` 에 선언(estimate 아님). 확인 실행 1회(codex low "ok") 환산 약 $0.06~0.09. ultra 보류 그대로, luna·terra·astra 무변경.
+
 ---
 
 ## 미해결 목록

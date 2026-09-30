@@ -217,7 +217,7 @@
               <div class="bench-row" data-models="astra"><div class="bench-row__label">Astra + Codex</div><div class="bench-track"><div class="bench-fill" style="--w:89.5%;--color:#34d399"></div></div><div class="bench-score">58.2% <span>±2.8</span></div></div>
               <div class="bench-row" data-models="fable"><div class="bench-row__label">Fable 5.1 + Claude Code</div><div class="bench-track"><div class="bench-fill" style="--w:89.1%;--color:#ff6b35"></div></div><div class="bench-score">57.9% <span>±3.8</span></div></div>
               <div class="bench-row" data-models="opus"><div class="bench-row__label">Opus 5.5 (5세대 수치) + Claude Code</div><div class="bench-track"><div class="bench-fill" style="--w:82.9%;--color:#c4b5fd"></div></div><div class="bench-score">53.9% <span>±3.2</span></div></div>
-              <div class="bench-row" data-models="sol"><div class="bench-row__label">Sol + Codex</div><div class="bench-track"><div class="bench-fill" style="--w:57.4%;--color:#2dd4bf"></div></div><div class="bench-score">37.3% <span>±3.8</span></div></div>
+              <div class="bench-row" data-models="sol"><div class="bench-row__label">Sol 6.1 (5.6세대 수치) + Codex</div><div class="bench-track"><div class="bench-fill" style="--w:57.4%;--color:#2dd4bf"></div></div><div class="bench-score">37.3% <span>±3.8</span></div></div>
               <div class="bench-row" data-models="terra"><div class="bench-row__label">Terra + Codex</div><div class="bench-track"><div class="bench-fill" style="--w:33.1%;--color:#86efac"></div></div><div class="bench-score">21.5% <span>±3.3</span></div></div>
               <div class="bench-row" data-models="luna"><div class="bench-row__label">Luna + Codex</div><div class="bench-track"><div class="bench-fill" style="--w:26.6%;--color:#bef264"></div></div><div class="bench-score">17.3% <span>±2.8</span></div></div>
               <div class="bench-row" data-models="sonnet"><div class="bench-row__label">Sonnet 5.5 (5세대 수치) + Claude Code</div><div class="bench-track"><div class="bench-fill" style="--w:19.1%;--color:#fda4af"></div></div><div class="bench-score">12.4% <span>±3.1</span></div></div>
@@ -241,7 +241,7 @@
         <div class="panel__body"><div class="model-station">
           <div class="model-list" role="tablist" aria-label="모델 선택">
             <button class="model-button active" style="--model-color:#34d399" data-profile="astra" type="button" role="tab" aria-selected="true">GPT-6 Astra<span>highest complexity · Codex</span></button>
-            <button class="model-button" style="--model-color:#2dd4bf" data-profile="sol" type="button" role="tab" aria-selected="false">GPT-5.6 Sol<span>complex professional work</span></button>
+            <button class="model-button" style="--model-color:#2dd4bf" data-profile="sol" type="button" role="tab" aria-selected="false">GPT-6.1 Sol<span>complex professional work</span></button>
             <button class="model-button" style="--model-color:#86efac" data-profile="terra" type="button" role="tab" aria-selected="false">GPT-5.6 Terra<span>fast balanced work · Codex</span></button>
             <button class="model-button" style="--model-color:#bef264" data-profile="luna" type="button" role="tab" aria-selected="false">GPT-5.6 Luna<span>cost-sensitive high volume</span></button>
             <button class="model-button" style="--model-color:#ff6b35" data-profile="fable" type="button" role="tab" aria-selected="false">Claude Fable 5.1<span>long horizon · Claude Code</span></button>
@@ -276,7 +276,7 @@
         <div class="panel__header"><div><h2 class="panel__title" id="economics-title">Cost, latency, and modality</h2><p class="panel__sub">AA current max-effort rows. Cost is weighted benchmark task cost, not accepted-work spend.</p></div><span class="pill" style="color:var(--accent-cyan);border-color:rgba(34,211,238,.35)">ECONOMICS LAYER</span></div>
         <div class="table-wrap"><table class="economics-grid"><thead><tr><th>Model</th><th>AA</th><th>Task cost</th><th>First chunk</th><th>Native input scope</th></tr></thead><tbody>
           <tr><td>Astra</td><td>53</td><td>$3.26</td><td>260.42s</td><td>Text + image</td></tr>
-          <tr><td>Sol</td><td>47</td><td>$1.99</td><td>129.50s</td><td>Text + image</td></tr>
+          <tr><td>Sol 6.1 (5.6세대 수치)</td><td>47</td><td>$1.99</td><td>129.50s</td><td>Text + image</td></tr>
           <tr><td>Terra</td><td>42</td><td>$1.40</td><td>211.05s</td><td>Text + image</td></tr>
           <tr><td>Luna</td><td>37</td><td>$0.18</td><td>123.28s</td><td>Text + image</td></tr>
           <tr><td>Fable 5.1*</td><td>53</td><td>$7.63</td><td>262.21s</td><td>Text + image</td></tr>
@@ -317,7 +317,7 @@
   <script>
     const profiles = {
       astra: { name: 'GPT-6 Astra', color: '#34d399', kind: 'OpenAI · frontier execution', summary: '복잡한 구현, 다중 파일 변경, 장애 RCA와 실제 terminal 실행을 primary로 맡기기 좋은 선택입니다. 장기 작업에서 Fable과 사실상 동급 코딩군이므로, 고위험 작업은 Fable을 independent reviewer로 둡니다.', stats: [['Best fit', 'RCA · feature · security'], ['Effort', 'High → Max'], ['Reviewer', 'Fable xHigh / Max']] },
-      sol: { name: 'GPT-5.6 Sol', color: '#2dd4bf', kind: 'OpenAI · complex professional work', summary: '일반 구현보다 한 단계 깊은 복합 기능, 여러 파일 리팩터링, 테스트 설계의 primary로 적합합니다. Astra가 필요한지 판단하기 전에 명확한 수용 기준과 실행 로그를 먼저 보강하는 기본 상향 지점입니다.', stats: [['Best fit', 'Feature · refactor · test'], ['Effort', 'High → xHigh'], ['Reviewer', 'Opus or Sonnet']] },
+      sol: { name: 'GPT-6.1 Sol', color: '#2dd4bf', kind: 'OpenAI · complex professional work', summary: '일반 구현보다 한 단계 깊은 복합 기능, 여러 파일 리팩터링, 테스트 설계의 primary로 적합합니다. Astra가 필요한지 판단하기 전에 명확한 수용 기준과 실행 로그를 먼저 보강하는 기본 상향 지점입니다.', stats: [['Best fit', 'Feature · refactor · test'], ['Effort', 'High → xHigh'], ['Reviewer', 'Opus or Sonnet']] },
       terra: { name: 'GPT-5.6 Terra', color: '#86efac', kind: 'OpenAI · fast balanced work', summary: '짧고 명확한 구현, 구조화된 문서, 반복적인 보조 검증에 비용과 속도 균형이 좋습니다. Terminal-Bench 결과는 최상위군과 큰 간격이 있어, 복잡한 버그나 광범위한 리팩터링의 단독 담당은 피합니다.', stats: [['Best fit', 'Small changes · docs'], ['Effort', 'Mid → High'], ['Escalate when', 'root cause is unclear']] },
       luna: { name: 'GPT-5.6 Luna', color: '#bef264', kind: 'OpenAI · high-volume efficiency', summary: '반복 변환, 짧은 요약, 명확한 타입·문법 확인처럼 비용 민감하고 고빈도인 업무에 맞습니다. 결과가 바로 실행·배포 경로를 바꾸면 Terra 이상으로 올리고 관련 test를 실행합니다.', stats: [['Best fit', 'Batch · summary · routine'], ['Effort', 'Low → Mid'], ['Escalate when', 'scope expands']] },
       fable: { name: 'Claude Fable 5.1', color: '#ff6b35', kind: 'Anthropic · long-horizon exploration', summary: '모호한 아키텍처 설계, 대규모 레거시 분석, 장기 마이그레이션에서 primary로 적합합니다. Astra와 terminal coding 결과가 오차 범위 내로 가까워, 코딩 업무에서도 고위험 작업의 독립 검증자 역할이 강합니다.', stats: [['Best fit', 'Legacy · design · migration'], ['Effort', 'High → Max'], ['Reviewer', 'Astra xHigh / Max']] },
