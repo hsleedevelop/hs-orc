@@ -1,5 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { runProcess } from '../run.ts';
 
 const sh = (script: string, timeoutMs = 10_000) =>
@@ -105,9 +109,28 @@ describe('취소와 타임아웃', () => {
     assert.equal(await waitGone(grandchild, 8_000), true, `손자 ${grandchild} 가 살아남았다 (좀비)`);
   });
 
+  it('취소 직후 호스트가 유예를 기다리지 않고 나가도 SIGTERM 무시 손자가 남지 않는다 (D-066)', async () => {
+    const pidFile = path.join(mkdtempSync(path.join(os.tmpdir(), 'hs-exit-')), 'pid');
+    // 호스트 프로세스: SIGTERM 을 무시하는 손자를 띄우고 취소한 뒤 2초 유예 전에 process.exit 한다(chat 의 두 번째 Ctrl-C).
+    const host = `
+      import { runProcess } from ${JSON.stringify(new URL('../run.ts', import.meta.url).href)};
+      const h = runProcess({ bin: '/bin/sh', argv: ['-c', "trap '' TERM; sleep 120 & echo $! > ${pidFile}; wait"], cwd: process.cwd(), timeoutMs: 60000, format: 'claude' });
+      await new Promise((r) => setTimeout(r, 500));
+      h.cancel();
+      await new Promise((r) => setTimeout(r, 100));
+      process.exit(130);
+    `;
+    const ran = spawnSync(process.execPath, ['--input-type=module', '-e', host], { encoding: 'utf8', timeout: 15_000 });
+    assert.equal(ran.status, 130, ran.stderr);
+    const grandchild = Number(readFileSync(pidFile, 'utf8').trim());
+    assert.ok(Number.isInteger(grandchild) && grandchild > 0);
+    spawnedGrandchildren.push(grandchild);
+    assert.equal(await waitGone(grandchild, 1_500), true, `손자 ${grandchild} 가 호스트 종료 뒤에도 살아남았다`);
+  });
+
   it('이 파일이 띄운 손자가 하나도 남지 않는다', () => {
     // pgrep -f 로 세지 않는다 — 검사 셸 자신의 커맨드라인이 패턴에 걸려 자기를 센다(실측).
-    assert.ok(spawnedGrandchildren.length >= 3, '손자를 하나도 추적하지 못했다');
+    assert.ok(spawnedGrandchildren.length >= 4, '손자를 하나도 추적하지 못했다');
     assert.deepEqual(spawnedGrandchildren.filter(alive), []);
   });
 });

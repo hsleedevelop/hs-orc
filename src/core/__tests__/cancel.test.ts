@@ -236,6 +236,7 @@ describe('위임 취소 — 그 뒤 (D-066)', () => {
     const primaryCalls = calls.filter((c) => c.role === 'primary');
     assert.deepEqual(primaryCalls.map((c) => c.resume), [undefined, 'eng-1', undefined]);
     assert.match(primaryCalls[2]?.prompt ?? '', /\[최근 대화\]/, '잇지 않으면 orc 의 최근 대화가 원문으로 실린다 (D-059)');
+    assert.match(primaryCalls[2]?.prompt ?? '', /orc\(위임 취소\): 사용자가 앞 위임을 취소했다\(행 \w+ · primary 실행 중\)/, '취소한 사실이 맥락에 실린다');
     assert.equal(session.state, 'waiting_input');
     assert.equal(session.records().findLast((r) => r.kind === 'result')?.kind, 'result');
     const last = session.records().findLast((r) => r.kind === 'result');
