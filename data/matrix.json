@@ -2,7 +2,7 @@
   "$generated": {
     "note": "GENERATED — 수기 편집하지 않는다. `npm run gen:matrix` 로 재생성한다.",
     "source": "data/matrix-source.html",
-    "sourceSha256": "85cc39b4a6a7932fdcdb7453665f55e5ee51c4f49f47ab2c3fe46fe0c6f3323c",
+    "sourceSha256": "3e9c04017cb4ec585a47760af47249e738073af06051b9e69eb92422dabf411c",
     "generator": "scripts/gen-matrix.mjs"
   },
   "tiers": {
@@ -116,7 +116,7 @@
       ]
     },
     "opus": {
-      "name": "Claude Opus 5",
+      "name": "Claude Opus 5.5",
       "kind": "Anthropic · focused reasoning",
       "summary": "비용을 낮추면서 강한 단발 추론과 코드 경로 검토를 수행하는 대안입니다. 최신 Fable보다 장기 에이전트성은 낮지만, 리팩터링·성능 최적화의 reviewer로 실용적인 균형을 제공합니다.",
       "stats": [
@@ -135,7 +135,7 @@
       ]
     },
     "sonnet": {
-      "name": "Claude Sonnet 5",
+      "name": "Claude Sonnet 5.5",
       "kind": "Anthropic · balanced daily implementation",
       "summary": "요구사항 정리, 일상 기능 구현, 테스트 보강과 코드 리뷰에 균형 잡힌 역할입니다. 장기 탐색이나 불명확한 RCA에서는 Opus 또는 Fable로 상향하되, 먼저 로그·재현 조건을 보강합니다.",
       "stats": [

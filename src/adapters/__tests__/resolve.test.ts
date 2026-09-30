@@ -68,8 +68,8 @@ describe('argv 생성', () => {
 
   it('cursor 는 effort 를 모델 id 접미사로 녹이고 별도 플래그를 두지 않는다', () => {
     const invocation = build('opus', 'max', 'cursor');
-    assert.equal(invocation.modelId, 'claude-opus-5-thinking-max');
-    assert.deepEqual(invocation.argv, ['-p', 'PROMPT', '--model', 'claude-opus-5-thinking-max']);
+    assert.equal(invocation.modelId, 'claude-opus-5-5-max');
+    assert.deepEqual(invocation.argv, ['-p', 'PROMPT', '--model', 'claude-opus-5-5-max']);
   });
 });
 
@@ -119,7 +119,7 @@ describe('Cursor -fast (D-023)', () => {
     );
     assert.equal(
       buildInvocation(catalog, 'opus', 'max', 'P', { engine: 'cursor', fast: true }).modelId,
-      'claude-opus-5-thinking-max-fast',
+      'claude-opus-5-5-max-fast',
     );
   });
 

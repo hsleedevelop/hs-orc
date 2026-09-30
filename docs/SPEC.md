@@ -183,7 +183,7 @@ cursor는 `cursor-agent --list-models`, claude는 4개 id를 실제로 `-p` 실�
 | **Astra** | codex | `gpt-6-astra` | **없음 ❌** |
 | **Haiku** | claude | `claude-haiku-4-5-20251001` | **없음 ❌** |
 | Sonnet | claude | `claude-sonnet-5-5` | `claude-sonnet-5-5-{effort}` ✅ |
-| Opus | claude | `claude-opus-5` | `claude-opus-5-thinking-{effort}` ✅ |
+| Opus | claude | `claude-opus-5-5` | `claude-opus-5-5-{effort}` ✅ |
 | Fable | claude | `claude-fable-5-1` | `claude-fable-5-1-thinking-{effort}` ✅ |
 
 **Cursor는 8모델 중 6개만 커버한다.** Astra는 11행 중 6행에 등장(primary 4 / reviewer 2)하고
@@ -196,8 +196,8 @@ Cursor 쪽 id에서 S1이 확인한 두 가지(SPEC v0.1보다 정밀해진 부�
 - **OpenAI 모델에는 `-thinking` 변형이 아예 없다.** §3.3의 "기본은 `-thinking` 계열" 정책은
   Claude 3모델(sonnet·opus·fable)에만 적용된다. `gpt-5.6-*`는 `-{effort}`와 `-fast`만 있다.
   단 **Sonnet 5.5는 `-thinking` 변형이 없다** (2026-09-29 실측: `claude-sonnet-5-5-{low|medium|high|xhigh|max}` 5종뿐, adaptive thinking이 기본) — `-{effort}`만 붙는다.
-- **`claude-opus-5` 비thinking은 `low|medium|high`뿐이다.** `xhigh`·`max`는 `-thinking` 변형이
-  유일한 경로이므로, Opus에서 `-thinking` 기본값은 취향이 아니라 **커버리지 요구사항**이다.
+- **Opus 5.5도 `-thinking` 변형이 없다** (2026-09-30 실측: `claude-opus-5-5-{low|medium|high|xhigh|max}` 5종과 각 `-fast` 5종, adaptive thinking이 기본) — `-{effort}`만 붙고 5단계가 전부 비thinking으로 닿는다.
+  옛 `claude-opus-5`는 비thinking이 `low|medium|high`뿐이라 `xhigh`·`max`가 `-thinking` 변형에만 있었다(그때 `-thinking` 기본값은 커버리지 요구사항이었다). Fable만 `-thinking` 을 그대로 쓴다.
 
 codex의 `supported_reasoning_levels`는 네 모델 모두 정규 5단계를 포함한다.
 terra·sol·astra에는 `ultra`도 있으나 매트릭스에 등장하지 않으므로 정규 어휘에 넣지 않는다(§3.3).
@@ -219,7 +219,7 @@ terra·sol·astra에는 `ultra`도 있으나 매트릭스에 등장하지 않으
 - **정규 어휘 밖의 값은 던진다.** `claude`는 잘못된 값을 경고만 내고 기본값으로 실행하므로(§0.1-2), 어댑터 검증이 유일한 방어선이다.
 - Cursor는 `-fast`/`-thinking` 변형 선택 정책을 `engines.json`에 둔다. 기본값은 `-thinking` 계열(추론 품질 우선), `fast`는 옵트인.
   단 `-thinking`은 **Claude 3모델에만 존재한다** — `gpt-5.6-*`에는 변형 자체가 없다(§3.2).
-- **`fast`는 모델별 옵트인이다** (D-023). 실측(2026-09-21): `-fast`는 Luna·Terra·Sol(각 6종)과 Opus(8종)에 있고 **Sonnet·Fable 5.1에는 0종**이다. 없는 모델에 `fast`를 요청하면 **던진다** — 일반 변형으로 조용히 떨어뜨리는 것이 D-004가 금지한 말없는 치환이다.
+- **`fast`는 모델별 옵트인이다** (D-023). 실측(2026-09-21): `-fast`는 Luna·Terra·Sol(각 6종)과 Opus(옛 5 는 8종, 2026-09-30 기준 5.5 는 5종)에 있고 **Sonnet·Fable 5.1에는 0종**이다. 없는 모델에 `fast`를 요청하면 **던진다** — 일반 변형으로 조용히 떨어뜨리는 것이 D-004가 금지한 말없는 치환이다.
 
 ### 3.4 argv 생성 예
 
