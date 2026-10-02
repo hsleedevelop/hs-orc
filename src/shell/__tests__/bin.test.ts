@@ -1,17 +1,18 @@
 import { after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { projectStateDir } from '../../core/project-state.ts';
 
 /**
  * 진입점의 **경로 해석**을 프로세스 수준에서 고정한다.
  *
  * 두 기준이 섞여 있고 그게 의도다:
  *   설치 위치 기준 — data/{matrix,engines,limits,verify}.json (어디서 부르든 같은 매트릭스)
- *   cwd 기준       — .hs-orc/ (실행 산출물은 작업 중인 프로젝트에 쌓인다)
- * 둘 중 하나가 반대로 뒤집히면 "다른 디렉터리에서 부를 수 있다"가 조용히 거짓이 된다.
+ *   홈 기준        — ~/.hs-orc/projects/<cwd 키>/ (실행 산출물은 부른 폴더별로 나뉘되, 그 폴더에는 아무것도 만들지 않는다 — D-071)
+ * 둘 중 하나가 뒤집히면 "다른 디렉터리에서 부를 수 있다"·"빈 폴더에서 스캐폴더가 돈다"가 조용히 거짓이 된다.
  *
  * 그래서 이 테스트는 반드시 **저장소 바깥** 디렉터리를 cwd 로 잡고 돈다.
  */
@@ -43,16 +44,18 @@ describe('hs-orc 진입점', () => {
     assert.match(r.err, /실제 실행은 --run/);
   });
 
-  it('실행 산출물은 부른 디렉터리에 쌓인다 — .hs-orc 는 cwd 기준', () => {
+  it('실행 산출물은 부른 디렉터리 몫으로 홈에 쌓이고, 그 디렉터리에는 아무것도 생기지 않는다 (D-071)', () => {
     const project = mkdtempSync(path.join(os.tmpdir(), 'hs-orc-proj-'));
     try {
       const r = hsOrc(['오늘 점심 뭐 먹지'], project);
       assert.notEqual(r.code, 0);
       assert.match(r.err, /분류하지 못했다/);
+      // 뿌리는 test-setup 이 가둔 HS_ORC_PROJECT_STATE 다 — 자식도 그것을 물려받는다.
       assert.ok(
-        existsSync(path.join(project, '.hs-orc', 'unclassified.jsonl')),
-        '미분류 로그가 부른 디렉터리에 생기지 않았다 — 설치 위치로 샜다는 뜻이다.',
+        existsSync(path.join(projectStateDir(project), 'unclassified.jsonl')),
+        '미분류 로그가 부른 디렉터리의 프로젝트 상태에 생기지 않았다 — 설치 위치나 다른 키로 샜다는 뜻이다.',
       );
+      assert.deepEqual(readdirSync(project), [], '부른 디렉터리를 더럽혔다 — 빈 폴더 스캐폴더가 거절된다.');
     } finally {
       rmSync(project, { recursive: true, force: true });
     }

@@ -10,7 +10,7 @@ import { Budget } from '../core/budget.ts';
 import { createExecutor, type SlotExecutor } from '../core/executor.ts';
 import type { Journal } from '../core/journal.ts';
 import { ConversationSession } from '../core/session.ts';
-import { readTranscript, replaySpend, transcriptPath, type SessionKind } from '../core/transcript.ts';
+import { readSessionLog, replaySpend, type SessionKind } from '../core/transcript.ts';
 import { repoRoot } from './gui/worktree.ts';
 
 /**
@@ -24,7 +24,7 @@ export function skipGitCheck(kind: SessionKind, inGit: boolean, write: boolean):
 /** 세션 하나의 Budget — 기록의 `spend` 를 재생해 되살린다 (D-054). 상한은 세션 단위다 (D-032 A2). */
 export function restoreBudget(dir: string, id: string, budgetUsd = loadLimits().budgetUsd): Budget {
   const budget = new Budget(budgetUsd, loadLimits().tokenBudget);
-  replaySpend(budget, readTranscript(transcriptPath(dir, id)).records);
+  replaySpend(budget, readSessionLog(dir, id).records);
   return budget;
 }
 

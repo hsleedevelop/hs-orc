@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { projectStateDir } from '../../core/project-state.ts';
 
 /**
  * 하한선에 걸린 입력이 **엔진을 띄우지 않는지**를 프로세스 수준에서 증명한다 (PLAN S3 완료 판정).
@@ -15,14 +16,15 @@ import path from 'node:path';
  * **사용자의 개인 결정 로그**(`~/.claude/logs/delegation-router.jsonl`)에 줄을 쌓는다.
  * 실측으로 그 일이 벌어졌다: 미분류 누적이 테스트 쓰레기로 임계치를 넘겨 제품이 사용자에게
  * 가짜 "행 추가 제안"을 냈고, 개인 로그에는 일어나지도 않은 $10.89 실행이 38줄 남았다(PLAN S9-3).
- * 그래서 cwd 기준 경로(`.hs-orc/`)는 **임시 cwd** 로, 홈 기준 경로(결정 로그)는 **환경변수**로 돌린다.
+ * 그래서 cwd 는 **임시 폴더**로, 홈 기준 경로(결정 로그)는 **환경변수**로 돌린다. 프로젝트 상태(D-071, 미분류 로그 포함)는
+ * test-setup 이 가둔 `HS_ORC_PROJECT_STATE` 아래 그 임시 cwd 의 키로 쌓인다.
  */
 const CLI = path.resolve(import.meta.dirname, '..', 'cli.ts');
 const sandbox = mkdtempSync(path.join(os.tmpdir(), 'hs-orc-cli-'));
 const decisionLog = path.join(sandbox, 'decisions.jsonl');
 after(() => rmSync(sandbox, { recursive: true, force: true }));
 
-/** 이 파일이 저장소를 건드렸는지 재는 기준선. 자식을 띄우기 **전에** 찍는다. */
+/** 이 파일이 저장소를 건드렸는지 재는 기준선(D-071 이전 자리 — 지금은 아무도 쓰지 않는다). 자식을 띄우기 **전에** 찍는다. */
 const repoUnclassified = path.resolve(import.meta.dirname, '..', '..', '..', '.hs-orc', 'unclassified.jsonl');
 const sizeOf = (file: string): number => (existsSync(file) ? readFileSync(file, 'utf8').length : -1);
 const repoBefore = sizeOf(repoUnclassified);
@@ -115,7 +117,8 @@ describe('CLI 순서 보장', () => {
    * 이 검사가 없으면 격리가 조용히 풀려도 초록이 뜨고, 그 대가는 사용자의 개인 로그다.
    */
   it('테스트가 남긴 흔적은 전부 샌드박스 안에 있다 — 저장소도 홈도 건드리지 않는다', () => {
-    assert.ok(existsSync(path.join(sandbox, '.hs-orc', 'unclassified.jsonl')), '미분류 로그가 샌드박스 밖으로 샜다.');
+    assert.ok(existsSync(path.join(projectStateDir(sandbox), 'unclassified.jsonl')), '미분류 로그가 샌드박스 밖으로 샜다.');
+    assert.ok(projectStateDir(sandbox).startsWith(process.env['HS_ORC_PROJECT_STATE'] ?? '~'), '프로젝트 상태가 진짜 홈으로 샜다.');
     assert.ok(existsSync(decisionLog), '결정 로그가 샌드박스 밖으로 샜다 — 기본 경로는 사용자의 개인 로그다.');
     assert.equal(
       sizeOf(repoUnclassified),

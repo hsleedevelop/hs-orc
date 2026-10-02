@@ -7,6 +7,7 @@
  */
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { legacyStateDir, projectStateDir } from './project-state.ts';
 
 export interface UnclassifiedRow {
   readonly ts: string;
@@ -15,8 +16,9 @@ export interface UnclassifiedRow {
 
 export const DEFAULT_THRESHOLD = 3;
 
+/** 쓰는 자리 — 홈의 프로젝트 상태 아래다 (D-071). */
 export function unclassifiedLogPath(cwd = process.cwd(), env: NodeJS.ProcessEnv = process.env): string {
-  return env['HS_ORC_UNCLASSIFIED_LOG'] ?? path.join(cwd, '.hs-orc', 'unclassified.jsonl');
+  return env['HS_ORC_UNCLASSIFIED_LOG'] ?? path.join(projectStateDir(cwd, env), 'unclassified.jsonl');
 }
 
 export function recordUnclassified(task: string, file = unclassifiedLogPath(), now = new Date()): void {
@@ -41,6 +43,16 @@ export function readUnclassified(file = unclassifiedLogPath()): UnclassifiedRow[
     }
   }
   return rows;
+}
+
+/**
+ * 제안 판정용 읽기 — 옛 자리(`<cwd>/.hs-orc/unclassified.jsonl`, D-071 이전)를 먼저 붙여 읽는다.
+ * 옛 누적이 사라져 임계치가 처음부터 다시 세지지 않게. 경로를 env 로 정했으면 그 파일만 본다.
+ */
+export function readUnclassifiedWithLegacy(cwd = process.cwd(), env: NodeJS.ProcessEnv = process.env): UnclassifiedRow[] {
+  const current = readUnclassified(unclassifiedLogPath(cwd, env));
+  if (env['HS_ORC_UNCLASSIFIED_LOG'] !== undefined) return current;
+  return [...readUnclassified(path.join(legacyStateDir(cwd), 'unclassified.jsonl')), ...current];
 }
 
 /** 작업 문자열에서 뽑은 거친 키 — 같은 모양의 미분류를 묶는 용도일 뿐 분류가 아니다. */

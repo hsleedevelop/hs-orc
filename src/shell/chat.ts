@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline';
 import { APPROVAL_MODES, isApprovalMode, type ApprovalMode } from '../data/limits.ts';
 import type { Budget } from '../core/budget.ts';
 import type { ConversationSession } from '../core/session.ts';
-import { listScratchSessions, listSessions, readTranscript, type SessionSummary, type TranscriptRecord } from '../core/transcript.ts';
+import { listScratchSessions, listSessions, readSessionLog, type SessionSummary, type TranscriptRecord } from '../core/transcript.ts';
 import { compactLines, cutLine, ladderLines } from './transcript-lines.ts';
 
 export function renderRecord(r: TranscriptRecord): string[] {
@@ -212,7 +212,7 @@ export function findSession(cwd: string, id: string): SessionSummary | undefined
 export function openingLines(session: ConversationSession, budget: Budget, tail = 10): string[] {
   const records = session.records().filter((r) => r.kind !== 'spend');
   const last = records.at(-1);
-  const broken = readTranscript(session.file).broken;
+  const broken = readSessionLog(session.dir, session.id).broken;
   return [
     `세션   ${session.kind} ${session.id} · ${session.dir}`,
     `방식   승인 방식 ${session.mode}`,

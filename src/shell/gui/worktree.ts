@@ -11,10 +11,10 @@
  * Electron 을 import 하지 않는다 (`service.ts`·`projects.ts` 와 같은 이유). shell 안에만 있다 (D-001).
  */
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { legacyStateDir, projectKey } from '../../core/project-state.ts';
 
 export interface WorktreeInfo {
   readonly dir: string;
@@ -77,14 +77,8 @@ export function mainWorktree(cwd: string): string | null {
  * 실제 경로 해시를 붙여 갈라 둔다.
  */
 export function repoSlug(mainDir: string): string {
-  const real = (() => {
-    try {
-      return realpathSync(mainDir);
-    } catch {
-      return path.resolve(mainDir);
-    }
-  })();
-  return `${path.basename(real)}-${createHash('sha256').update(real).digest('hex').slice(0, 8)}`;
+  // 프로젝트 상태 키(D-071)와 같은 규칙이다 — 한 폴더는 홈 어디서든 같은 이름으로 보인다.
+  return projectKey(mainDir);
 }
 
 /**
@@ -184,9 +178,11 @@ export interface RemoveResult {
  *   - 본체 작업 트리는 못 지운다.
  *   - `--force` 를 쓰지 않는다. 커밋 안 한 변경이 있으면 git 이 거절하고, 그 말을 그대로 올린다.
  *   - 브랜치는 `git branch -d`(머지된 것만) 로만 지운다. 거절당하면 남기고 그렇다고 말한다.
- *   - **실행 기록이 남아 있으면 거절한다.** 산출물은 cwd 기준으로 쌓이므로(`bin/hs-orc.mjs`)
- *     워크트리를 지우면 그 안의 `.hs-orc/runs/` 도 같이 사라진다. "증거로 종료" 하는 제품이
- *     증거를 조용히 버리면 안 된다 — 2026-09-22 에 실제로 첫 실사용 원시 로그를 이렇게 잃었다.
+ *   - **옛 자리에 기록이 남아 있으면 거절한다.** "증거로 종료" 하는 제품이 증거를 조용히 버리면 안 된다 —
+ *     2026-09-22 에 워크트리 안 `.hs-orc/runs/` 째로 첫 실사용 원시 로그를 이렇게 잃었다.
+ *     D-071 부터 새 기록(runs·sessions)은 홈(`~/.hs-orc/projects/<키>/`)에 쌓여 워크트리를 지워도 남는다.
+ *     그래서 막는 대상은 **그 전 기록이 남은 옛 자리**(`<워크트리>/.hs-orc/{runs,sessions}`)뿐이다 —
+ *     읽기 폴백으로만 남은 그 기록은 워크트리와 함께 사라진다. 세션도 같이 보는 것은 같은 이유다.
  */
 export function removeWorktree(cwd: string, target: string): RemoveResult {
   const items = listWorktrees(cwd);
@@ -196,13 +192,15 @@ export function removeWorktree(cwd: string, target: string): RemoveResult {
   if (found.locked) throw new Error(`잠긴 워크트리다 — git worktree unlock 이 먼저다: ${found.dir}`);
 
   // 증거가 먼저다. git 이 dirty 를 거절하는 것과 같은 자리에서 같은 방식으로 막는다.
-  const runs = path.join(found.dir, '.hs-orc', 'runs');
-  const kept = existsSync(runs) ? readdirSync(runs) : [];
-  if (kept.length > 0) {
-    throw new Error(
-      `실행 기록 ${kept.length}건이 남아 있다: ${runs}\n` +
-        '지우면 그 사이클의 원시 로그와 판정 근거가 사라진다. 옮기거나 지운 뒤 다시 한다.',
-    );
+  for (const [what, sub] of [['실행 기록', 'runs'], ['세션 기록', 'sessions']] as const) {
+    const legacy = path.join(legacyStateDir(found.dir), sub);
+    const kept = existsSync(legacy) ? readdirSync(legacy) : [];
+    if (kept.length > 0) {
+      throw new Error(
+        `옛 자리에 ${what} ${kept.length}건이 남아 있다: ${legacy}\n` +
+          '지우면 그 기록(원시 로그·판정 근거·대화)이 사라진다. 옮기거나 지운 뒤 다시 한다. 새 기록은 홈에 있어 남는다 (D-071).',
+      );
+    }
   }
 
   const repo = items[0]?.dir ?? cwd;

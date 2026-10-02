@@ -413,8 +413,11 @@ Evaluator에는 reviewer 슬롯 모델을 쓴다 — 매트릭스의 독립 리�
 
 | 종류 | 작업 폴더 | 기록 파일 |
 |---|---|---|
-| `project` | 사용자가 고른 폴더 (워크트리 포함, D-029). git 이 아니면 codex 는 **읽기 전용 위임만** 돈다 (D-055) | `<폴더>/.hs-orc/sessions/<id>.jsonl` |
-| `scratch` | `~/.hs-orc/scratch/<id>/` 를 세션 시작 때 만든다 (`HS_ORC_SCRATCH` 로 뿌리를 바꾼다). git 아님, **쓰기 켤 수 없음** | 그 폴더의 `.hs-orc/sessions/<id>.jsonl` |
+| `project` | 사용자가 고른 폴더 (워크트리 포함, D-029). git 이 아니면 codex 는 **읽기 전용 위임만** 돈다 (D-055) | `~/.hs-orc/projects/<폴더 키>/sessions/<id>.jsonl` (D-071) |
+| `scratch` | `~/.hs-orc/scratch/<id>/` 를 세션 시작 때 만든다 (`HS_ORC_SCRATCH` 로 뿌리를 바꾼다). git 아님, **쓰기 켤 수 없음** | `~/.hs-orc/projects/<그 폴더 키>/sessions/<id>.jsonl` (D-071) |
+
+- **작업 폴더에는 아무것도 만들지 않는다** (D-071) — 빈 폴더를 요구하는 스캐폴더(`npx create-expo-app .` 등)가 위임에서 돌아야 한다. 원시 로그(`runs/`)·미분류 누적(`unclassified.jsonl`)도 같은 `projects/<폴더 키>/` 아래다. 폴더 키 = `<basename>-<실제 경로 sha256 앞 8자>`, 뿌리는 `HS_ORC_PROJECT_STATE` 로 바꾼다.
+- D-071 이전 기록(`<폴더>/.hs-orc/sessions/<id>.jsonl`)은 **읽기만 한다** — 목록에 함께 뜨고, 같은 세션은 옛 자리 → 새 자리 순으로 이어 읽는다. 옮기거나 지우지 않는다.
 
 - `id` 는 결정 로그와 같은 `MMDD-HHMM-xxx` (§8).
 - 기록은 **append-only JSONL** 이다. 한 줄 = 한 사건:
@@ -545,7 +548,7 @@ v2 의 Run 폼은 세션 화면으로 대체한다. 탭을 옮겨도 세션 화�
 | `engines.json` | 바이너리 경로·이름 해석, 모델↔엔진 매핑, 가용성, effort 표기, cursor 변형 정책 | 수기 |
 | `limits.json` | 최대 반복 수, 최대 노드 수, 누적 비용 상한, 타임아웃. v2.1: `contextTurns`(6)·`contextChars`(6000) | 수기 |
 
-환경 변수 (테스트가 홈을 건드리지 않게 가두는 자리이기도 하다): `HS_ORC_DECISION_LOG` · `HS_ORC_RUN_STORE` · `HS_ORC_PROJECTS` · `HS_ORC_WORKTREES` · v2.1 `HS_ORC_SCRATCH`.
+환경 변수 (테스트가 홈을 건드리지 않게 가두는 자리이기도 하다): `HS_ORC_DECISION_LOG` · `HS_ORC_RUN_STORE` · `HS_ORC_PROJECTS` · `HS_ORC_WORKTREES` · v2.1 `HS_ORC_SCRATCH` · `HS_ORC_PROJECT_STATE`(D-071).
 
 `matrix.json`은 생성물이며 수기 편집하지 않는다.
 

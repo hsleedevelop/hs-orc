@@ -19,7 +19,7 @@ import { firstLine, secondLine } from '../core/decide.ts';
 import { storeRun } from '../core/run-store.ts';
 import { reportError, reportNotice } from '../core/report.ts';
 import { FAILING_PHASES, collect, contradiction, notRun, outcomeOf, type Evidence } from '../core/evidence.ts';
-import { readUnclassified, recordUnclassified, suggestRows } from '../core/unclassified.ts';
+import { readUnclassifiedWithLegacy, recordUnclassified, suggestRows } from '../core/unclassified.ts';
 import { declaredTests, defaultVerify } from '../data/verify.ts';
 import { depStatus } from './deps.ts';
 import { parseVerdict, reviewPrompt, runDuo } from '../core/duo.ts';
@@ -210,7 +210,7 @@ async function main(): Promise<void> {
     // 세면 없는 행을 더하라는 가짜 제안이 나온다.
     if (routed.jev !== 'unsure') {
       recordUnclassified(args.task);
-      for (const s of suggestRows(readUnclassified())) process.stderr.write(`\n${s.message}\n`);
+      for (const s of suggestRows(readUnclassifiedWithLegacy())) process.stderr.write(`\n${s.message}\n`);
     }
 
     process.exitCode = 1;

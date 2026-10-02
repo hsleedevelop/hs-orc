@@ -23,7 +23,7 @@ import { LadderError, planLadder, requestStage, type EscalationStage } from './l
 import { route as routeTask, routeWithFallback } from './pipeline.ts';
 import {
   appendRecord,
-  readTranscript,
+  readSessionLog,
   transcriptPath,
   type LadderRecord,
   type SessionKind,
@@ -109,7 +109,7 @@ export class ConversationSession {
     this.file = transcriptPath(deps.dir, deps.id);
     // 다시 열면 턴 번호를 이어 간다. 끝에 승인 안 된 배정이 남아 있어도 **되살리지 않는다** —
     // 그 사이 비용·폴더가 바뀌었을 수 있다. 화면은 그 카드를 보여주되 승인 버튼은 없다.
-    this.log = readTranscript(this.file).records;
+    this.log = readSessionLog(deps.dir, deps.id).records;
     this.turn = this.log.reduce((max, r) => Math.max(max, r.turn), 0);
     const recorded = this.log.findLast((r) => r.kind === 'mode');
     // 방식이 없는 기록은 이 결정 전의 세션이다 — 조용히 자동이 되지 않게 manual 로 연다 (D-064 결정 8). 빈 기록만 기본값을 받는다.

@@ -20,7 +20,7 @@ import {
   listScratchSessions,
   listSessions,
   prepareSession,
-  readTranscript,
+  readSessionLog,
   scratchRoot,
   type SessionKind,
   type SessionState,
@@ -93,7 +93,7 @@ export interface RunOutcome {
 }
 
 export interface ProjectState {
-  /** 엔진·검증 명령·`.hs-orc/runs`·git 변경 파일이 **전부 이 폴더 기준**이다. */
+  /** 엔진·검증 명령·실행 기록의 프로젝트 키(D-071)·git 변경 파일이 **전부 이 폴더 기준**이다. */
   readonly current: ProjectInfo;
   readonly recent: readonly ProjectInfo[];
 }
@@ -367,7 +367,7 @@ export class GuiService {
       state: s.state,
       // spend 는 Budget 을 되살리는 재료다 — 화면은 마지막 기록으로 버튼을 고르므로 싣지 않는다 (D-054).
       records: s.records().filter((r) => r.kind !== 'spend'),
-      broken: readTranscript(s.file).broken,
+      broken: readSessionLog(s.dir, s.id).broken,
       budget: this.sessionBudget(s.dir, s.id).summary(),
       appBudget: this.appBudgetSummary(),
       interrupted: s.interrupted,
