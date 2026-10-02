@@ -2396,7 +2396,17 @@ D-071 은 "빈 폴더를 project 로 열고 쓰기 위임으로 `npx create-expo
 
 **재검토 조건** 스캐폴딩 위임이 실사용에서 반복될 때(B3), 또는 사람이 스캐폴더를 먼저 돌리는 불편이 확인될 때(A4·B2).
 
-**상태** 확정 — 2026-10-03 전하 결정(Q22 권장안 A2 + B1). 구현은 같은 PR.
+**구현** (같은 PR)
+- `core/approval.ts`: 묻는 조건 **H4** (`nonGitWriteRefusal`) — 조건은 `write` · `inGit === false` · primary 엔진에 `nonGitArgv` 선언(= git 밖에서 그 인자 없이는 거절, 지금 codex). 엔진 이름을 코드에 박지 않고 `engines.json` 선언에서 읽는다. `inGit` 을 모르면(입력 없음) git 으로 본다 — 모르는 것을 거절로 예고하지 않는다. `manual` 은 `asks` 가 비는 계약(D-064) 그대로라, `session.ts` 가 같은 줄을 카드 `guide` 로 싣는다.
+- 기록: `plan`·`direct` 에 선택 필드 `guide`(다음 행동 안내, `v: 1` 유지) — 분류 사실(`notes`, chat 에서 `분류` 로 찍힌다)과 섞지 않는다. chat 은 `안내` 줄, GUI 는 경고 hint.
+- `SessionDeps.inGit` — `assembleSession` 이 실행기의 `nonGit` 과 같은 `repoRoot` 판정으로 넘긴다.
+- B1 안내(`SCAFFOLD_GUIDE`)는 쓰기 · git 아닌 project 이면 엔진과 무관하게 붙는다(claude 쓰기 모드도 셸을 못 연다 — D-073 추론 11). 직접 답은 사용자가 쓰기로 보낸 메시지일 때만.
+- SPEC §6.4.5 H 목록에 H4 와 B1 안내.
+- 테스트(가짜 실행기·Jev): auto-ask·auto 의 H4 + 승인하면 그대로 시작, git 폴더·읽기 전용·claude primary 는 H4 없음(claude 쓰기는 안내만), manual 은 안내 줄로, 직접 답 안내, 조립이 실제 폴더로 `inGit` 을 정함(빈 임시 폴더 vs `git init`), chat 렌더. 음성 대조: H4 를 `asks` 에 넣지 않으면 2건 실패.
+
+**남은 위험** 조건은 **보낼 때의 쓰기**(`send({ write })`)다. GUI 카드에서 승인 직전에 쓰기 스위치를 켜면 H4·안내가 없다(H2 와 같은 규칙 — "승인 클릭 때 켜는 쓰기는 이미 사람이 본 것"). 그 화면에는 폴더 머리의 `git 아님` 칩만 있다. 또 지휘자 제안 카드(`suggestedPlan`)는 원래부터 쓰기를 이어받지 않아 그 카드에는 H4 가 서지 않는다(직접 답의 안내 줄은 남는다).
+
+**상태** 확정 — 2026-10-03 전하 결정(Q22 권장안 A2 + B1). 구현됨 — 같은 PR(#83).
 
 ---
 

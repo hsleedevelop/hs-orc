@@ -38,8 +38,8 @@ interface Cut { turns: number; chars: number }
 interface Compaction { trigger: string; preTokens?: number; postTokens?: number }
 type Rec =
   | { kind: 'user'; turn: number; text: string }
-  | { kind: 'direct'; turn: number; text: string; suggest: string | null; cost: string; notes: string[]; cut?: Cut }
-  | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; reviewer2?: string; estimateUsd: number; notes: string[]; mode?: ApprovalMode; asked?: { code: string; text: string }[]; write?: boolean; ladder?: { stage: string; label: string; from: string; changes: string[] } }
+  | { kind: 'direct'; turn: number; text: string; suggest: string | null; cost: string; notes: string[]; guide?: string[]; cut?: Cut }
+  | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; reviewer2?: string; estimateUsd: number; notes: string[]; guide?: string[]; mode?: ApprovalMode; asked?: { code: string; text: string }[]; write?: boolean; ladder?: { stage: string; label: string; from: string; changes: string[] } }
   | { kind: 'approval'; turn: number; approved: boolean; write: boolean; by?: 'user' | 'auto'; mode?: ApprovalMode }
   | { kind: 'mode'; turn: number; mode: ApprovalMode }
   | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string; cut?: Cut; compacted?: Compaction[] }
@@ -347,6 +347,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       // 사다리 ④ 가 더한 reviewer (D-072) — 세 슬롯이고 판정은 AND 다.
       r.reviewer2 ? planLine(`reviewer ${r.reviewer2}  · 사다리 ④ 추가 — 둘 다 PASS 일 때만 PASS`, 5) : null,
       planLine(`비용 예상 $${r.estimateUsd}`, 3),
+      // 다음 행동 안내 (D-074) — git 아닌 폴더의 쓰기 위임. manual 이면 H4 도 여기 실린다(묻는 이유가 비어서).
+      ...(r.guide ?? []).map((g, j) => h('div', { key: `g${j}`, className: 'hint warn' }, g)),
       // 사다리 상향 카드는 무엇이 올라갔는지 보인다 (D-068) — 같은 요청을 올려 다시 위임하는 카드임을 첫 줄이 말한다.
       ...ladderLines(r.ladder).map((l, j) => h('div', { key: `l${j}`, className: j === 0 ? 'hint warn' : 'hint' }, l)),
       // 묻는 카드는 걸린 조건을 이름으로 보인다 (D-064) — 이유 없이 선 카드는 무엇을 봐야 할지 모른다.
@@ -396,6 +398,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
         const suggest = r.suggest;
         return h('div', { key: i, className: 'bubble orc' },
           ...r.notes.map((n, j) => h('div', { key: `n${j}`, className: 'hint' }, n)),
+          ...(r.guide ?? []).map((g, j) => h('div', { key: `g${j}`, className: 'hint warn' }, g)),
           h('div', null, r.text),
           h('div', { className: 'hint' }, `직접 답 · 지휘자 Haiku·low · ${r.cost}`),
           ...cutLine(r.cut).map((l, j) => h('div', { key: `c${j}`, className: 'hint' }, l)),

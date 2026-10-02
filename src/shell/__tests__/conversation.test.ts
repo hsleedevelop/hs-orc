@@ -3,6 +3,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,6 +18,13 @@ const isolated = () => {
   process.env['HS_ORC_RUN_STORE'] = path.join(dir, 'runs');
   process.env['HS_ORC_SCRATCH'] = path.join(dir, 'scratch');
 };
+
+/**
+ * 훅이 심는 `GIT_*`(GIT_DIR·GIT_INDEX_FILE·GIT_WORK_TREE …)를 전부 뺀 환경. 안 빼면 pre-commit 아래에서 `git init` 이
+ * `cwd` 가 아니라 바깥 저장소를 다시 초기화한다 — 2026-10-03 공유 config 의 `core.bare` 가 true 로 뒤집혔다.
+ */
+const withoutGitEnv = (): NodeJS.ProcessEnv =>
+  Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
 
 const fake = () => {
   const calls: string[] = [];
@@ -36,6 +44,22 @@ describe('세션 조립 (D-056)', () => {
     const out = await session.send('넌 누구니');
     assert.deepEqual(out.map((r) => r.kind), ['user', 'direct']);
     assert.equal(calls.length, 1, '지휘자 1회 — 분류 폴백은 돌지 않는다 (D-033)');
+  });
+
+  it('폴더가 git 인지 조립이 정해 넘긴다 — git 아닌 폴더의 codex 쓰기 카드에만 H4 (D-074)', async () => {
+    isolated();
+    const { exec } = fake();
+    const h4 = async (dir: string): Promise<boolean> => {
+      const { id } = prepareSession('project', dir);
+      const session = assembleSession({ approvalMode: 'auto-ask', kind: 'project', dir, id, budget: restoreBudget(dir, id), journal: new Journal(), execute: exec });
+      const plan = (await session.send('이 타입 에러 고쳐줘', { write: true })).find((r) => r.kind === 'plan');
+      return plan?.kind === 'plan' && (plan.asked ?? []).some((a) => a.code === 'H4');
+    };
+    const empty = mkdtempSync(path.join(os.tmpdir(), 'hs-conv-empty-'));
+    assert.equal(await h4(empty), true);
+    const repo = mkdtempSync(path.join(os.tmpdir(), 'hs-conv-git-'));
+    spawnSync('git', ['init', '-q'], { cwd: repo, env: withoutGitEnv() });
+    assert.equal(await h4(repo), false);
   });
 
   it('같은 세션의 Budget 을 기록의 spend 로 되살린다 (D-054)', async () => {

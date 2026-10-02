@@ -57,6 +57,8 @@ export function assembleSession(input: AssembleInput): ConversationSession {
     journal,
     ...(classifier ? { classifier } : {}),
     ...(approvalMode ? { approvalMode } : {}),
+    // 카드가 git 아닌 폴더의 쓰기 거절을 미리 말한다 (D-074). 실행기의 `nonGit` 과 같은 판정이다.
+    inGit,
     // 지휘자(직접 답·요약)만 격리한다 (D-032 B1) — 위임 실행기(executorFor)는 그대로 사용자 설정을 싣는다.
     conduct: execute ?? createExecutor(catalog, dir, timeout, { nonGit: skipGitCheck(kind, inGit, false), isolate: true }),
     executorFor: (write) => execute ?? createExecutor(catalog, dir, timeout, { write, nonGit: skipGitCheck(kind, inGit, write) }),
