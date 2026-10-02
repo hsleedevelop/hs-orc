@@ -23,6 +23,11 @@ export interface Usage {
   readonly outputTokens: number;
   readonly cachedInputTokens: number;
   readonly cacheWriteTokens: number;
+  /**
+   * 엔진 보고에 캐시 읽기 칸 자체가 없었다 (D-070). 그때 `cachedInputTokens` 의 0 은 "읽지 않았다" 가 아니라 "모른다" 다 —
+   * 셈은 그대로 두고 표시만 한다. 칸이 있으면(0 이라도) 생략한다.
+   */
+  readonly cachedInputUnreported?: true;
 }
 
 /**

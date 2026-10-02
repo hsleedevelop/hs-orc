@@ -30,6 +30,8 @@ export interface BudgetMark {
   readonly tokens: number;
   readonly unreported: number;
   readonly compactionUncounted: number;
+  readonly cacheRead: number;
+  readonly cacheReadUnreported: number;
 }
 
 /** 한 구간에 쌓인 과금·토큰. 대화 기록의 `spend` 줄이 이것이다 (D-054). */
@@ -39,6 +41,13 @@ export interface Spend {
   readonly unreported: number;
   /** D-060 이전 기록에는 없다 — 0 으로 읽는다. 0 이면 쓰지 않는다. */
   readonly compactionUncounted?: number;
+  /**
+   * `tokens` 중 캐시 읽기 (D-070). 표시 전용 — 상한 판정은 `tokens` 그대로다.
+   * D-070 이전 기록에는 없다 — 0 이 아니라 **내역 없음**으로 읽는다. `tokens` 가 0 이면 쓰지 않는다.
+   */
+  readonly cacheReadTokens?: number;
+  /** 캐시 읽기 칸을 보고하지 않은 토큰 보고 수 (D-070). 0 이면 쓰지 않는다. */
+  readonly cacheReadUnreported?: number;
 }
 
 export class TokenBudgetExceeded extends Error {
@@ -78,6 +87,12 @@ export class Budget {
    * `unreported` 처럼 **숨기지 않고** 표시만 한다.
    */
   private compactionUncounted = 0;
+  /** `tokens` 중 캐시 읽기 (D-070, Q21 선택지 4). **표시 전용** — 상한 판정에 쓰지 않는다. */
+  private cacheRead = 0;
+  /** 캐시 읽기 칸이 없던 토큰 보고 수 (D-070). 그 보고의 캐시 읽기는 "그 외" 에 섞였을 수 있다. */
+  private cacheReadUnreported = 0;
+  /** 내역 없이 되살린 토큰 — D-070 이전 `spend` 줄 (D-054 재생). 캐시 읽기인지 아닌지 모른다. */
+  private breakdownMissing = 0;
 
   constructor(limitUsd: number, limitTokens = 0) {
     this.limitUsd = limitUsd;
@@ -86,16 +101,27 @@ export class Budget {
 
   /** 지금까지의 위치. `since()` 에 넘기면 그 뒤에 쌓인 것만 돌려준다 (D-054). */
   mark(): BudgetMark {
-    return { charges: this.charges.length, tokens: this.tokens, unreported: this.unreported, compactionUncounted: this.compactionUncounted };
+    return {
+      charges: this.charges.length,
+      tokens: this.tokens,
+      unreported: this.unreported,
+      compactionUncounted: this.compactionUncounted,
+      cacheRead: this.cacheRead,
+      cacheReadUnreported: this.cacheReadUnreported,
+    };
   }
 
   since(mark: BudgetMark): Spend {
     const compactionUncounted = this.compactionUncounted - mark.compactionUncounted;
+    const tokens = this.tokens - mark.tokens;
+    const cacheReadUnreported = this.cacheReadUnreported - mark.cacheReadUnreported;
     return {
       charges: this.charges.slice(mark.charges),
-      tokens: this.tokens - mark.tokens,
+      tokens,
       unreported: this.unreported - mark.unreported,
       ...(compactionUncounted > 0 ? { compactionUncounted } : {}),
+      ...(tokens > 0 ? { cacheReadTokens: this.cacheRead - mark.cacheRead } : {}),
+      ...(cacheReadUnreported > 0 ? { cacheReadUnreported } : {}),
     };
   }
 
@@ -105,10 +131,18 @@ export class Budget {
     this.tokens += spend.tokens;
     this.unreported += spend.unreported;
     this.compactionUncounted += spend.compactionUncounted ?? 0;
+    if (spend.cacheReadTokens === undefined) this.breakdownMissing += spend.tokens;
+    else this.cacheRead += spend.cacheReadTokens;
+    this.cacheReadUnreported += spend.cacheReadUnreported ?? 0;
   }
 
   get spentTokens(): number {
     return this.tokens;
+  }
+
+  /** 누적 토큰 중 캐시 읽기 (D-070). 표시 전용 — 내역 없이 되살린 몫과 미보고 몫은 빠져 있다. */
+  get cacheReadTokens(): number {
+    return this.cacheRead;
   }
 
   get unreportedCycles(): number {
@@ -127,6 +161,8 @@ export class Budget {
     }
     this.tokens += usage.inputTokens + usage.outputTokens + usage.cachedInputTokens + usage.cacheWriteTokens;
     if (compactionUncounted) this.compactionUncounted += 1;
+    if (usage.cachedInputUnreported) this.cacheReadUnreported += 1;
+    else this.cacheRead += usage.cachedInputTokens;
   }
 
   tokensExceeded(): boolean {
@@ -220,13 +256,28 @@ export class Budget {
     const mixed = kinds.length > 1 ? ` (${kinds.map((k) => LABEL[k]).join('+')})` : this.hasEstimates ? ' (추정 포함)' : '';
     // 구독제 금액에 "/ $20" 을 붙이면 그 상한이 이 숫자를 막는다는 거짓말이 된다.
     const tokens = this.limitTokens > 0 ? ` · 토큰 ${this.tokens}/${this.limitTokens}` : ` · 토큰 ${this.tokens}`;
+    const breakdown = this.tokenBreakdown();
     const blind = this.unreported > 0 ? ` (토큰 미보고 ${this.unreported}회 — 상한이 그만큼 못 본다)` : '';
     // D-060: claude 는 압축 몫이 `modelUsage` 로 이미 들어 있어 따로 적을 것이 없다. codex 는 셀 값이 없다.
     const uncounted =
       this.compactionUncounted > 0 ? ` (압축 토큰을 보고하지 않는 엔진 ${this.compactionUncounted}회 — 압축했다면 상한이 그만큼 못 본다)` : '';
     if (this.allConverted)
-      return `$${this.spentUsd.toFixed(4)} API 환산${mixed} · 구독제라 청구되지 않는다${tokens}${blind}${uncounted}`;
+      return `$${this.spentUsd.toFixed(4)} API 환산${mixed} · 구독제라 청구되지 않는다${tokens}${breakdown}${blind}${uncounted}`;
     const converted = this.convertedUsd > 0 ? ` + $${this.convertedUsd.toFixed(4)} API 환산` : '';
-    return `$${this.billedUsd.toFixed(4)} / $${this.limitUsd}${converted}${mixed}${tokens}${blind}${uncounted}`;
+    return `$${this.billedUsd.toFixed(4)} / $${this.limitUsd}${converted}${mixed}${tokens}${breakdown}${blind}${uncounted}`;
+  }
+
+  /**
+   * 토큰 내역 (D-070, Q21 선택지 4): 상한 소진이 캐시 읽기 때문인지 보인다. 셈(네 칸 1:1)은 그대로다.
+   * 모르는 몫은 0 으로 채우지 않고 따로 적는다 — 옛 기록은 `내역 없음`, 칸을 안 준 엔진은 `캐시 읽기 미보고`.
+   */
+  private tokenBreakdown(): string {
+    if (this.tokens === 0) return '';
+    const known = this.tokens - this.breakdownMissing;
+    if (known === 0) return ' (캐시 읽기 내역 없음)';
+    const parts = [`캐시 읽기 ${this.cacheRead}`, `그 외 ${known - this.cacheRead}`];
+    if (this.breakdownMissing > 0) parts.push(`내역 없음 ${this.breakdownMissing}`);
+    if (this.cacheReadUnreported > 0) parts.push(`캐시 읽기 미보고 ${this.cacheReadUnreported}회`);
+    return ` (${parts.join(' · ')})`;
   }
 }

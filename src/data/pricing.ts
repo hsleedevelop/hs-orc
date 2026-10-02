@@ -17,6 +17,8 @@ export interface TokenCounts {
   readonly outputTokens: number;
   readonly cachedInputTokens: number;
   readonly cacheWriteTokens: number;
+  /** 캐시 읽기 칸이 보고되지 않았다 (D-070) — 표시 전용, 셈에 쓰지 않는다. */
+  readonly cachedInputUnreported?: true;
 }
 
 export interface ModelPrice {

@@ -57,3 +57,57 @@ describe('압축 몫을 세지 못한 토큰 보고는 숨기지 않는다 (D-06
     assert.match(reopened.summary(), /압축 토큰을 보고하지 않는 엔진 1회/);
   });
 });
+
+describe('토큰 내역에 캐시 읽기를 따로 보인다 — 셈은 그대로다 (D-070, Q21)', () => {
+  // Q20 §3 rn_temp 위임 1회: codex 캐시 읽기 943,872 + 그 외.
+  const codex = { inputTokens: 53829, outputTokens: 3899, cachedInputTokens: 943872, cacheWriteTokens: 0 };
+  const claude = { inputTokens: 40000, outputTokens: 2000, cachedInputTokens: 0, cacheWriteTokens: 16722 };
+
+  it('누계는 네 칸 1:1 그대로, 요약은 캐시 읽기와 그 외를 나눈다', () => {
+    const b = new Budget(20, 2000000);
+    b.countTokens(codex);
+    b.countTokens(claude);
+    assert.equal(b.spentTokens, 1060322);
+    assert.equal(b.cacheReadTokens, 943872);
+    assert.match(b.summary(), /토큰 1060322\/2000000 \(캐시 읽기 943872 · 그 외 116450\)/);
+    assert.equal(b.tokensExceeded(), false);
+  });
+
+  it('토큰이 없으면 내역을 달지 않는다', () => {
+    assert.doesNotMatch(new Budget(20, 2000000).summary(), /캐시 읽기/);
+  });
+
+  it('칸을 안 준 보고는 0 으로 읽지 않고 미보고 횟수로 보인다', () => {
+    const b = new Budget(20, 2000000);
+    b.countTokens(codex);
+    b.countTokens({ inputTokens: 100, outputTokens: 5, cachedInputTokens: 0, cacheWriteTokens: 0, cachedInputUnreported: true });
+    assert.equal(b.spentTokens, 1001705);
+    assert.match(b.summary(), /\(캐시 읽기 943872 · 그 외 57833 · 캐시 읽기 미보고 1회\)/);
+  });
+
+  it('spend 줄에 실려 다시 열어도 되살아나고, 옛 기록(칸 없음)은 내역 없음이다 (D-054)', () => {
+    const b = new Budget(20, 2000000);
+    const mark = b.mark();
+    b.countTokens(codex);
+    b.countTokens({ ...claude, cachedInputUnreported: true });
+    const spend = JSON.parse(JSON.stringify(b.since(mark))) as ReturnType<Budget['since']>;
+    assert.equal(spend.cacheReadTokens, 943872);
+    assert.equal(spend.cacheReadUnreported, 1);
+
+    const reopened = new Budget(20, 2000000);
+    reopened.absorb(spend);
+    assert.equal(reopened.summary(), b.summary());
+
+    const old = new Budget(20, 2000000);
+    old.absorb({ charges: [], tokens: 5000, unreported: 0 });
+    assert.match(old.summary(), /토큰 5000\/2000000 \(캐시 읽기 내역 없음\)/);
+    old.absorb(spend);
+    assert.equal(old.spentTokens, 1065322, '판정 누계는 옛 기록까지 그대로 센다');
+    assert.match(old.summary(), /\(캐시 읽기 943872 · 그 외 116450 · 내역 없음 5000 · 캐시 읽기 미보고 1회\)/);
+  });
+
+  it('토큰이 0 인 구간은 내역 칸을 쓰지 않는다', () => {
+    const b = new Budget(20);
+    assert.equal(b.since(b.mark()).cacheReadTokens, undefined);
+  });
+});

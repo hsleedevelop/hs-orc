@@ -143,6 +143,12 @@ describe('resume 한 실행의 누적 보고는 직전 보고를 빼서 센다 (
     assert.deepEqual(sinceBaseline(raw, { costUsd: 0.08, usage: { ...raw.usage, inputTokens: 20 } }, ['cost', 'usage']), raw);
     assert.deepEqual(sinceBaseline(raw, { costUsd: 0.01 }, []), raw, '선언이 없는 엔진(cursor)은 빼지 않는다');
   });
+
+  it('캐시 읽기 미보고 표시는 차분 뒤에도 남는다 (D-070)', () => {
+    const usage = { inputTokens: 30, outputTokens: 3, cachedInputTokens: 0, cacheWriteTokens: 0, cachedInputUnreported: true as const };
+    const base = { usage: { inputTokens: 10, outputTokens: 1, cachedInputTokens: 0, cacheWriteTokens: 0 } };
+    assert.equal(sinceBaseline({ usage }, base, ['usage']).usage?.cachedInputUnreported, true);
+  });
 });
 
 describe('압축 몫은 modelUsage 누적 차분으로 센다 — 두 번 세지 않는다 (D-060)', () => {
