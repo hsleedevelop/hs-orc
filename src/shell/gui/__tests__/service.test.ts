@@ -4,11 +4,13 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { SlotExecutor } from '../../../core/executor.ts';
 import { readDecisions } from '../../../core/decision-log.ts';
+import { projectStateDir } from '../../../core/project-state.ts';
+import { transcriptPath } from '../../../core/transcript.ts';
 import { GuiService, skipGitCheck } from '../service.ts';
 import { samePath } from '../worktree.ts';
 import { spawnSync } from 'node:child_process';
@@ -274,6 +276,24 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     assert.throws(() => service.conversation(), /열린 세션이 없다/);
   });
 
+  it('빈 폴더에서 세션을 열고 위임까지 돌려도 그 폴더에는 아무것도 생기지 않는다 — 스캐폴더가 돈다 (D-071)', async () => {
+    isolated();
+    delete process.env['HS_ORC_RUN_STORE']; // 원시 로그도 기본 자리(홈의 프로젝트 상태)로 보낸다.
+    const empty = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'hs-empty-')));
+    const service = new GuiService(fake, 20, empty);
+    const view = service.startConversation('project');
+    await service.converse('이 타입 에러 고쳐줘');
+    await service.converseApprove({ verify: [], write: false });
+
+    assert.deepEqual(readdirSync(empty), []);
+    assert.ok(existsSync(transcriptPath(empty, view.id)), '기록은 홈의 프로젝트 상태에 있다');
+    assert.ok(readdirSync(path.join(projectStateDir(empty), 'runs')).length > 0, '원시 로그도 홈에 있다');
+
+    const scratch = service.startConversation('scratch');
+    await service.converse('넌 누구니');
+    assert.deepEqual(readdirSync(scratch.dir), [], '스크래치 폴더도 엔진 cwd 로만 쓰고 비워 둔다');
+  });
+
   it('세션마다 Budget 이 따로다 — 한 세션이 쓴 돈이 다른 세션에 새지 않는다 (D-032 A2)', async () => {
     isolated();
     const service = new GuiService(fake, 20, process.cwd());
@@ -317,7 +337,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     return { exec, open: () => open() };
   };
   const fileKinds = (view: { dir: string; id: string }) =>
-    readFileSync(path.join(view.dir, '.hs-orc', 'sessions', `${view.id}.jsonl`), 'utf8')
+    readFileSync(transcriptPath(view.dir, view.id), 'utf8')
       .trim().split('\n').map((l) => (JSON.parse(l) as { kind: string }).kind).filter((k) => k !== 'mode');
 
   it('위임이 도는 중에 세션 목록으로 나갔다 같은 세션을 다시 열면 같은 실행에 붙는다 — 끊김 배너 없음', async () => {

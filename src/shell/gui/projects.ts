@@ -4,8 +4,8 @@
  * Electron 을 import 하지 않는다 — `service.ts` 와 같은 이유다. 창 없이 테스트한다.
  *
  * 저장 위치가 홈인 것은 의도다. `bin/hs-orc.mjs` 가 못 박은 두 기준(설치 위치 = 매트릭스,
- * cwd = 실행 산출물) 중 **어느 쪽도 아니다** — 최근 목록은 특정 프로젝트의 산출물이 아니라
- * 이 사람의 것이라, 프로젝트를 옮겨 다녀도 따라와야 한다.
+ * 홈의 폴더별 키 = 실행 산출물, D-071) 중 **어느 쪽도 아니다** — 최근 목록은 특정 프로젝트의 산출물이 아니라
+ * 이 사람의 것이라, 폴더 키 없이 프로젝트를 옮겨 다녀도 따라와야 한다.
  */
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';

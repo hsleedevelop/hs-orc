@@ -13,7 +13,8 @@
  *
  * 경로 해석이 두 기준으로 갈리는 것은 **의도다**:
  *   설치 위치 기준 — data/{matrix,engines,limits,verify}.json. 어디서 부르든 같은 매트릭스다.
- *   cwd 기준       — .hs-orc/runs, .hs-orc/unclassified.jsonl. 산출물은 작업 중인 프로젝트에 쌓인다.
+ *   홈 기준        — ~/.hs-orc/projects/<cwd 키>/{runs,sessions,unclassified.jsonl}. 산출물은 부른 폴더별로
+ *                    나뉘지만 **그 폴더에는 아무것도 만들지 않는다** — 빈 폴더 스캐폴더가 거절되지 않게 (D-071).
  * `src/shell/__tests__/bin.test.ts` 가 이 갈림을 프로세스 수준에서 고정한다.
  */
 import { spawnSync } from 'node:child_process';
@@ -35,7 +36,7 @@ const USAGE = `hs-orc ${version} — 작업 1건을 분류·배정하고 두 슬
 
 cli 옵션 전체는 인자 없이 \`hs-orc\` 를 부르면 나온다.
 매트릭스는 설치 위치를 읽는다: ${ROOT}
-실행 산출물은 **부른 디렉터리**의 .hs-orc/ 에 쌓인다.`;
+실행 산출물은 부른 디렉터리 몫으로 ~/.hs-orc/projects/<폴더 키>/ 에 쌓인다 — 그 디렉터리에는 만들지 않는다.`;
 
 // 스트리핑이 꺼져 있으면 첫 import 에서 문법 오류로 죽는다 — 원인을 알 수 없는 실패 대신 여기서 막는다.
 // `process.features.typescript` 가 없는 구버전은 플래그로 판정한다 (`??` 는 undefined 만 받는다).
@@ -99,7 +100,7 @@ function bundleRenderer() {
 function runGui(args) {
   const built = bundleRenderer();
   if (built !== 0) process.exit(built);
-  // electron 은 **부른 디렉터리**에서 돌린다 — .hs-orc/ 가 작업 중인 프로젝트에 쌓여야 한다.
+  // electron 은 **부른 디렉터리**에서 돌린다 — 그 폴더가 첫 작업 폴더이고, 산출물의 프로젝트 키도 그 폴더다 (D-071).
   const r = spawnSync(localBin('electron'), [path.join(ROOT, 'src/shell/gui/main.ts'), ...args], {
     cwd: process.cwd(),
     stdio: 'inherit',

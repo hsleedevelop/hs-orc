@@ -9,6 +9,7 @@ import { appendFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { newDecisionId } from './decision-log.ts';
+import { legacyStateDir, projectStateDir } from './project-state.ts';
 import type { Budget, Spend } from './budget.ts';
 import type { ContextCut } from './context.ts';
 import type { SettledOutcome } from './evidence.ts';
@@ -115,8 +116,13 @@ export function scratchRoot(env: NodeJS.ProcessEnv = process.env): string {
   return env['HS_ORC_SCRATCH'] ?? path.join(os.homedir(), '.hs-orc', 'scratch');
 }
 
-export const transcriptPath = (dir: string, id: string): string =>
-  path.join(dir, '.hs-orc', 'sessions', `${id}.jsonl`);
+/** 쓰는 자리 — 세션 폴더가 아니라 홈의 프로젝트 상태 아래다 (D-071). 스크래치도 같은 규칙이다. */
+export const transcriptPath = (dir: string, id: string, env: NodeJS.ProcessEnv = process.env): string =>
+  path.join(projectStateDir(dir, env), 'sessions', `${id}.jsonl`);
+
+/** D-071 이전 자리(`<세션 폴더>/.hs-orc/sessions/`). **읽기만 한다** — 옮기지도 지우지도, 덧쓰지도 않는다. */
+export const legacyTranscriptPath = (dir: string, id: string): string =>
+  path.join(legacyStateDir(dir), 'sessions', `${id}.jsonl`);
 
 /** 세션 id 는 결정 로그와 같은 모양이다 — 두 기록을 사람이 눈으로 잇는다 (SPEC §6.4.1). */
 export const newSessionId = (now = new Date()): string => newDecisionId(now);
@@ -182,6 +188,16 @@ export function readTranscript(file: string): LoadedTranscript {
   return { records, broken };
 }
 
+/**
+ * 세션 하나의 기록 전체 — 옛 자리 다음에 새 자리를 잇는다 (D-071). 옛 세션을 이어 쓰면 새 줄은 홈에 쌓이므로,
+ * 둘을 이어 읽어야 턴 번호·Budget 재생(D-054)이 끊기지 않는다. 옛 자리가 먼저인 것은 시간 순서 그대로다.
+ */
+export function readSessionLog(dir: string, id: string): LoadedTranscript {
+  const legacy = readTranscript(legacyTranscriptPath(dir, id));
+  const current = readTranscript(transcriptPath(dir, id));
+  return { records: [...legacy.records, ...current.records], broken: legacy.broken + current.broken };
+}
+
 export interface SessionSummary {
   readonly id: string;
   readonly dir: string;
@@ -190,20 +206,27 @@ export interface SessionSummary {
   readonly preview: string;
 }
 
-export function listSessions(dir: string, kind: SessionKind): SessionSummary[] {
-  const folder = path.join(dir, '.hs-orc', 'sessions');
-  let names: string[];
+function sessionIds(folder: string): string[] {
   try {
-    names = readdirSync(folder).filter((n) => n.endsWith('.jsonl'));
+    return readdirSync(folder)
+      .filter((n) => n.endsWith('.jsonl'))
+      .map((n) => n.slice(0, -'.jsonl'.length));
   } catch {
     return []; // 세션을 한 번도 안 연 폴더다 — 정상이다.
   }
-  return names
-    .map((name): SessionSummary => {
-      const id = name.slice(0, -'.jsonl'.length);
+}
+
+/** 새 자리와 옛 자리(D-071 이전)를 합쳐 본다. 같은 id 는 한 세션이다. */
+export function listSessions(dir: string, kind: SessionKind): SessionSummary[] {
+  const ids = new Set([
+    ...sessionIds(path.dirname(transcriptPath(dir, 'x'))),
+    ...sessionIds(path.dirname(legacyTranscriptPath(dir, 'x'))),
+  ]);
+  return [...ids]
+    .map((id): SessionSummary => {
       let records: TranscriptRecord[];
       try {
-        ({ records } = readTranscript(path.join(folder, name)));
+        ({ records } = readSessionLog(dir, id));
       } catch {
         // 한 세션을 못 읽어도 목록은 보여준다. 열면 그때 오류가 드러난다.
         return { id, dir, kind, lastAt: '', preview: '(읽지 못한 기록)' };

@@ -4,14 +4,16 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { projectStateDir } from './project-state.ts';
 
 export interface StoredRun {
   readonly dir: string;
   readonly files: readonly string[];
 }
 
+/** 작업 폴더가 아니라 홈의 프로젝트 상태 아래다 (D-071). 옛 `<cwd>/.hs-orc/runs` 는 아무도 다시 읽지 않는다. */
 export function runStoreRoot(cwd = process.cwd(), env: NodeJS.ProcessEnv = process.env): string {
-  return env['HS_ORC_RUN_STORE'] ?? path.join(cwd, '.hs-orc', 'runs');
+  return env['HS_ORC_RUN_STORE'] ?? path.join(projectStateDir(cwd, env), 'runs');
 }
 
 /** `<root>/<decisionId>/<seq>-<slot>.{stdout,stderr,meta.json}` */

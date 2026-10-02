@@ -104,7 +104,7 @@ hs-orc "<작업>" --mode graph --graph examples/graph-nodes.json --run
 | 대상 | 기준 |
 |---|---|
 | `data/*.json` (매트릭스·엔진·상한·검증 선언) | **설치 위치** — 어디서 부르든 같은 매트릭스 |
-| `.hs-orc/runs/<id>/` (원시 stdout·stderr·meta) | **부른 디렉터리** — 산출물은 작업 중인 프로젝트에 |
+| `runs/<id>/` (원시 stdout·stderr·meta)·`sessions/`·`unclassified.jsonl` | **홈의 폴더 키** — `~/.hs-orc/projects/<부른 디렉터리 키>/`. 부른 디렉터리에는 아무것도 만들지 않는다 (D-071) |
 | 결정 로그 | `~/.claude/logs/delegation-router.jsonl` (`HS_ORC_DECISION_LOG`로 분리 가능) |
 
 결정 로그는 작업 1건당 **두 줄**이다: 배정을 확정한 시점의 `pending`, 그리고 같은 id로 append하는 결과. 갱신이 아니라 append라 1차 줄이 그대로 남는다.

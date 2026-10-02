@@ -3,7 +3,14 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readUnclassified, recordUnclassified, shapeKey, suggestRows } from '../unclassified.ts';
+import {
+  readUnclassified,
+  readUnclassifiedWithLegacy,
+  recordUnclassified,
+  shapeKey,
+  suggestRows,
+  unclassifiedLogPath,
+} from '../unclassified.ts';
 
 const tmp = () => path.join(mkdtempSync(path.join(os.tmpdir(), 'hs-unc-')), 'u.jsonl');
 
@@ -39,5 +46,17 @@ describe('미분류 누적 (D-022)', () => {
 
   it('로그가 없는 것은 정상이다', () => {
     assert.deepEqual(readUnclassified(tmp()), []);
+  });
+
+  it('새 누적은 홈에 쌓고, 옛 자리(<cwd>/.hs-orc, D-071 이전) 누적도 이어 센다', () => {
+    const cwd = mkdtempSync(path.join(os.tmpdir(), 'hs-unc-cwd-'));
+    const env = { HS_ORC_PROJECT_STATE: mkdtempSync(path.join(os.tmpdir(), 'hs-unc-state-')) };
+    const legacy = path.join(cwd, '.hs-orc', 'unclassified.jsonl');
+    recordUnclassified('점심 메뉴 골라줘', legacy);
+    recordUnclassified('점심 메뉴 골라줘', legacy);
+    recordUnclassified('점심 메뉴 골라줘', unclassifiedLogPath(cwd, env));
+
+    assert.equal(unclassifiedLogPath(cwd, env).startsWith(env.HS_ORC_PROJECT_STATE), true);
+    assert.equal(suggestRows(readUnclassifiedWithLegacy(cwd, env))[0]?.count, 3);
   });
 });

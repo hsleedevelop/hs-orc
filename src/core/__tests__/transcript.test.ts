@@ -3,7 +3,16 @@ import assert from 'node:assert/strict';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { appendRecord, listSessions, prepareSession, readTranscript, transcriptPath, type TranscriptRecord } from '../transcript.ts';
+import {
+  appendRecord,
+  legacyTranscriptPath,
+  listSessions,
+  prepareSession,
+  readSessionLog,
+  readTranscript,
+  transcriptPath,
+  type TranscriptRecord,
+} from '../transcript.ts';
 
 const tmp = () => mkdtempSync(path.join(os.tmpdir(), 'hs-transcript-'));
 const user = (turn: number, text: string): TranscriptRecord => ({ v: 1, at: '2026-09-23T00:00:00.000Z', turn, kind: 'user', text });
@@ -65,5 +74,26 @@ describe('대화 기록 (SPEC §6.4.1)', () => {
     const list = listSessions(dir, 'project');
     assert.deepEqual(list.map((s) => [s.id, s.preview]), [['b', '최근'], ['a', '옛날']]);
     assert.deepEqual(listSessions(path.join(dir, 'none'), 'project'), []);
+  });
+
+  it('기록은 세션 폴더가 아니라 홈의 프로젝트 상태에 쓴다 (D-071)', () => {
+    const dir = tmp();
+    const file = transcriptPath(dir, 'a');
+    assert.equal(path.relative(dir, file).startsWith('..'), true, `세션 폴더 안이다: ${file}`);
+    assert.equal(path.dirname(path.dirname(path.dirname(file))), process.env['HS_ORC_PROJECT_STATE']);
+  });
+
+  it('옛 자리(D-071 이전)의 세션도 목록에 뜨고, 이어 쓴 새 자리 기록과 이어 읽는다 — 옛 파일은 건드리지 않는다', () => {
+    const dir = tmp();
+    appendRecord(legacyTranscriptPath(dir, 'old'), user(1, '옛 자리'));
+    appendFileSync(legacyTranscriptPath(dir, 'old'), '{깨진\n');
+    appendRecord(transcriptPath(dir, 'old'), user(2, '이어 씀'));
+    appendRecord(transcriptPath(dir, 'new'), user(1, '새 자리'));
+
+    const loaded = readSessionLog(dir, 'old');
+    assert.deepEqual(loaded.records.map((r) => r.turn), [1, 2]);
+    assert.equal(loaded.broken, 1);
+    assert.deepEqual(listSessions(dir, 'project').map((s) => s.id).sort(), ['new', 'old']);
+    assert.equal(readTranscript(legacyTranscriptPath(dir, 'old')).records.length, 1);
   });
 });
