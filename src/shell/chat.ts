@@ -28,6 +28,7 @@ export function renderRecord(r: TranscriptRecord): string[] {
         `업무   ${r.taskId} ${r.title}  (${r.reason})`,
         `배정   primary  ${r.primary}`,
         `       reviewer ${r.reviewer}`,
+        ...(r.reviewer2 ? [`       reviewer ${r.reviewer2}  (사다리 ④ 추가 — 둘 다 PASS 일 때만 PASS)`] : []),
         `비용   $${r.estimateUsd} (추정)`,
         ...ladderLines(r.ladder).map((l, i) => (i === 0 ? l : `       ${l}`)),
         // 묻는 카드는 걸린 조건을 이름으로 보인다 (D-064). manual 은 늘 묻고, 이유가 없으면 자동 승인이 뒤따른다.

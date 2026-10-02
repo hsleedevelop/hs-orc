@@ -64,6 +64,8 @@ export type TranscriptEntry =
       readonly reason: string;
       readonly primary: string;
       readonly reviewer: string;
+      /** 사다리 ④ 가 더한 reviewer (D-072). 옛 기록·두 슬롯 배정에는 없다. */
+      readonly reviewer2?: string;
       readonly estimateUsd: number;
       readonly notes: readonly string[];
       /** 이 배정이 설 때의 승인 방식 (D-064). 이 결정 전 기록에는 없다. */

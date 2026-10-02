@@ -3,19 +3,21 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadMatrix, type ModelKey } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
 import type { ApprovalMode } from '../../data/limits.ts';
 import { isModelPick } from '../approval.ts';
+import { assign } from '../assign.ts';
 import { Budget } from '../budget.ts';
 import { readDecisions } from '../decision-log.ts';
 import type { SlotExecutor, SlotRun, SlotRunOptions } from '../executor.ts';
 import { Journal } from '../journal.ts';
 import { EFFORT_COST_NOTE, ESCALATION_ORDER, LadderError, planLadder, type EscalationStage } from '../ladder.ts';
 import { ConversationSession, SessionStateError } from '../session.ts';
+import { transcriptPath } from '../transcript.ts';
 
 const isolate = () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-ladder-log-'));
@@ -74,13 +76,36 @@ describe('사다리 — 단계 적용 (결정론)', () => {
     let cost: number[] = [];
     for (let s = planLadder(matrix, catalog, base, []); s; s = planLadder(matrix, catalog, base, s.applied.done)) {
       steps.push(s.applied.stage);
-      const { primary, reviewer } = s.plan.slots;
-      seen.push(`${primary.model}/${primary.effort}+${reviewer.model}/${reviewer.effort}`);
+      const { primary, reviewer, secondReviewer } = s.plan.slots;
+      seen.push(`${primary.model}/${primary.effort}+${reviewer.model}/${reviewer.effort}${secondReviewer ? `+${secondReviewer.model}/${secondReviewer.effort}` : ''}`);
       cost = [...cost, s.plan.cost.totalUsd];
     }
     assert.deepEqual(steps, [...ESCALATION_ORDER]);
-    assert.deepEqual(seen, ['luna/medium+haiku/low', 'luna/high+haiku/low', 'terra/high+haiku/low', 'terra/high+sonnet/low']);
-    assert.deepEqual(cost, [0.39, 0.39, 1.61, 6.49], '모델이 오른 단계부터 economics 로 다시 계산한다');
+    assert.deepEqual(seen, ['luna/medium+haiku/low', 'luna/high+haiku/low', 'terra/high+haiku/low', 'terra/high+haiku/low+sonnet/low']);
+    assert.deepEqual(cost, [0.39, 0.39, 1.61, 6.7], '모델이 오른 단계부터 economics 로 다시 계산한다 — ④ 는 세 슬롯 합이다');
+  });
+
+  it('④reviewer 추가는 기존 reviewer 를 두고 같은 벤더 한 계층 위 reviewer 를 더한다 — 비용은 세 슬롯 합, 둘 다 읽기 전용 (D-072)', () => {
+    const third = planLadder(matrix, catalog, row('R01'), ['evidence', 'effort', 'model']);
+    assert.ok(third);
+    assert.equal(third.applied.stage, 'reviewer');
+    const { primary, reviewer, secondReviewer } = third.plan.slots;
+    assert.equal(reviewer.model, 'haiku', '기존 reviewer 는 그대로다');
+    assert.equal(secondReviewer?.model, 'sonnet');
+    assert.equal(secondReviewer?.effort, reviewer.effort);
+    assert.equal(secondReviewer?.role, 'reviewer', '쓰기 권한은 role 로 판정한다 (D-025)');
+    const cost = third.plan.cost;
+    assert.equal(cost.totalUsd, Number((cost.primaryUsd + cost.reviewerUsd + (cost.secondReviewerUsd ?? NaN)).toFixed(4)));
+    assert.equal(primary.model, 'terra');
+    assert.match(third.applied.changes[3] ?? '', /④reviewer 추가 — reviewer Sonnet \(low\) 를 더한다 · 기존 reviewer Haiku 유지 · 둘 다 PASS 일 때만 PASS/);
+    // 행 기본 배정·앞 단계는 여전히 두 슬롯이다.
+    assert.equal(planLadder(matrix, catalog, row('R01'), ['evidence', 'effort'])?.plan.slots.secondReviewer, undefined);
+  });
+
+  it('INV-1 — 두 번째 reviewer 도 primary 와 벤더가 같으면 배정이 던진다 (D-072)', () => {
+    const base = row('R01'); // Luna(openai) / Haiku(anthropic)
+    const terra = { ...base.reviewer, model: 'terra' as ModelKey, vendor: 'openai' as const, label: 'Terra' };
+    assert.throws(() => assign(matrix, catalog, base, { secondReviewer: { slot: terra, effort: 'high' } }), /INV-1 위반: primary\(luna\)와 reviewer\(terra\)/);
   });
 
   it('②effort 상향은 예상 비용을 바꾸지 않고, 카드가 그 이유(AA 측정치는 모델 단위)를 말한다 — effort 별 비용을 지어내지 않는다', () => {
@@ -102,10 +127,14 @@ describe('사다리 — 단계 적용 (결정론)', () => {
     const vendor = (model: ModelKey) => (matrix.tiers.openai.includes(model) ? 'openai' : 'anthropic');
     for (const base of matrix.assignments) {
       for (let s = planLadder(matrix, catalog, base, []); s; s = planLadder(matrix, catalog, base, s.applied.done)) {
-        const { primary, reviewer } = s.plan.slots;
+        const { primary, reviewer, secondReviewer } = s.plan.slots;
         assert.notEqual(vendor(primary.model), vendor(reviewer.model), `${base.id} ${s.applied.label} INV-1`);
         assert.ok(rank(primary.model) <= rank(base.primary.model) + 1, `${base.id} primary 는 한 칸까지`);
-        assert.ok(rank(reviewer.model) <= rank(base.reviewer.model) + 1, `${base.id} reviewer 는 한 칸까지`);
+        assert.equal(reviewer.model, base.reviewer.model, `${base.id} 기존 reviewer 는 바뀌지 않는다`);
+        if (secondReviewer) {
+          assert.equal(vendor(secondReviewer.model), vendor(reviewer.model), `${base.id} 추가 reviewer 는 기존 reviewer 의 벤더`);
+          assert.equal(rank(secondReviewer.model), rank(reviewer.model) + 1, `${base.id} 추가 reviewer 는 한 칸 위`);
+        }
       }
     }
   });
@@ -119,7 +148,8 @@ describe('사다리 — 단계 적용 (결정론)', () => {
     assert.equal(r07?.applied.stage, 'reviewer');
     assert.deepEqual(r07?.applied.done, ['evidence', 'effort', 'model', 'reviewer']);
     assert.match(r07?.applied.changes[2] ?? '', /③모델 상향 — 건너뜀: primary Astra 는 openai 계층의 최상위다/);
-    assert.equal(r07?.plan.slots.reviewer.model, 'fable');
+    assert.equal(r07?.plan.slots.reviewer.model, 'opus');
+    assert.equal(r07?.plan.slots.secondReviewer?.model, 'fable');
     assert.equal(r07?.plan.slots.primary.effort, 'max');
   });
 
@@ -175,10 +205,10 @@ describe('사다리 — 세션 (D-068)', () => {
       session.escalate();
       const p = lastPlan(session);
       assert.equal(p.ladder?.stage, stage);
-      seen.push(`${p.primary.split(' →')[0]} | ${p.reviewer.split(' →')[0]} | $${p.estimateUsd}`);
+      seen.push(`${p.primary.split(' →')[0]} | ${p.reviewer.split(' →')[0]}${p.reviewer2 ? ` + ${p.reviewer2.split(' →')[0]}` : ''} | $${p.estimateUsd}`);
       await session.approve();
     }
-    assert.deepEqual(seen, ['Luna·medium | Haiku·low | $0.39', 'Luna·high | Haiku·low | $0.39', 'Terra·high | Haiku·low | $1.61', 'Terra·high | Sonnet·low | $6.49']);
+    assert.deepEqual(seen, ['Luna·medium | Haiku·low | $0.39', 'Luna·high | Haiku·low | $0.39', 'Terra·high | Haiku·low | $1.61', 'Terra·high | Haiku·low + Sonnet·low | $6.7']);
     assert.equal(session.ladderOffer(), null);
     assert.throws(() => session.escalate(), /더 올릴 단계가 없다/);
     const summary = session.records().findLast((r) => r.kind === 'summary');
@@ -196,7 +226,29 @@ describe('사다리 — 세션 (D-068)', () => {
     assert.equal(changes.length, 4);
     assert.match(changes[1] ?? '', /②effort 상향 — primary Luna medium → high/);
     assert.match(changes[2] ?? '', /③모델 상향 — primary Luna → Terra \(high\)/);
-    assert.match(changes[3] ?? '', /④reviewer 추가 — reviewer Haiku → Sonnet/);
+    assert.match(changes[3] ?? '', /④reviewer 추가 — reviewer Sonnet \(low\) 를 더한다/);
+  });
+
+  it('④ 를 승인하면 reviewer 둘이 읽기 전용·새 실행으로 돌고, 카드·결과·결정 로그가 세 슬롯을 적는다 (D-072)', async () => {
+    isolate();
+    const { session, calls } = make();
+    await session.send(REQUEST);
+    await session.approve();
+    for (let i = 0; i < 4; i += 1) { session.escalate(); await session.approve(); }
+    const plan = lastPlan(session);
+    assert.equal(plan.ladder?.stage, 'reviewer');
+    assert.match(plan.reviewer, /^Haiku·low → claude\//);
+    assert.match(plan.reviewer2 ?? '', /^Sonnet·low → claude\//);
+    const last = calls.slice(-3);
+    assert.deepEqual(last.map((c) => `${c.role}:${c.model}`), ['primary:terra', 'reviewer:haiku', 'reviewer:sonnet']);
+    // 쓰기는 role 로만 판정한다 (executor: `slot.role === 'primary'`, D-025) — 둘 다 reviewer 라 읽기 전용이다.
+    assert.ok(last.slice(1).every((c) => c.options?.resume === undefined), 'reviewer 는 잇지 않는다');
+    const result = session.records().findLast((r) => r.kind === 'result');
+    assert.equal(result?.kind === 'result' ? result.verdict : '', 'pass');
+    assert.match(result?.kind === 'result' ? result.review : '', /\[reviewer Haiku·low \(claude\/[^)]+\) → PASS\]\nPASS\n\n\[reviewer Sonnet·low \(claude\/[^)]+\) → PASS\]\nPASS/);
+    const decided = readDecisions().filter((d) => d.status === 'decided').at(-1);
+    assert.equal(decided?.parallel_n, 3);
+    assert.match(decided?.note ?? '', /reviewer haiku\/low \+ sonnet\/low/);
   });
 
   it('위임은 새 엔진 세션이고 직전 실패 근거가 프롬프트에 실린다 — 일반 위임은 그대로 잇는다 (D-059)', async () => {
@@ -301,6 +353,28 @@ describe('사다리 — 취소·재열기 (D-066·D-063)', () => {
     assert.equal(x.session.ladderOffer()?.stage, 'evidence', '취소는 실패가 아니고 단계를 쓰지 않는다');
     x.session.escalate();
     assert.equal(lastPlan(x.session).ladder?.stage, 'evidence');
+  });
+
+  it('옛 ④ 기록(reviewer 를 강화하던 D-068, reviewer2 없음)도 그대로 다시 열린다 — 사다리는 끝이고 카드는 두 슬롯이다', async () => {
+    isolate();
+    const x = make();
+    await x.session.send(REQUEST);
+    await x.session.approve();
+    for (let i = 0; i < 4; i += 1) { x.session.escalate(); await x.session.approve(); }
+    // D-068 시절 ④ 기록 모양으로 되돌린다 — reviewer 를 올렸고 두 번째 reviewer 는 없다.
+    const file = transcriptPath(x.dir, '0930-1300-lll');
+    const old = readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => {
+      const r = JSON.parse(l) as Record<string, unknown>;
+      if (r['kind'] !== 'plan' || r['reviewer2'] === undefined) return l;
+      const { reviewer2, ...rest } = r;
+      return JSON.stringify({ ...rest, reviewer: reviewer2 });
+    });
+    writeFileSync(file, `${old.join('\n')}\n`);
+    const reopened = x.open();
+    const plan = lastPlan(reopened);
+    assert.equal(plan.reviewer2, undefined);
+    assert.match(plan.reviewer, /^Sonnet·low/);
+    assert.equal(reopened.ladderOffer(), null, '④ 까지 지났으니 더 올릴 단계가 없다');
   });
 
   it('다시 열어도 사다리 상태가 기록에서 그대로 계산된다 — 승인 전에 끊긴 카드는 같은 단계를 다시 세운다', async () => {

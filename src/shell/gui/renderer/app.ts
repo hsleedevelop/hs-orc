@@ -39,7 +39,7 @@ interface Compaction { trigger: string; preTokens?: number; postTokens?: number 
 type Rec =
   | { kind: 'user'; turn: number; text: string }
   | { kind: 'direct'; turn: number; text: string; suggest: string | null; cost: string; notes: string[]; cut?: Cut }
-  | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; estimateUsd: number; notes: string[]; mode?: ApprovalMode; asked?: { code: string; text: string }[]; write?: boolean; ladder?: { stage: string; label: string; from: string; changes: string[] } }
+  | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; reviewer2?: string; estimateUsd: number; notes: string[]; mode?: ApprovalMode; asked?: { code: string; text: string }[]; write?: boolean; ladder?: { stage: string; label: string; from: string; changes: string[] } }
   | { kind: 'approval'; turn: number; approved: boolean; write: boolean; by?: 'user' | 'auto'; mode?: ApprovalMode }
   | { kind: 'mode'; turn: number; mode: ApprovalMode }
   | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string; cut?: Cut; compacted?: Compaction[] }
@@ -344,6 +344,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       planLine(`분류 ${r.taskId} ${r.title}  (${r.reason})`, 0),
       planLine(`primary  ${r.primary}`, 1),
       planLine(`reviewer ${r.reviewer}`, 2),
+      // 사다리 ④ 가 더한 reviewer (D-072) — 세 슬롯이고 판정은 AND 다.
+      r.reviewer2 ? planLine(`reviewer ${r.reviewer2}  · 사다리 ④ 추가 — 둘 다 PASS 일 때만 PASS`, 5) : null,
       planLine(`비용 예상 $${r.estimateUsd}`, 3),
       // 사다리 상향 카드는 무엇이 올라갔는지 보인다 (D-068) — 같은 요청을 올려 다시 위임하는 카드임을 첫 줄이 말한다.
       ...ladderLines(r.ladder).map((l, j) => h('div', { key: `l${j}`, className: j === 0 ? 'hint warn' : 'hint' }, l)),
@@ -380,7 +382,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
               h('button', {
                 className: 'btn accent', disabled: busy,
                 onClick: () => { setDelegation('running'); act(orc.convApprove({ verify: lines(verify), write: (write ?? r.write === true) && view.kind !== 'scratch' })); },
-              }, busy ? '실행 중…' : `승인하고 실행 · 두 슬롯${(write ?? r.write === true) && view.kind !== 'scratch' ? ' · 쓰기 켜짐' : ''}`),
+              }, busy ? '실행 중…' : `승인하고 실행 · ${r.reviewer2 ? '세' : '두'} 슬롯${(write ?? r.write === true) && view.kind !== 'scratch' ? ' · 쓰기 켜짐' : ''}`),
               h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convReject()) }, '거절'),
               // 규칙이 대화성 후속을 작업 행으로 잡았을 때 — 거절하고 같은 메시지를 지휘자가 답한다 (D-038).
               h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convAsk()) }, '지휘자에게 묻기')))

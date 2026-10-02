@@ -10,7 +10,7 @@ import { loadEngines } from '../../data/engines.ts';
 import { assign, type AssignmentPlan } from '../assign.ts';
 import { Budget } from '../budget.ts';
 import type { SlotExecutor, SlotRun } from '../executor.ts';
-import { parseVerdict, reviewPrompt, runDuo } from '../duo.ts';
+import { combineVerdicts, parseVerdict, reviewPrompt, reviewText, runDuo } from '../duo.ts';
 
 const matrix = loadMatrix();
 const catalog = loadEngines();
@@ -159,5 +159,69 @@ describe('resume 은 primary 에만 (SPEC §6.4.3)', () => {
     };
     await runDuo(matrix, planR01, exec, 'task', new Budget(20, 2_000_000), { resumePrimary: 'eng-1' });
     assert.deepEqual(seen.map((s) => s.resume), ['eng-1', undefined]);
+  });
+});
+
+describe('reviewer 둘 — 사다리 ④ (D-072)', () => {
+  // R01 ④: 기존 reviewer Haiku 를 두고 같은 벤더 한 칸 위 Sonnet 을 더한다.
+  const planR01x2 = assign(matrix, catalog, row('R01'), {
+    secondReviewer: { slot: { ...row('R01').reviewer, model: 'sonnet', vendor: 'anthropic', label: 'Sonnet' }, effort: 'low' },
+  });
+  const usage = { inputTokens: 900, outputTokens: 100, cachedInputTokens: 0, cacheWriteTokens: 0 };
+
+  it('판정은 AND 다 — FAIL 이 하나라도 있으면 fail, 배정된 reviewer 가 모두 PASS 일 때만 pass, 그 밖은 unknown', () => {
+    assert.equal(combineVerdicts(['pass', 'pass'], 2), 'pass');
+    assert.equal(combineVerdicts(['pass', 'fail'], 2), 'fail');
+    assert.equal(combineVerdicts(['unknown', 'fail'], 2), 'fail');
+    assert.equal(combineVerdicts(['pass', 'unknown'], 2), 'unknown');
+    assert.equal(combineVerdicts(['pass'], 2), 'unknown', '돌지 못한 reviewer 는 pass 가 아니다');
+    assert.equal(combineVerdicts([], 1), 'unknown');
+  });
+
+  it('세 슬롯을 다 띄우고 세 슬롯을 다 과금한다 — reviewer 둘은 같은 산출물을 서로의 판정 없이 받고, 잇지 않는다', async () => {
+    const seen: { label: string; prompt: string; resume: string | undefined }[] = [];
+    const exec: SlotExecutor = (slot, prompt, options) => {
+      seen.push({ label: slot.label, prompt, resume: options?.resume });
+      return Promise.resolve({ ok: true, text: slot.label === 'Luna' ? '산출물' : slot.label === 'Haiku' ? '없음\nPASS' : '반례 있음\nFAIL', rawStdout: '', rawStderr: '', durationMs: 1 });
+    };
+    const budget = new Budget(20, 2_000_000);
+    const duo = await runDuo(matrix, planR01x2, exec, 't', budget, { resumePrimary: 'eng-1' });
+    assert.deepEqual(seen.map((s) => s.label), ['Luna', 'Haiku', 'Sonnet']);
+    assert.deepEqual(seen.map((s) => s.resume), ['eng-1', undefined, undefined]);
+    assert.equal(seen[1]?.prompt, seen[2]?.prompt);
+    assert.deepEqual(budget.charges.map((c) => c.label), ['Luna·medium', 'Haiku·low', 'Sonnet·low']);
+    assert.equal(duo.verdict, 'fail');
+    assert.deepEqual(duo.reviews.map((r) => r.verdict), ['pass', 'fail']);
+    assert.deepEqual(duo.evidence.map((e) => (e.kind === 'review' ? e.verdict : '')), ['pass', 'fail'], 'FAIL 증거가 rework 로 이어진다 (D-043)');
+    assert.match(reviewText(duo.reviews), /^\[reviewer Haiku·low \(claude\/[^)]+\) → PASS\]\n없음\nPASS\n\n\[reviewer Sonnet·low \(claude\/[^)]+\) → FAIL\]\n반례 있음\nFAIL$/);
+  });
+
+  it('하나가 판정을 못 읽으면 unknown 이고 PASS 한 쪽의 증거도 싣지 않는다 — R11 을 채워 pass 로 봐주지 않는다', async () => {
+    const { exec } = spy((l) => ({ ok: true, text: l === 'Haiku' ? 'PASS' : l === 'Sonnet' ? '잘 모르겠다' : '산출물' }));
+    const duo = await runDuo(matrix, planR01x2, exec, 't', new Budget(20));
+    assert.equal(duo.verdict, 'unknown');
+    assert.deepEqual(duo.evidence, []);
+  });
+
+  it('첫 reviewer 뒤 상한에 닿으면 두 번째를 시작하지 않는다 — 판정은 unknown', async () => {
+    const { calls, exec } = spy(() => ({ ok: true, text: 'PASS', usage }));
+    const duo = await runDuo(matrix, planR01x2, exec, 't', new Budget(1000, 2000));
+    assert.deepEqual(calls.map((c) => c.label), ['Luna', 'Haiku']);
+    assert.equal(duo.verdict, 'unknown');
+    assert.deepEqual(duo.evidence, []);
+  });
+
+  it('두 reviewer 사이에 취소하면 두 번째를 띄우지 않고 reviewer 단계에서 멈춘 것이다 (D-066)', async () => {
+    const controller = new AbortController();
+    const labels: string[] = [];
+    const exec: SlotExecutor = (slot) => {
+      labels.push(slot.label);
+      if (slot.label === 'Haiku') controller.abort();
+      return Promise.resolve({ ok: true, text: 'PASS', rawStdout: '', rawStderr: '', durationMs: 1 });
+    };
+    const duo = await runDuo(matrix, planR01x2, exec, 't', new Budget(20), { signal: controller.signal });
+    assert.deepEqual(labels, ['Luna', 'Haiku']);
+    assert.equal(duo.cancelledAt, 'reviewer');
+    assert.equal(duo.verdict, 'unknown');
   });
 });

@@ -235,7 +235,7 @@ async function main(): Promise<void> {
       `배정   primary  ${primary.label} · ${primary.effort}  → ${primary.engine} / ${primary.modelId}`,
       `       reviewer ${reviewer.label} · ${reviewer.effort}  → ${reviewer.engine} / ${reviewer.modelId}`,
       `기준   ${plan.assignment.operatingCriterion}`,
-      `비용   $${plan.cost.totalUsd} = primary $${plan.cost.primaryUsd} + reviewer $${plan.cost.reviewerUsd}  [${plan.cost.grade.toUpperCase()}]`,
+      `비용   $${plan.cost.totalUsd} = primary $${plan.cost.primaryUsd} + reviewer $${plan.cost.reviewerUsd}${plan.cost.secondReviewerUsd !== undefined ? ` + reviewer $${plan.cost.secondReviewerUsd}` : ''}  [${plan.cost.grade.toUpperCase()}]`,
       `       ${plan.cost.note}`,
       // 외부 쓰기는 승인 **전에** 보여준다 — 비용과 같은 이유다 (PLAN "사람에게 올리는 조건").
       args.write

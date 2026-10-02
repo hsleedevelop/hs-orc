@@ -2012,7 +2012,7 @@ D-064 는 "사다리는 `nextSuggestion()` 이 글로만 제안한다 — 배정
    - ① **근거 보강** — 배정은 그대로, 직전 실패의 reviewer 검증·증거 요약을 위임 프롬프트에 싣는다(`[직전 시도 실패 근거]`). 자동 증거 수집은 이 결정 밖이다(SPEC §8). ②~④ 도 이 블록을 계속 싣는다(누적).
    - ② **effort 상향** — primary effort 를 한 칸(행이 범위를 줬으면 그 상향값, 아니면 `EFFORTS` 다음 칸) 올린다. 어댑터가 지원하지 않거나 이미 max 면 올릴 곳이 없다.
    - ③ **모델 상향** — primary 를 **자기 벤더 계층에서 한 칸** 올린다(luna→terra→sol→astra, haiku→sonnet→opus→fable). effort 는 ②까지 올린 값을 유지한다. 최상위거나 그 모델이 그 effort 를 지원하지 않으면 올릴 곳이 없다 — **대체 모델로 바꾸지 않는다**(D-004).
-   - ④ **reviewer** — **별도 reviewer 슬롯을 더하지 않고** 기존 reviewer 를 자기 벤더 계층에서 한 칸 올린다. 제품이 primary+reviewer 두 슬롯 고정(D-009)이라 세 번째 슬롯은 `delegate` 구조 변경이 필요하고 이 범위 밖이다. SPEC 의 "reviewer 추가" 를 "reviewer 강화" 로 읽은 해석이다 — 전하가 진짜 추가 reviewer 를 원하면 새 결정이다.
+   - ④ **reviewer** — **→ D-072 이 개정했다(기존 reviewer 를 두고 같은 벤더 한 칸 위 reviewer 를 더한다, 판정 AND).** 원래: **별도 reviewer 슬롯을 더하지 않고** 기존 reviewer 를 자기 벤더 계층에서 한 칸 올린다. 제품이 primary+reviewer 두 슬롯 고정(D-009)이라 세 번째 슬롯은 `delegate` 구조 변경이 필요하고 이 범위 밖이다. SPEC 의 "reviewer 추가" 를 "reviewer 강화" 로 읽은 해석이다 — 전하가 진짜 추가 reviewer 를 원하면 새 결정이다.
    - **올릴 곳이 없는 단계는 건너뛴다**(카드에 "건너뜀 — 이유" 한 줄). 순서를 바꾸거나 뒤 단계로 점프하는 것이 아니라 바뀌는 것이 없는 칸을 넘는 것이다. 남은 단계가 전부 올릴 곳이 없으면 더 올릴 단계가 없다 — 버튼이 사라지고 "문제 정의를 다시 본다"(SPEC §2.4)만 남는다.
 3. **INV-1 은 그대로 지킨다.** 상향 배정도 `assign()` 을 거친다 — 올리는 것은 각자 자기 벤더 안이라 교차 벤더가 유지되고, 위반이면 `crossVendorPair` 가 던진다. 조용히 한쪽을 바꾸지 않는다.
 4. **비용은 다시 계산한다.** `assign()` 이 새 모델 조합의 `economics` 로 `plan.cost` 를 계산한다 — 카드의 예상 비용이 상향 뒤 값이다. 상향이 비용을 올릴 수 있다는 것이 A3 를 늘 묻는 이유다.
@@ -2034,7 +2034,7 @@ D-064 는 "사다리는 `nextSuggestion()` 이 글로만 제안한다 — 배정
 - *사다리를 자동으로 한 칸 올려 재위임* — D-015·D-031·FR-14 위반, pingpong loop(D-002).
 - *단계를 사용자가 골라 눌러 올리기* — L5 직행을 만든다. 1단계 문제 정의가 부족한 채로 비싼 조합이 돈다.
 - *②③④ 각각 여러 칸 올리기* — 한 칸 올려도 사용자가 다시 누를 수 있다. 한 번에 여러 칸은 실패 원인 분리(어느 단계에서 풀렸나)를 잃는다.
-- *세 번째 reviewer 슬롯* — 위 ④ (D-009 구조 변경 필요).
+- *세 번째 reviewer 슬롯* — 위 ④ (D-009 구조 변경 필요). **→ D-072 이 이 기각을 뒤집었다.**
 - *사다리 배정의 엔진 세션 잇기* — 위 9.
 
 **영향**
@@ -2269,6 +2269,44 @@ D-024 가 실행 산출물(`.hs-orc/runs`·`.hs-orc/unclassified.jsonl`)을 cwd 
 **재검토 조건** 폴더 이동·이름 변경으로 세션을 잃는 불편이 실사용에서 나올 때(키를 git 저장소 식별자로 바꾸는 안). 또는 홈 기록이 쌓여 수동 정리가 필요해질 때(Q12 재검토와 함께).
 
 **상태** 권장안 적용, **전하 확인 대기** — 2026-10-02.
+
+---
+
+## D-072 — 사다리 ④ 는 reviewer 를 진짜 더한다: 기존 reviewer 를 두고 같은 벤더 한 계층 위 reviewer 1개, 판정은 AND (D-068 결정 2-④ 개정)
+
+**배경**
+D-068 결정 2-④ 는 SPEC §2.4 의 "④ reviewer 추가" 를 **기존 reviewer 를 자기 벤더에서 한 계층 강화**로 읽었다 — 제품이 primary+reviewer 두 슬롯 고정(D-009)이라 세 번째 슬롯은 `delegate` 구조 변경이 필요해서였다. 그리고 "전하가 진짜 추가 reviewer 를 원하면 새 결정" 이라고 적었다. 전하 백로그로 그 결정을 연다. ①~③ 이 모두 primary 쪽을 바꾸는 사이 ④ 만 검증 쪽 단계인데, 강화는 검증자 **한 명**의 눈을 바꿀 뿐 독립된 눈을 늘리지 않는다 — SPEC 원문의 "추가" 와 L5 의 `+ independent review` 가 말하는 것은 검증자의 수다.
+
+**결정**
+1. **④ 는 추가다.** 기존 reviewer 를 그대로 두고, 그 reviewer 의 벤더 계층에서 **한 칸 위** 모델로 reviewer 1개를 더한다 — primary + reviewer 2 = **세 슬롯**. effort 는 기존 reviewer 의 effort 를 따른다. 추가 reviewer 도 INV-1(`vendor(primary) ≠ vendor(reviewer)`)을 지켜야 하므로 기존 reviewer 와 **같은 벤더**가 된다(벤더는 둘뿐이다). 사다리는 여전히 한 번에 한 단계·한 칸이다 — reviewer 는 최대 둘이고, ④ 를 지나면 더 올릴 단계가 없다.
+2. **건너뛰기는 D-068 그대로다.** 기존 reviewer 가 자기 벤더 최상위(Fable·Astra)이거나 위 모델이 그 effort 를 지원하지 않으면 올릴 곳이 없다 — `④reviewer 추가 — 건너뜀: <이유>`, ④ 가 마지막 단계라 사다리가 끝난다. 대체 모델·다른 벤더로 바꾸지 않는다(D-004·INV-1).
+3. **판정은 AND 다.** reviewer 중 하나라도 `FAIL` 이면 `fail`. 배정된 reviewer 가 **모두 돌아 모두 `PASS`** 일 때만 `pass`. 그 밖 — 하나라도 판정을 못 읽었거나(`unknown`, SPEC §5 그대로 pass 로 보지 않는다), 비용·토큰 상한으로 두 번째를 시작하지 못했으면 `unknown`. 합친 판정이 `unknown` 이면 PASS 한 쪽의 `review` 증거도 싣지 않는다 — 배정한 검증이 다 서지 않았는데 R11 `독립 리뷰 결과` 를 채우면 pass 로 봐주는 것이다. `fail` 이면 판정을 읽은 reviewer 의 증거를 모두 싣는다(FAIL 증거가 `rework` 를 만든다, D-043).
+4. **두 reviewer 는 서로 독립이다.** 같은 `reviewPrompt`(같은 primary 산출물)를 받고 서로의 판정을 보지 않는다. 차례로 돈다(Budget 상한·취소 검사를 둘 사이에 한다). 첫 reviewer 가 FAIL 이어도 두 번째를 돌린다 — 승인 카드가 세 슬롯 비용으로 섰고, ④ 가 사다리 마지막이라 두 번째 반례가 "문제 정의를 다시 본다"(SPEC §2.4)의 재료다. **둘 다 읽기 전용**(`role: 'reviewer'`, D-025)이고 **resume 하지 않는다**(SPEC §3.8 — 이어 붙이는 것은 primary 뿐).
+5. **비용은 `assign()` 에서 세 슬롯 합으로 다시 계산한다**(`cost.secondReviewerUsd`, `totalUsd` 에 포함). 실행 과금도 슬롯마다 Budget 에 들어간다. 카드는 서기만 하고 시작은 승인이다 — A3 는 D-068 결정 6 그대로 모든 비 manual 방식에서 묻는다. `auto-ask` A2 의 "청구되는 슬롯" 판정에 두 번째 reviewer 가 들어간다.
+6. **구조는 최소로 넓힌다.** 매트릭스 행(`Assignment`)은 두 슬롯 그대로다 — 세 번째 슬롯은 `AssignOptions.secondReviewer` 로만 들어와 `CrossVendorPair.secondReviewer?` 에 실린다(INV-1 검사 포함). `runDuo` 는 reviewer 를 1..2 개 돌리고 `reviews[]`·합친 `verdict` 를 낸다. 결과 기록(`result.review`)은 문자열 그대로 두고 reviewer 가 둘이면 reviewer 마다 `[reviewer <label·effort (engine/model)> → PASS|FAIL|UNKNOWN]` 머리줄을 단다. 배정 기록(`plan`)에 선택 필드 `reviewer2` 를 더한다(`v: 1` 유지). 결정 로그 1차는 `parallel_n: 3`, `note` 에 `reviewer a/x + b/y`.
+7. **옛 기록은 그대로 읽힌다.** D-068 방식으로 reviewer 를 강화한 ④ 기록(`reviewer2` 없음)도 카드는 두 슬롯으로 보이고, 사다리 상태는 `ladder.done` 에서 계산돼 ④ 를 지났으니 더 올릴 단계가 없다. 결과 기록 모양은 바뀌지 않았다.
+8. **표시.** GUI 배정 카드에 `reviewer` 줄이 하나 더 서고(`· 사다리 ④ 추가 — 둘 다 PASS 일 때만 PASS`), 승인 버튼이 `세 슬롯` 이라 적는다. chat 도 같은 줄을 더한다. 카드의 사다리 줄은 `④reviewer 추가 — reviewer <위 모델> (<effort>) 를 더한다 · 기존 reviewer <모델> 유지 · 둘 다 PASS 일 때만 PASS`. TUI·CLI 는 사다리가 없지만(D-056 결정 4) 비용 줄이 `secondReviewerUsd` 가 있으면 더해 보인다.
+
+**근거**
+- SPEC §2.4 원문이 "추가" 이고, ①~③ 이 primary 를 올린 뒤 남은 수단은 검증의 독립성을 늘리는 것이다. 강화는 같은 자리의 한 명을 바꿔 첫 reviewer 가 짚은 것과 놓친 것을 함께 잃는다 — 추가는 둘 다 남긴다.
+- AND 는 보수적이다 — 둘 중 한 명이라도 반례를 냈으면 완료가 아니다. 하나라도 못 읽은 판정을 pass 로 치지 않는 것은 SPEC §5 의 규칙을 그대로 넓힌 것이다.
+- 같은 벤더 한 칸 위로 고정하면 사다리의 결정론(G1, 엔진 호출 없음)·한 칸 규칙·INV-1 이 그대로 선다.
+
+**기각**
+- *D-068 그대로 종결(④ = 기존 reviewer 강화)* — 슬롯 구조를 안 바꿔 변경이 작다. 그러나 ④ 단계에서 검증자가 여전히 한 명이라 "reviewer 추가" 라는 단계 이름과 실제 동작이 어긋나고(카드가 "추가" 라 쓰고 바꾼다), 첫 reviewer 의 관점을 버린다. 비용도 강화나 추가나 위 모델 한 몫이 들어 차이가 아래 모델 한 몫(R01: Haiku $0.21)뿐이다. 바꾸는 구조는 선택 필드 하나로 막을 수 있어 D-009 두 슬롯 기본 경로를 건드리지 않는다.
+- *다른 벤더 reviewer 추가* — INV-1 위반(primary 와 같은 벤더가 된다).
+- *OR 판정(하나만 PASS 면 pass)* — 독립 검증을 더한 의미가 없다. 반례를 낸 쪽을 무시한다.
+- *첫 reviewer 가 FAIL 이면 두 번째를 건너뛰기* — 돈은 아끼지만 사다리 마지막 단계의 두 번째 의견을 잃고, 승인한 세 슬롯 실행과 달라진다. 실사용에서 비용이 문제로 보이면 다시 본다.
+- *두 reviewer 병렬 실행* — 상한·취소 검사가 둘 사이에 서지 않는다. 시간 이득은 사다리 재시도 1건에 한정된다.
+
+**영향**
+- 코드: `core/assign.ts`(`secondReviewer` 선택 슬롯·INV-1·비용 합), `core/ladder.ts`(④), `core/duo.ts`(`reviews`·`combineVerdicts`·`reviewText`), `core/delegate.ts`(검증 글), `core/session.ts`·`core/transcript.ts`(`plan.reviewer2`), `core/decide.ts`(`parallel_n`·note), `core/approval.ts`(A2 청구 판정), `shell/chat.ts`·`shell/gui/renderer/app.ts`(카드 줄·버튼), `shell/tui/model.ts`·`shell/cli.ts`(비용 줄).
+- 기록 형식: `plan` 에 선택 필드 `reviewer2`(`v: 1` 유지). `result` 는 그대로.
+- SPEC §2.4·§5 갱신. D-068 결정 2-④·기각 "세 번째 reviewer 슬롯" 을 이 결정이 대체한다.
+
+**검증 계획** 단위(가짜 실행기·`HS_ORC_JEV=off`, 엔진·Jev 실호출 없음): ④ 가 기존 reviewer 를 두고 같은 벤더 한 칸 위를 더함, 전 행 INV-1·한 칸, 최상위 reviewer 건너뛰기(R11 사다리 소진), 두 번째 reviewer 가 primary 와 같은 벤더면 `assign` 이 던짐, 비용 세 슬롯 합(R01 ④ $6.7), AND 판정 표·unknown 이면 증거 없음, 상한·취소 시 두 번째를 시작하지 않음, reviewer 둘 다 resume 없음·`role: reviewer`, 세 슬롯 과금, 결과 검증 글 머리줄, 결정 로그 `parallel_n: 3`, 옛 ④ 기록(`reviewer2` 없음) 재열기, chat 카드 줄. 실제 엔진 실행(과금)은 하지 않았다 — 세 슬롯 실행의 실측은 다음 사다리 실사용에서 본다.
+
+**상태** 권장안 적용, 전하 확인 대기 — 2026-10-02 오케스트레이터 권장안(전하 백로그). PR 에서 전하가 확인한다. 기각안 "D-068 그대로 종결" 로 돌리면 이 PR 을 닫으면 된다(기록 형식은 선택 필드만 늘었다).
 
 ---
 

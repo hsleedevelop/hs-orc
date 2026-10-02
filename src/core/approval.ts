@@ -78,7 +78,7 @@ export function evaluateApproval(input: ApprovalInput): ApprovalCheck {
     const usd = plan.cost.totalUsd;
     if (usd >= A1_COST_USD) asks.push({ code: 'A1', text: `예상 $${usd} ≥ $${A1_COST_USD}` });
 
-    const billed = plan.slots.primary.plan === 'api' || plan.slots.reviewer.plan === 'api';
+    const billed = [plan.slots.primary, plan.slots.reviewer, plan.slots.secondReviewer].some((s) => s?.plan === 'api');
     const tokenLimit = budget.limitTokens;
     if (billed && budget.remainingUsd < A2_REMAINING_FACTOR * usd) {
       asks.push({ code: 'A2', text: `남은 금액 $${budget.remainingUsd} < 예상 $${usd} × ${A2_REMAINING_FACTOR}` });

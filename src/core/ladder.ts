@@ -89,6 +89,8 @@ interface Rung {
 interface Rungs {
   readonly primary: Rung;
   readonly reviewer: Rung;
+  /** ④ 가 더한 reviewer (D-072). 기존 reviewer 는 그대로 남는다. */
+  readonly secondReviewer?: Rung;
 }
 type StageResult = { readonly rungs: Rungs; readonly change: string; readonly applied: boolean };
 
@@ -135,8 +137,12 @@ function applyStage(matrix: Matrix, catalog: Engines, rungs: Rungs, stage: Escal
       const next = modelAbove(matrix, reviewer.model);
       if (!next) return skip(`reviewer ${modelLabel(reviewer.model)} 는 ${vendorOf(matrix, reviewer.model)} 계층의 최상위다`);
       if (!supported(catalog, next, reviewer.effort)) return skip(`${modelLabel(next)} 는 ${reviewer.effort} 를 지원하지 않는다`);
-      // 제품이 primary+reviewer 두 슬롯 고정이라 슬롯을 더하지 않고 기존 reviewer 를 올린다 (D-068 결정 2).
-      return { rungs: { ...rungs, reviewer: { ...reviewer, model: next } }, change: `${name} — reviewer ${modelLabel(reviewer.model)} → ${modelLabel(next)} (${reviewer.effort}, 교차 벤더 유지 · 슬롯을 더하지 않고 기존 reviewer 를 올린다)`, applied: true };
+      // 기존 reviewer 를 두고 같은 벤더 한 계층 위 reviewer 를 하나 더한다 (D-072, D-068 결정 2-④ 개정). 같은 벤더라 INV-1 이 유지된다.
+      return {
+        rungs: { ...rungs, secondReviewer: { model: next, effort: reviewer.effort } },
+        change: `${name} — reviewer ${modelLabel(next)} (${reviewer.effort}) 를 더한다 · 기존 reviewer ${modelLabel(reviewer.model)} 유지 · 둘 다 PASS 일 때만 PASS`,
+        applied: true,
+      };
     }
   }
 }
@@ -144,7 +150,8 @@ function applyStage(matrix: Matrix, catalog: Engines, rungs: Rungs, stage: Escal
 /**
  * `done` 뒤의 다음 단계를 행 기본 배정(`base`)에 적용한다 (D-068). **결정론이고 엔진을 부르지 않는다.**
  * 올릴 곳이 없는 단계는 건너뛰고(순서를 바꾸지 않는다) 그 다음 단계를 적용한다. 남은 단계가 모두 올릴 곳이 없으면 null.
- * 배정은 `assign()` 을 거친다 — INV-1 검사와 비용 재산정이 그대로 걸린다. 모델·reviewer 는 자기 벤더 안에서 한 칸만 오른다.
+ * 배정은 `assign()` 을 거친다 — INV-1 검사와 비용 재산정이 그대로 걸린다. 모델은 자기 벤더 안에서 한 칸만 오르고,
+ * ④ 는 기존 reviewer 를 두고 그 벤더에서 한 칸 위 reviewer 를 더한다 (D-072).
  */
 export function planLadder(matrix: Matrix, catalog: Engines, base: Assignment, done: readonly EscalationStage[]): LadderPlan | null {
   const changes: string[] = [];
@@ -165,7 +172,12 @@ export function planLadder(matrix: Matrix, catalog: Engines, base: Assignment, d
     if (!r.applied) continue;
     const slot = (old: Assignment['primary'], rung: Rung) => ({ ...old, model: rung.model, vendor: vendorOf(matrix, rung.model), label: modelLabel(rung.model) });
     const raised: Assignment = { ...base, primary: slot(base.primary, r.rungs.primary), reviewer: slot(base.reviewer, r.rungs.reviewer) };
-    const plan = assign(matrix, catalog, raised, { primaryEffort: r.rungs.primary.effort, reviewerEffort: r.rungs.reviewer.effort });
+    const second = r.rungs.secondReviewer;
+    const plan = assign(matrix, catalog, raised, {
+      primaryEffort: r.rungs.primary.effort,
+      reviewerEffort: r.rungs.reviewer.effort,
+      ...(second ? { secondReviewer: { slot: slot(base.reviewer, second), effort: second.effort } } : {}),
+    });
     return { plan, applied: { stage, label: stageName(stage), done: passed, changes } };
   }
   return null;
