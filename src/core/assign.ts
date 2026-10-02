@@ -28,6 +28,8 @@ export interface ResolvedSlot {
 export interface CrossVendorPair {
   readonly primary: ResolvedSlot;
   readonly reviewer: ResolvedSlot;
+  /** 사다리 ④ 가 더한 reviewer (D-072). 있으면 세 슬롯이고 판정은 둘 다 PASS 일 때만 PASS 다. 행 기본 배정에는 없다. */
+  readonly secondReviewer?: ResolvedSlot;
   readonly [crossVendorBrand]: true;
 }
 
@@ -39,6 +41,8 @@ export class AssignError extends Error {
 export interface CostEstimate {
   readonly primaryUsd: number;
   readonly reviewerUsd: number;
+  /** 두 번째 reviewer 가 있을 때만 (D-072). `totalUsd` 에 들어 있다. */
+  readonly secondReviewerUsd?: number;
   readonly totalUsd: number;
   readonly grade: 'independent';
   readonly note: string;
@@ -61,18 +65,20 @@ export function resolveSlot(catalog: Engines, slot: Slot, effort: Effort, role: 
   return { model: slot.model, label: slot.label, effort, engine, modelId, role, plan: catalog.engines[engine].plan };
 }
 
-/** INV-1 을 통과한 쌍만 반환한다. 위반이면 던진다 — 조용히 한쪽을 바꾸지 않는다. */
-export function crossVendorPair(matrix: Matrix, primary: ResolvedSlot, reviewer: ResolvedSlot): CrossVendorPair {
+/** INV-1 을 통과한 쌍만 반환한다. 위반이면 던진다 — 조용히 한쪽을 바꾸지 않는다. 두 번째 reviewer 도 primary 와 벤더가 달라야 한다 (D-072). */
+export function crossVendorPair(matrix: Matrix, primary: ResolvedSlot, reviewer: ResolvedSlot, secondReviewer?: ResolvedSlot): CrossVendorPair {
   const vendorOf = (model: ModelKey): string => {
     for (const [vendor, models] of Object.entries(matrix.tiers)) if (models.includes(model)) return vendor;
     throw new AssignError(`모델 계층에 없는 모델: ${model}`);
   };
-  if (vendorOf(primary.model) === vendorOf(reviewer.model)) {
-    throw new AssignError(
-      `INV-1 위반: primary(${primary.model})와 reviewer(${reviewer.model})의 벤더가 같다. 독립 검증이 성립하지 않는다.`,
-    );
+  for (const r of secondReviewer ? [reviewer, secondReviewer] : [reviewer]) {
+    if (vendorOf(primary.model) === vendorOf(r.model)) {
+      throw new AssignError(
+        `INV-1 위반: primary(${primary.model})와 reviewer(${r.model})의 벤더가 같다. 독립 검증이 성립하지 않는다.`,
+      );
+    }
   }
-  return { primary, reviewer } as CrossVendorPair;
+  return (secondReviewer ? { primary, reviewer, secondReviewer } : { primary, reviewer }) as CrossVendorPair;
 }
 
 const costOf = (economics: readonly Economics[], model: ModelKey): number => {
@@ -84,6 +90,8 @@ const costOf = (economics: readonly Economics[], model: ModelKey): number => {
 export interface AssignOptions {
   readonly primaryEffort?: Effort;
   readonly reviewerEffort?: Effort;
+  /** 사다리 ④ 가 더하는 reviewer (D-072). 배정 행(`Assignment`)은 두 슬롯 그대로다 — 세 번째 슬롯은 여기로만 들어온다. */
+  readonly secondReviewer?: { readonly slot: Slot; readonly effort: Effort };
 }
 
 export function assign(
@@ -100,10 +108,12 @@ export function assign(
 
   const primary = resolveSlot(catalog, assignment.primary, pick(assignment.primary, options.primaryEffort), 'primary');
   const reviewer = resolveSlot(catalog, assignment.reviewer, pick(assignment.reviewer, options.reviewerEffort), 'reviewer');
-  const slots = crossVendorPair(matrix, primary, reviewer);
+  const second = options.secondReviewer ? resolveSlot(catalog, options.secondReviewer.slot, options.secondReviewer.effort, 'reviewer') : undefined;
+  const slots = crossVendorPair(matrix, primary, reviewer, second);
 
   const primaryUsd = costOf(matrix.economics, primary.model);
   const reviewerUsd = costOf(matrix.economics, reviewer.model);
+  const secondReviewerUsd = second ? costOf(matrix.economics, second.model) : undefined;
 
   return {
     assignment,
@@ -111,7 +121,8 @@ export function assign(
     cost: {
       primaryUsd,
       reviewerUsd,
-      totalUsd: Number((primaryUsd + reviewerUsd).toFixed(4)),
+      ...(secondReviewerUsd !== undefined ? { secondReviewerUsd } : {}),
+      totalUsd: Number((primaryUsd + reviewerUsd + (secondReviewerUsd ?? 0)).toFixed(4)),
       grade: 'independent',
       note: 'Artificial Analysis max-effort 벤치마크 작업당 비용(모델 단위 — effort 는 반영하지 않는다). 실제 지출이 아니다.',
     },

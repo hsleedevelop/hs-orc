@@ -29,6 +29,13 @@ describe('chat — 기록 렌더', () => {
     assert.deepEqual(lines, ['업무   R01 타입 에러  (규칙)', '배정   primary  Luna·low → codex/x', '       reviewer Haiku·low → claude/y', '비용   $0.5 (추정)']);
   });
 
+  it('사다리 ④ 배정은 더한 reviewer 를 한 줄 더 찍는다 — 옛 기록(reviewer2 없음)은 위처럼 두 슬롯 그대로다 (D-072)', () => {
+    const lines = renderRecord({
+      ...at, kind: 'plan', taskId: 'R01', title: '타입 에러', reason: '사다리', primary: 'Terra·high → codex/x', reviewer: 'Haiku·low → claude/y', reviewer2: 'Sonnet·low → claude/z', estimateUsd: 6.7, notes: [],
+    });
+    assert.deepEqual(lines.slice(1, 4), ['배정   primary  Terra·high → codex/x', '       reviewer Haiku·low → claude/y', '       reviewer Sonnet·low → claude/z  (사다리 ④ 추가 — 둘 다 PASS 일 때만 PASS)']);
+  });
+
   it('맥락을 잘랐으면 잘린 양을 알린다 (D-053)', () => {
     const lines = renderRecord({ ...at, kind: 'direct', text: '답', suggest: null, cost: '$0 x', notes: [], cut: { turns: 2, chars: 300 } });
     assert.ok(lines.includes('맥락   앞 대화 2턴·300자를 싣지 못했다'));

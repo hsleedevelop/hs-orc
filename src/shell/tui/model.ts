@@ -50,7 +50,7 @@ export interface CostLine {
 
 export function costLine(plan: AssignmentPlan): CostLine {
   return {
-    line: `$${plan.cost.totalUsd} = primary $${plan.cost.primaryUsd} + reviewer $${plan.cost.reviewerUsd}`,
+    line: `$${plan.cost.totalUsd} = primary $${plan.cost.primaryUsd} + reviewer $${plan.cost.reviewerUsd}${plan.cost.secondReviewerUsd !== undefined ? ` + reviewer $${plan.cost.secondReviewerUsd}` : ''}`,
     badge: { grade: 'INDEPENDENT', text: 'Artificial Analysis' },
     disclaimer: 'AA 벤치마크 측정치이며 실제 지출이 아니다.',
   };

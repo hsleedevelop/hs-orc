@@ -55,11 +55,11 @@ export function firstLine(
     tier: `${primary}/${plan.slots.primary.effort}`,
     downshifted: branch === 'down',
     trigger: `매트릭스 ${plan.assignment.id} · ${reason}`,
-    // primary + reviewer 두 슬롯이다 (D-009). 단일 엔진 선택기가 아님을 로그에도 남긴다.
-    parallel_n: 2,
+    // primary + reviewer 두 슬롯이다 (D-009). 단일 엔진 선택기가 아님을 로그에도 남긴다. 사다리 ④ 는 reviewer 가 하나 더 붙는다 (D-072).
+    parallel_n: plan.slots.secondReviewer ? 3 : 2,
     status: 'decided',
     outcome: 'pending',
-    note: `hs-orchestrator · reviewer ${plan.slots.reviewer.model}/${plan.slots.reviewer.effort} · 예상 $${plan.cost.totalUsd}(추정)`,
+    note: `hs-orchestrator · reviewer ${[plan.slots.reviewer, plan.slots.secondReviewer].filter((r) => r !== undefined).map((r) => `${r.model}/${r.effort}`).join(' + ')} · 예상 $${plan.cost.totalUsd}(추정)`,
   };
 }
 

@@ -292,7 +292,7 @@ export class ConversationSession {
 
   /** 배정을 승인 대기로 세우고 `plan` 을 남긴다. 상태를 `blocked` 로 바꾼다. */
   private stage(title: string, plan: AssignmentPlan, reason: string, notes: readonly string[], write = false, ladder?: LadderRecord): TranscriptRecord {
-    const { primary, reviewer } = plan.slots;
+    const { primary, reviewer, secondReviewer } = plan.slots;
     const { catalog, budget } = this.deps;
     const check = evaluateApproval({ mode: this.modeValue, plan, reason, write, catalog, budget, records: this.log, ...(ladder ? { ladder: true } : {}) });
     this.pending = { title, plan, reason, write, check, ...(ladder ? { ladder } : {}) };
@@ -304,6 +304,7 @@ export class ConversationSession {
       reason,
       primary: `${primary.label}·${primary.effort} → ${primary.engine}/${primary.modelId}`,
       reviewer: `${reviewer.label}·${reviewer.effort} → ${reviewer.engine}/${reviewer.modelId}`,
+      ...(secondReviewer ? { reviewer2: `${secondReviewer.label}·${secondReviewer.effort} → ${secondReviewer.engine}/${secondReviewer.modelId}` } : {}),
       estimateUsd: plan.cost.totalUsd,
       notes,
       mode: check.mode,

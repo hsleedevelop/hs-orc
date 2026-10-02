@@ -120,7 +120,9 @@ L5: Astra max    / Fable max  + independent review
 
 상향 순서는 **① 코드·로그·재현 조건 보강 → ② effort 상향 → ③ 모델 상향 → ④ reviewer 추가**. 이 순서를 건너뛰고 L5로 점프하는 경로를 만들지 않는다.
 
-적용 경로(D-068): 위임이 미검증·실패로 끝나면 사용자가 '사다리 다음 단계로 다시 위임'(GUI)·`/ladder`(chat)를 눌러 같은 요청의 상향 배정 카드를 세운다 — 한 번에 한 단계, 모델·reviewer 는 자기 벤더에서 한 칸, INV-1·비용 재산정은 `assign()` 그대로, **카드만 서고 시작은 승인**(어느 방식에서도 A3 로 묻는다).
+적용 경로(D-068): 위임이 미검증·실패로 끝나면 사용자가 '사다리 다음 단계로 다시 위임'(GUI)·`/ladder`(chat)를 눌러 같은 요청의 상향 배정 카드를 세운다 — 한 번에 한 단계, 모델은 자기 벤더에서 한 칸, INV-1·비용 재산정은 `assign()` 그대로, **카드만 서고 시작은 승인**(어느 방식에서도 A3 로 묻는다).
+
+④ reviewer 추가(D-072): 기존 reviewer 를 **그대로 두고** 그 벤더 계층에서 한 칸 위 reviewer 1개를 더한다 — primary + reviewer 2 = 세 슬롯. 추가 reviewer 도 INV-1 을 지키므로 기존 reviewer 와 같은 벤더다. 기존 reviewer 가 최상위면 "건너뜀 — 이유" 이고 사다리가 끝난다. 두 reviewer 는 같은 산출물을 서로의 판정 없이 차례로 보고(둘 다 읽기 전용·resume 없음), 판정은 AND 다(§5). 예상 비용은 세 슬롯 합이다.
 
 ### 2.5 근거 등급
 
@@ -345,6 +347,8 @@ cursor  -p "<prompt>" --model gpt-5.6-sol-xhigh --output-format stream-json
 산출물의 누락·반례를 먼저 요구한 뒤 마지막 줄에 `PASS`/`FAIL` 한 단어를 받는다. **읽지 못하면
 `unknown` 이고 pass 로 봐주지 않는다.** primary 가 실패했거나 비용 상한을 넘겼으면 reviewer 를
 시작하지 않는다 — 검증할 산출물이 없거나 쓸 돈이 없다.
+reviewer 가 둘이면(사다리 ④, D-072) 판정은 **AND** 다 — 하나라도 `FAIL` 이면 `fail`, 둘 다 돌아 둘 다 `PASS` 일 때만
+`pass`, 그 밖(하나라도 못 읽음·상한으로 두 번째를 시작 못 함)은 `unknown` 이고 이때는 PASS 한 쪽의 `review` 증거도 싣지 않는다.
 
 **"성공했습니다"라는 산문은 증거가 아니다.** `file:line`, 실행 명령과 exit code, 수정 경로, 인용 원문을 받는다.
 

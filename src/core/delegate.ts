@@ -10,7 +10,7 @@ import type { AssignmentPlan } from './assign.ts';
 import type { Budget } from './budget.ts';
 import { appendDecision } from './decision-log.ts';
 import { cancelledLine, firstLine, secondLine } from './decide.ts';
-import { runDuo, type Verdict } from './duo.ts';
+import { reviewText, runDuo, type Verdict } from './duo.ts';
 import { collect, outcomeOf, type Evidence, type EvidenceReport, type SettledOutcome } from './evidence.ts';
 import { changedFiles, runCommand, snapshotTests, testChanges } from './evidence-gather.ts';
 import { declaredTests } from '../data/verify.ts';
@@ -53,6 +53,7 @@ export interface Delegated {
   readonly cancelledAt?: 'primary' | 'reviewer';
   readonly report: EvidenceReport;
   readonly verdict: Verdict;
+  /** reviewer 검증 글. reviewer 가 둘이면(D-072) reviewer 마다 머리줄을 단 한 글이다 — 기록 모양은 그대로다. */
   readonly review?: string;
   readonly decisionId: string;
   readonly primarySession?: EngineSessionRef;
@@ -72,7 +73,7 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
   const testGlobs = declaredTests();
   const testsBefore = testGlobs.length > 0 ? snapshotTests(testGlobs, input.cwd) : undefined;
 
-  // **두 슬롯을 실제로 돌린다** (D-009) — primary 만 돌리면 단일 엔진 선택기다.
+  // **두 슬롯을 실제로 돌린다** (D-009) — primary 만 돌리면 단일 엔진 선택기다. 사다리 ④ 배정은 reviewer 가 둘이다 (D-072).
   let duo;
   try {
     duo = await runDuo(matrix, plan, input.execute, input.prompt, budget,
@@ -149,7 +150,7 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
     outcome,
     report,
     verdict: duo.verdict,
-    ...(duo.review ? { review: duo.review.text.slice(0, 2000) } : {}),
+    ...(duo.reviews.length > 0 ? { review: reviewText(duo.reviews) } : {}),
     decisionId: decision.id,
     ...(run.compactions ? { compactions: run.compactions } : {}),
     // 성공한 primary 만 이을 수 있다 — 실패한 세션을 다음에 이으면 실패를 물려받는다.
