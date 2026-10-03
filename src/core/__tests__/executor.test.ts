@@ -299,6 +299,30 @@ describe('압축 창 env 는 지휘자 실행에만 싣는다 (D-061)', () => {
   });
 });
 
+/** D-080: 지휘자(직접 답·요약이 쓰는 격리 실행기)만 내장 도구를 전부 끈다. 뜬 프로세스의 argv 로 본다. */
+describe('내장 도구 제거는 지휘자 실행에만 싣는다 (D-080)', () => {
+  const r08 = matrix.assignments.find((a) => a.id === 'R08');
+  if (!r08) throw new Error('R08 이 매트릭스에 없다.');
+  const claudePrimary = assign(matrix, catalog, r08).slots.primary;
+  /** 한 줄에 인자 하나 — 빈 인자는 빈 줄로 남는다. */
+  const argsOf = async (execute: ReturnType<typeof createExecutor>, slot: Parameters<ReturnType<typeof createExecutor>>[0]): Promise<string[]> => {
+    installFake('claude');
+    await execute(slot, 'X');
+    return argvOf('claude').split('\n').slice(0, -1);
+  };
+
+  it('지휘자는 `--tools ""` 를 받고, 같은 claude 라도 primary·reviewer 는 받지 않는다', async () => {
+    assert.equal(claudePrimary.engine, 'claude');
+    const conductor = await argsOf(createExecutor(catalog, fakeDir, 10_000, { isolate: true }), conductorSlot(catalog));
+    const at = conductor.indexOf('--tools');
+    assert.ok(at >= 0, '지휘자 argv 에 --tools 가 없다');
+    assert.equal(conductor[at + 1], '', '빈 문자열 하나가 그대로 넘어가야 도구가 0개다');
+    const delegated = createExecutor(catalog, fakeDir, 10_000);
+    assert.ok(!(await argsOf(delegated, claudePrimary)).includes('--tools'), 'primary 의 도구를 빼면 위임이 일을 못 한다 (D-032·D-069)');
+    assert.ok(!(await argsOf(delegated, plan.slots.reviewer)).includes('--tools'));
+  });
+});
+
 describe('취소 신호는 엔진 프로세스 그룹을 종료한다 (D-066, SPEC §3.7)', () => {
   /** 손자를 띄우고 그 pid 를 stderr 에 적은 채 안 끝나는 가짜 엔진. 카탈로그의 그 엔진 바이너리만 이것으로 바꾼다. */
   const slowCatalog = (name: string) => {
