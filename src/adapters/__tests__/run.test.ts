@@ -28,6 +28,24 @@ const alive = (pid: number): boolean => {
   }
 };
 
+/**
+ * codex 흉내 (D-067 추가 실측 2 (c)): 셸 명령을 **새 세션·프로세스 그룹**(setsid — node `detached`)으로 띄우고,
+ * SIGTERM 에는 명령을 정리하지 않고 끝난다. 손자 pid 를 stderr 첫 줄(또는 `pidFile`)로 알린다.
+ * 손자의 pgid 가 엔진과 같으면 이 가짜는 검사할 경우를 만들지 못한 것이다 — 던져서 드러낸다.
+ */
+const newGroupEngineScript = (command: string, pidFile?: string): string => `
+  const { spawn, execFileSync } = require('node:child_process');
+  const c = spawn('/bin/sh', ['-c', ${JSON.stringify(command)}], { detached: true, stdio: 'ignore' });
+  const pgid = (pid) => execFileSync('ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8' }).trim();
+  setTimeout(() => {
+    if (pgid(c.pid) === pgid(process.pid)) throw new Error('손자가 새 그룹을 만들지 않았다');
+    ${pidFile ? `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(c.pid));` : `process.stderr.write(c.pid + '\\n');`}
+  }, 200);
+  setInterval(() => {}, 1000);
+`;
+const newGroupEngine = (command: string) =>
+  runProcess({ bin: process.execPath, argv: ['-e', newGroupEngineScript(command)], cwd: process.cwd(), timeoutMs: 30_000, format: 'claude' });
+
 /** 실제 좀비 여부는 `kill -0` 로만 알 수 있다 — 종료를 기다리지 않고 단정하면 초록 거짓말이 된다. */
 const waitGone = async (pid: number, ms = 5_000): Promise<boolean> => {
   const deadline = Date.now() + ms;
@@ -128,9 +146,46 @@ describe('취소와 타임아웃', () => {
     assert.equal(await waitGone(grandchild, 1_500), true, `손자 ${grandchild} 가 호스트 종료 뒤에도 살아남았다`);
   });
 
+  it('취소하면 새 프로세스 그룹을 만든 손자도 죽는다 — 엔진이 정리 없이 끝나도 (Q24, D-078)', async () => {
+    const handle = newGroupEngine('sleep 120');
+    await new Promise((r) => setTimeout(r, 600));
+    handle.cancel();
+    const result = await handle.result;
+    assert.equal(result.outcome, 'cancelled');
+    const grandchild = grandchildPidOf(result.rawStderr);
+    assert.equal(await waitGone(grandchild), true, `새 그룹 손자 ${grandchild} 가 살아남았다 (고아)`);
+  });
+
+  it('엔진이 SIGTERM 에 바로 끝나도 SIGTERM 을 무시하는 새 그룹 손자는 유예 뒤 SIGKILL 로 죽는다 (Q24, D-078)', async () => {
+    const handle = newGroupEngine("trap '' TERM; exec sleep 120");
+    await new Promise((r) => setTimeout(r, 600));
+    handle.cancel();
+    const result = await handle.result;
+    const grandchild = grandchildPidOf(result.rawStderr);
+    assert.equal(await waitGone(grandchild, 8_000), true, `새 그룹 손자 ${grandchild} 가 살아남았다 (고아)`);
+  });
+
+  it('취소 직후 호스트가 나가도 SIGTERM 을 무시하는 새 그룹 손자가 남지 않는다 (Q24, D-078)', async () => {
+    const pidFile = path.join(mkdtempSync(path.join(os.tmpdir(), 'hs-exit-')), 'pid');
+    const host = `
+      import { runProcess } from ${JSON.stringify(new URL('../run.ts', import.meta.url).href)};
+      const h = runProcess({ bin: process.execPath, argv: ['-e', ${JSON.stringify(newGroupEngineScript("trap '' TERM; exec sleep 120", pidFile))}], cwd: process.cwd(), timeoutMs: 60000, format: 'claude' });
+      await new Promise((r) => setTimeout(r, 800));
+      h.cancel();
+      await new Promise((r) => setTimeout(r, 100));
+      process.exit(130);
+    `;
+    const ran = spawnSync(process.execPath, ['--input-type=module', '-e', host], { encoding: 'utf8', timeout: 15_000 });
+    assert.equal(ran.status, 130, ran.stderr);
+    const grandchild = Number(readFileSync(pidFile, 'utf8').trim());
+    assert.ok(Number.isInteger(grandchild) && grandchild > 0);
+    spawnedGrandchildren.push(grandchild);
+    assert.equal(await waitGone(grandchild, 1_500), true, `새 그룹 손자 ${grandchild} 가 호스트 종료 뒤에도 살아남았다`);
+  });
+
   it('이 파일이 띄운 손자가 하나도 남지 않는다', () => {
     // pgrep -f 로 세지 않는다 — 검사 셸 자신의 커맨드라인이 패턴에 걸려 자기를 센다(실측).
-    assert.ok(spawnedGrandchildren.length >= 4, '손자를 하나도 추적하지 못했다');
+    assert.ok(spawnedGrandchildren.length >= 7, '손자를 하나도 추적하지 못했다');
     assert.deepEqual(spawnedGrandchildren.filter(alive), []);
   });
 });

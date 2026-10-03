@@ -38,6 +38,13 @@ export interface EngineSpec {
   readonly streamFormat: 'claude' | 'codex';
   readonly variant?: { readonly default: 'thinking' | 'plain'; readonly fastOptIn: boolean };
   /**
+   * **모든 실행**(새 실행·resume·읽기·쓰기·격리)에 싣는 인자 (D-078). effort 인자 바로 뒤에 붙는다 —
+   * resume 경로에도 붙으므로 resume 이 받는 형식(codex `-c`)이어야 한다.
+   * codex 는 `-c agents.enabled=false` 로 하위 에이전트 도구를 없앤다 — 자식 토큰이 `turn.completed.usage` 에 안 잡히고
+   * 부모가 자식 모델을 바꿀 수 있다 (Q25 S1, D-067 추가 실측 2 (a)).
+   */
+  readonly alwaysArgv?: readonly string[];
+  /**
    * primary 슬롯에 파일 쓰기를 허용하는 인자 (D-025). 선언이 없는 엔진에 쓰기를 요청하면 **던진다** —
    * 읽기 전용으로 조용히 떨어뜨리면 "실행했다"가 거짓이 된다.
    */

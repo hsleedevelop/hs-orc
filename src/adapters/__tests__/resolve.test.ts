@@ -56,7 +56,8 @@ describe('쓰기 권한 (D-025)', () => {
 describe('argv 생성', () => {
   it('codex 는 exec 서브커맨드와 -c model_reasoning_effort 를 쓴다', () => {
     assert.deepEqual(build('sol', 'xhigh').argv, [
-      'exec', 'PROMPT', '-m', 'gpt-6.1-sol', '-c', 'model_reasoning_effort="xhigh"', '-c', 'sandbox_mode="read-only"',
+      'exec', 'PROMPT', '-m', 'gpt-6.1-sol', '-c', 'model_reasoning_effort="xhigh"', '-c', 'agents.enabled=false',
+      '-c', 'sandbox_mode="read-only"',
     ]);
   });
 
@@ -134,6 +135,31 @@ describe('Cursor -fast (D-023)', () => {
 
   it('기본값은 fast 미사용이다 (SPEC §3.3 추론 품질 우선)', () => {
     assert.equal(buildInvocation(catalog, 'sol', 'xhigh', 'P', 'cursor').modelId, 'gpt-5.6-sol-xhigh');
+  });
+});
+
+describe('codex 하위 에이전트 끄기 (Q25 S1, D-078)', () => {
+  const off = ['-c', 'agents.enabled=false'];
+  const hasOff = (argv: readonly string[]) => argv.join('\0').includes(off.join('\0'));
+
+  it('codex 의 모든 실행 — primary(읽기·쓰기)·reviewer(읽기)·스크래치·resume — 에 싣는다', () => {
+    for (const options of [{}, { write: true }, { nonGit: true }, { resume: 'T1' }] as const) {
+      assert.ok(hasOff(buildInvocation(catalog, 'sol', 'high', 'P', { engine: 'codex', ...options }).argv), JSON.stringify(options));
+    }
+  });
+
+  it('resume 인자와 충돌하지 않는다 — exec resume <id> <prompt> 순서가 그대로이고 effort·읽기 전용과 같이 붙는다', () => {
+    const { argv } = buildInvocation(catalog, 'luna', 'low', 'hi', { engine: 'codex', resume: 'T1' });
+    assert.deepEqual(argv, [
+      'exec', 'resume', 'T1', 'hi', '-m', 'gpt-5.6-luna', '-c', 'model_reasoning_effort="low"', '-c', 'agents.enabled=false',
+      '-c', 'sandbox_mode="read-only"',
+    ]);
+  });
+
+  it('claude·cursor 에는 싣지 않는다 — 선언이 없는 엔진이다', () => {
+    for (const argv of [build('haiku', 'low', 'claude').argv, build('sol', 'high', 'cursor').argv]) {
+      assert.ok(!argv.includes('agents.enabled=false'));
+    }
   });
 });
 
