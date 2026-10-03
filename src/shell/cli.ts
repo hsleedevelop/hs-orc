@@ -1,5 +1,5 @@
 /**
- * v1 셸의 최소판 (PLAN S1~S3). TUI 는 S5다.
+ * 한 번 실행 셸 (PLAN S1~S3). 대화는 `hs-orc chat`(D-056), 화면은 GUI 다. TUI 는 D-077 로 제거됐다.
  *
  *   hs-orc "<작업>" [--task R01] [--effort high] [--reviewer-effort high]
  *        [--gate irreversibleChange] [--no-classify-llm] [--run] [--write] [--timeout 600] [--raw]

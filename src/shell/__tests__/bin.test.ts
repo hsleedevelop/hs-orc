@@ -61,11 +61,13 @@ describe('hs-orc 진입점', () => {
     }
   });
 
-  it('tui 하위명령은 cli 로 새지 않는다', () => {
-    // TTY 없이도 라우팅만 확인할 수 있는 경로다 — tui/main.ts 만 이 문구를 낸다.
-    const r = hsOrc(['tui', '--screen', 'bogus']);
+  it('없어진 tui 하위명령은 대체 명령을 안내하고 cli 로 새지 않는다 (D-077)', () => {
+    // cli 로 새면 "tui …" 가 작업 문장이 되어 분류 폴백이 과금하고, --run 이면 엔진까지 돈다.
+    const r = hsOrc(['tui', '타입 오류 고쳐', '--run']);
     assert.equal(r.code, 1);
-    assert.match(r.err, /그런 화면이 없다: bogus/);
+    assert.match(r.err, /hs-orc tui 는 없어졌다 \(D-077\)/);
+    assert.match(r.err, /hs-orc chat/);
+    assert.doesNotMatch(r.err, /업무/);
   });
 
   it('chat --list 는 cli 로 새지 않고 세션 목록을 낸다', () => {
@@ -107,6 +109,6 @@ describe('hs-orc 진입점', () => {
     const r = hsOrc(['--', 'tui 화면 하나 만들어줘']);
     assert.equal(r.code, 0);
     assert.match(r.err, /업무\s+R03/);
-    assert.doesNotMatch(r.err, /그런 화면이 없다/);
+    assert.doesNotMatch(r.err, /없어졌다/);
   });
 });

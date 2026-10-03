@@ -1,11 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadMatrix } from '../../../data/matrix.ts';
-import { loadEngines } from '../../../data/engines.ts';
-import { route } from '../../../core/pipeline.ts';
-import { Budget } from '../../../core/budget.ts';
-import { Journal } from '../../../core/journal.ts';
-import { SCREENS, dashboardView, runView, titleInfo } from '../model.ts';
+import { loadMatrix } from '../../data/matrix.ts';
+import { loadEngines } from '../../data/engines.ts';
+import { route } from '../../core/pipeline.ts';
+import { Budget } from '../../core/budget.ts';
+import { Journal } from '../../core/journal.ts';
+import { dashboardView, runView, titleInfo } from '../view-model.ts';
 
 const matrix = loadMatrix();
 const catalog = loadEngines();
@@ -15,11 +15,6 @@ describe('화면 타이틀', () => {
     const t = titleInfo('Run');
     assert.match(t.text, /hs-orchestrator Run · .+ · v\d+\.\d+\.\d+/);
     assert.ok(t.env.length > 0);
-  });
-
-  it('디버그 화면은 프로덕션에서도 목록에 있다', () => {
-    assert.ok(SCREENS.includes('Debug'));
-    assert.equal(SCREENS.length, 6);
   });
 });
 

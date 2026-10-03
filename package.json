@@ -36,7 +36,6 @@
     "secret-scan": "gitleaks protect --staged --redact --no-banner",
     "prepare": "git config core.hooksPath githooks",
     "matrix:check": "node scripts/gen-matrix.mjs --check",
-    "tui": "HS_ORC_JEV=${HS_ORC_JEV:-off} node bin/hs-orc.mjs tui",
     "build:gui": "node bin/hs-orc.mjs build-gui",
     "gui": "HS_ORC_JEV=${HS_ORC_JEV:-off} node bin/hs-orc.mjs gui"
   },
@@ -52,7 +51,6 @@
     "typescript-eslint": "8.70.0"
   },
   "dependencies": {
-    "ink": "7.1.1",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   }

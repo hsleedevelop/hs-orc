@@ -3,7 +3,7 @@
  * hs-orc 진입점 — 어느 프로젝트 디렉터리에서든 부른다.
  *
  *   hs-orc "<작업>" [옵션…]        → src/shell/cli.ts
- *   hs-orc tui ["<작업>"] [옵션…]  → src/shell/tui/main.ts
+ *   hs-orc chat [옵션…]            → src/shell/chat-main.ts
  *   hs-orc gui                      → 렌더러 번들 → electron src/shell/gui/main.ts
  *
  * **빌드 산출물(dist/)을 만들지 않는다** (D-019). `.ts` 를 Node 타입 스트리핑으로 그대로 실행한다.
@@ -28,7 +28,6 @@ const version = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')
 const USAGE = `hs-orc ${version} — 작업 1건을 분류·배정하고 두 슬롯(primary·reviewer)으로 실행한다.
 
   hs-orc "<작업>" [옵션…]        배정·비용 제시. 실제 실행은 --run 이다 (승인 게이트).
-  hs-orc tui ["<작업>"] [옵션…]  TUI
   hs-orc chat [--scratch|--resume <id>|--list]  대화 세션 (줄 입력)
   hs-orc gui                      GUI (Electron)
   hs-orc -- "<작업>"              첫 인자를 하위명령으로 해석하지 않는다
@@ -59,7 +58,7 @@ async function runShell(relative, args) {
     process.stderr.write(`설치가 깨졌다 — 그런 파일이 없다: ${target}\n`);
     process.exit(1);
   }
-  // 하위 프로세스를 하나 더 두지 않는다. 래퍼가 끼면 TUI 의 raw mode 와
+  // 하위 프로세스를 하나 더 두지 않는다. 래퍼가 끼면 chat 의 Ctrl-C(D-066) 와
   // 엔진 프로세스 그룹 종료(SPEC §3)가 한 겹 멀어진다. argv 만 실제 호출 모양으로 바꾼다.
   process.argv = [process.argv[0], target, ...args];
   await import(pathToFileURL(target).href);
@@ -80,7 +79,7 @@ function localBin(name) {
 
 /**
  * 렌더러만 묶는다 — Chromium 은 TS 도 bare specifier 도 못 읽는다 (D-019 의 S7 개정).
- * cli·tui 에는 번들이 없다. 이 한 곳이 유일한 예외다.
+ * cli·chat 에는 번들이 없다. 이 한 곳이 유일한 예외다.
  */
 function bundleRenderer() {
   const r = spawnSync(
@@ -116,7 +115,15 @@ if (first === '--help' || first === '-h' || first === 'help') {
 } else if (first === '--version' || first === '-v') {
   process.stdout.write(`${version}\n`);
 } else if (first === 'tui') {
-  await runShell('src/shell/tui/main.ts', argv.slice(1));
+  // TUI 는 제거됐다 (D-077). 이 분기가 없으면 `tui …` 가 작업 문장으로 cli 에 흘러 분류 폴백(D-026)이 과금하고,
+  // `--run` 이 붙어 있으면 엔진까지 돈다. "tui" 로 시작하는 작업은 `hs-orc -- "tui …"` 로 보낸다.
+  process.stderr.write(
+    `hs-orc tui 는 없어졌다 (D-077). 대신:\n` +
+      `  hs-orc "<작업>" [--write] [--run]   배정·비용을 보고 실행\n` +
+      `  hs-orc chat                          대화 세션 (승인 카드·취소·사다리)\n` +
+      `  hs-orc gui                           Agents·Reviews·Dashboard 화면\n`,
+  );
+  process.exit(1);
 } else if (first === 'chat') {
   await runShell('src/shell/chat-main.ts', argv.slice(1));
 } else if (first === 'gui') {

@@ -44,10 +44,11 @@ hs-orc "<작업>"                      # 배정·비용 제시까지. 여기서 
 hs-orc "<작업>" --run                # 두 슬롯 실행 (읽기 전용)
 hs-orc "<작업>" --write --run        # primary 가 파일을 고칠 수 있다
 hs-orc chat [--scratch|--resume <id>] [--approval manual|auto-ask|auto]   # 대화 세션 (줄 입력, /mode 로 승인 방식)
-hs-orc tui "<작업>"                  # TUI
 hs-orc gui                           # GUI (Electron)
 hs-orc --help
 ```
+
+v1 의 TUI(`hs-orc tui`)는 제거했다 (D-077). 치면 위 대체 명령을 안내하고 끝난다 — "tui" 로 시작하는 작업은 `hs-orc -- "tui …"`.
 
 **승인 게이트가 둘이다.** `--run`은 비용 승인, `--write`는 쓰기 승인 — 다른 결정이라 끼워 팔지 않는다. 둘 다 실행 **전에** 화면에 찍힌다.
 
@@ -76,7 +77,7 @@ hs-orc "<작업>" --mode graph --graph examples/graph-nodes.json --run
 
 - 키는 환경변수 `TYPESAFE_API_KEY` 로만 준다. 로그·기록·오류 문구에 남기지 않는다.
 - Jev 는 **업무 행(R01~R11)만 고른다.** 모델·effort·reviewer 는 매트릭스가 정한다. 확신도가 `data/limits.json` 의 `jevConfidenceMin` 미만이거나 "해당 없음" 이면 행을 확정하지 않고 후보를 보여 준다.
-- 끄려면 `--no-jev` 또는 `HS_ORC_JEV=off` (GUI·TUI·`chat` 포함). 키가 없거나 호출이 실패하면(401·422·429·529·네트워크) 옛 방식(규칙 → Haiku 폴백 / 세션은 지휘자 제안)으로 돌고 화면에 `Jev 미사용 (사유)` 를 찍는다.
+- 끄려면 `--no-jev` 또는 `HS_ORC_JEV=off` (GUI·`chat` 포함). 키가 없거나 호출이 실패하면(401·422·429·529·네트워크) 옛 방식(규칙 → Haiku 폴백 / 세션은 지휘자 제안)으로 돌고 화면에 `Jev 미사용 (사유)` 를 찍는다.
 - 호출마다 토큰과 시간을 보여 준다. **가격이 공개돼 있지 않아 금액은 산정하지 않는다.**
 
 ## 증거 없이는 완료가 아니다
@@ -141,7 +142,7 @@ npm run gate        # matrix:check → type-check → lint → test (201 tests)
 npm run gen:matrix  # data/matrix-source.html → data/matrix.json 재생성
 ```
 
-**개발·테스트·화면 캡처 때는 Jev 를 끈다(`HS_ORC_JEV=off`)** — 키가 있는 셸에서 실제 `api.typesafe.ai` 호출이 새지 않게, `npm test`·`npm run gui`·`npm run tui` 가 기본으로 끄고 `jev-leak.test.ts` 가 그 격리를 재다. 사용자용 `hs-orc`·`hs-orc gui`·`chat` 은 그대로 켜짐이고, 개발 중에 켜려면 `HS_ORC_JEV=on npm run gui`. 스크린샷을 직접 띄울 때도 `HS_ORC_JEV=off` 를 앞에 붙인다.
+**개발·테스트·화면 캡처 때는 Jev 를 끈다(`HS_ORC_JEV=off`)** — 키가 있는 셸에서 실제 `api.typesafe.ai` 호출이 새지 않게, `npm test`·`npm run gui` 가 기본으로 끄고 `jev-leak.test.ts` 가 그 격리를 재다. 사용자용 `hs-orc`·`hs-orc gui`·`chat` 은 그대로 켜짐이고, 개발 중에 켜려면 `HS_ORC_JEV=on npm run gui`. 스크린샷을 직접 띄울 때도 `HS_ORC_JEV=off` 를 앞에 붙인다.
 
 `data/matrix.json`은 **생성물이다.** 진실은 `data/matrix-source.html`이고, 수기 편집하면 `matrix:check`가 게이트 첫 단계에서 막는다. 행을 늘리려면 원본 HTML을 고치고 재생성한다.
 

@@ -14,7 +14,7 @@ import { Journal } from '../../core/journal.ts';
 import { delegate } from '../../core/delegate.ts';
 import type { EvidenceReport, SettledOutcome } from '../../core/evidence.ts';
 import { reportError } from '../../core/report.ts';
-import { dashboardView, runView, titleInfo, type RunView } from '../tui/model.ts';
+import { dashboardView, runView, titleInfo, type RunView } from '../view-model.ts';
 import type { ConversationSession, LadderOffer } from '../../core/session.ts';
 import {
   listScratchSessions,

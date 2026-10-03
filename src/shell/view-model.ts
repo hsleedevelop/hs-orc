@@ -1,16 +1,17 @@
 /**
  * 화면 뷰모델 — **순수 함수다** (D-019).
- * Ink 렌더 층은 이 결과를 그리기만 한다. 그래서 화면 테스트가 터미널을 띄우지 않는다.
+ * GUI 가 이 결과를 그리기만 한다. 그래서 화면 테스트가 창을 띄우지 않는다.
+ * TUI 가 쓰던 자리에서 옮겼다 — TUI 는 D-077 로 제거됐다.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import type { AssignmentPlan } from '../../core/assign.ts';
-import type { Journal } from '../../core/journal.ts';
-import type { Budget } from '../../core/budget.ts';
-import type { RouteResult } from '../../core/pipeline.ts';
+import type { AssignmentPlan } from '../core/assign.ts';
+import type { Journal } from '../core/journal.ts';
+import type { Budget } from '../core/budget.ts';
+import type { RouteResult } from '../core/pipeline.ts';
 
-export const SCREENS = ['Run', 'Tasks', 'Dashboard', 'Sessions', 'Reviews', 'Debug'] as const;
-export type Screen = (typeof SCREENS)[number];
+/** 타이틀을 붙이는 화면 — GUI 가 부르는 것만. */
+export type Screen = 'Run' | 'Dashboard' | 'Debug';
 
 /** 근거 등급 배지 (SPEC §2.5, D-014). **섞어 표시하지 않는다.** */
 export type Grade = 'INDEPENDENT' | 'VENDOR' | 'POLICY';
@@ -32,7 +33,7 @@ export function titleInfo(screen: Screen, now = process.env): TitleInfo {
   let version = '0.0.0';
   try {
     const pkg = JSON.parse(
-      readFileSync(path.resolve(import.meta.dirname, '..', '..', '..', 'package.json'), 'utf8'),
+      readFileSync(path.resolve(import.meta.dirname, '..', '..', 'package.json'), 'utf8'),
     ) as { version?: string };
     version = pkg.version ?? version;
   } catch {
