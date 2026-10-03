@@ -768,6 +768,21 @@ describe('대화 세션 — Jev 분류 (D-065)', () => {
     assert.equal(session.state, 'waiting_input');
   });
 
+  it('행이 확정되지 않은 턴(NONE·확신도 미만)은 행 제안 대신 직접 고르라는 프롬프트로 묻는다 — Jev 를 못 쓰면 옛 프롬프트다 (D-079)', async () => {
+    const cases: [JevChoiceAnswer | Error, boolean][] = [
+      [answer('NONE', 0.99, { NONE: 0.99, R01: 0.01 }), true],
+      [answer('R06', 0.36, { R06: 0.4, R05: 0.3, R07: 0.2, NONE: 0.1 }), true],
+      [new JevUnavailableError('rate-limit', '429'), false],
+    ];
+    for (const [result, unrouted] of cases) {
+      const c = conductSpy();
+      // 규칙이 잡지 않는 문장이다 — Jev 를 못 쓴 경우에도 지휘자까지 간다.
+      await makeJev(c.exec, jevSpy(result).classifier).send('넌 누구니');
+      assert.equal(/업무 행에 배정되지 않았다/.test(c.prompts[0] ?? ''), unrouted);
+      assert.equal(/맞는 행을 제안한다/.test(c.prompts[0] ?? ''), !unrouted);
+    }
+  });
+
   it('확신도 미만이면 카드 없이 직접 답하고 후보를 보인다', async () => {
     const c = conductSpy('어떤 작업인지 더 알려 주세요.\nSUGGEST: R05');
     const session = makeJev(c.exec, jevSpy(answer('R06', 0.36, { R06: 0.4, R05: 0.3, R07: 0.2, NONE: 0.1 })).classifier);

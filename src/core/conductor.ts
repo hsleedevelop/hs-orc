@@ -28,14 +28,21 @@ export function conductorSlot(catalog: Engines): ResolvedSlot {
   );
 }
 
-export function buildDirectPrompt(matrix: Matrix, context: string, message: string): string {
+/**
+ * `unrouted` — Jev 가 답했는데 행을 확정하지 않은 턴(NONE·확신도 미만, D-065). 그 턴의 SUGGEST 는 세션이 어차피 버리므로
+ * 행을 제안하라고 시키지 않고, 위임은 사람이 행을 골라야 한다고 안내하게 한다 (D-079). 마지막 줄 형식은 그대로 둔다.
+ */
+export function buildDirectPrompt(matrix: Matrix, context: string, message: string, options: { readonly unrouted?: boolean } = {}): string {
   const rows = matrix.assignments.map((a) => `${a.id}\t${a.task}`).join('\n');
   return [
     '너는 hs-orc 의 지휘자다. 사용자와 대화로 짧게 답한다.',
     '규칙:',
     '- 파일을 고치거나 명령을 실행하지 않는다.',
-    '- 개발 작업을 대신 수행하거나 그 결과를 지어내지 않는다. 작업 요청이면 무엇을 하게 될지 한두 문장으로 말하고, 아래 업무 목록에서 맞는 행을 제안한다.',
-    '- 마지막 줄은 반드시 `SUGGEST: <행 id>` 또는 `SUGGEST: NONE` 이다.',
+    options.unrouted
+      ? '- 개발 작업을 대신 수행하거나 그 결과를 지어내지 않는다. 작업 요청이면 이 요청은 업무 행에 배정되지 않았다고 말하고, 위임하려면 사용자가 아래 업무 목록에서 행을 직접 골라야 한다고 안내한다 (GUI 의 "위임하기" · CLI 의 `/task Rxx`). 행을 대신 고르거나 추천하지 않는다.'
+      : '- 개발 작업을 대신 수행하거나 그 결과를 지어내지 않는다. 작업 요청이면 무엇을 하게 될지 한두 문장으로 말하고, 아래 업무 목록에서 맞는 행을 제안한다.',
+    '- 너는 이 답 하나만 쓴다. 분석·작업을 진행 중이라거나 곧 진행한다고 말하지 않는다 — 작업은 사람이 위임을 승인해야 시작된다.',
+    options.unrouted ? '- 마지막 줄은 반드시 `SUGGEST: NONE` 이다.' : '- 마지막 줄은 반드시 `SUGGEST: <행 id>` 또는 `SUGGEST: NONE` 이다.',
     '',
     '[업무 목록]',
     rows,
@@ -73,8 +80,9 @@ export async function directAnswer(
   matrix: Matrix,
   context: string,
   message: string,
+  options: { readonly unrouted?: boolean } = {},
 ): Promise<DirectAnswer> {
-  const run = await conduct(slot, buildDirectPrompt(matrix, context, message));
+  const run = await conduct(slot, buildDirectPrompt(matrix, context, message, options));
   return { run, ...parseSuggest(matrix, run.text) };
 }
 

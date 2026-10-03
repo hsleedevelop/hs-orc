@@ -350,7 +350,7 @@ export class ConversationSession {
       }
       const slot = conductorSlot(catalog);
       const context = buildContext(this.records(), this.contextLimits, { before: this.turn });
-      const answer = await directAnswer(conduct, slot, matrix, context.text, text);
+      const answer = await directAnswer(conduct, slot, matrix, context.text, text, { unrouted: ignoreSuggest });
       const charge = budget.charge(`${slot.label}·${slot.effort}`, answer.run.actualUsd, estimateUsd(matrix, slot), answer.run.meteredUsd, slot.plan);
       budget.countTokens(answer.run.usage);
       if (!answer.run.ok) {

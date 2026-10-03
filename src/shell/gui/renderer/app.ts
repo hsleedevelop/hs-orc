@@ -299,6 +299,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
   // null = 카드가 정한 대로(쓰기 위임으로 보낸 배정은 켜진 채 선다). 사람이 스위치를 만지면 그 값이 이긴다.
   const [write, setWrite] = useState<boolean | null>(null);
   const [sendWrite, setSendWrite] = useState(false);
+  // 제안 없는 직접 답 아래의 행 선택 (D-079). 빈 값 = 아직 안 골랐다.
+  const [pick, setPick] = useState('');
   const [busy, setBusy] = useState(false);
   // 승인한 위임이 도는 동안의 화면 쪽 표시 (D-066). 요청이 안 끝났으니 `view.cancellable` 은 아직 갱신 전이다.
   const [delegation, setDelegation] = useState<'' | 'running' | 'cancelling'>('');
@@ -404,6 +406,17 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
           ...cutLine(r.cut).map((l, j) => h('div', { key: `c${j}`, className: 'hint' }, l)),
           suggest && r === last && view.state === 'waiting_input'
             ? h('button', { className: 'btn accent', disabled: busy, onClick: () => act(orc.convPlanAs(suggest)) }, `${suggest} 로 위임`)
+            : null,
+          // 제안이 없으면(Jev NONE·확신도 미만이면 지휘자 제안을 버린다, D-065) 사람이 행을 고른다 — CLI `/task Rxx` 와 같은 경로다 (D-079).
+          // 카드만 선다 — 쓰기 스위치·승인은 그 카드에서 한다.
+          !suggest && r === last && view.state === 'waiting_input'
+            ? h('div', { className: 'row', style: { marginTop: 8, whiteSpace: 'normal' } },
+                h('select', {
+                  value: pick, disabled: busy, 'aria-label': '위임할 업무 행',
+                  onChange: (e: { target: { value: string } }) => setPick(e.target.value),
+                }, h('option', { value: '' }, '업무 행 선택…'), ...props.rows.map((row) => h('option', { key: row.id, value: row.id }, `${row.id} · ${row.task}`))),
+                h('button', { className: 'btn', disabled: busy || !pick, onClick: () => { setPick(''); act(orc.convPlanAs(pick)); } }, '위임하기'),
+                h('span', { className: 'hint' }, '행을 직접 골라 위임 — 배정 카드가 서고 승인은 그대로다'))
             : null);
       }
       case 'plan':

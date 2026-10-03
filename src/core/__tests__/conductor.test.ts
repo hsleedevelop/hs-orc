@@ -38,6 +38,17 @@ describe('지휘자 — 직접 답 (SPEC §6.4.2)', () => {
     assert.ok(prompt.endsWith('넌 누구니'));
   });
 
+  it('행이 확정되지 않은 턴(D-079)은 행 제안 대신 직접 고르라고 안내하게 한다 — 진행 중이라 말하지 않는 규칙은 두 경우 다 싣는다', () => {
+    const routed = buildDirectPrompt(matrix, '', '로그인 버그 고쳐줘');
+    const unrouted = buildDirectPrompt(matrix, '', '로그인 버그 고쳐줘', { unrouted: true });
+    assert.match(routed, /맞는 행을 제안한다/);
+    assert.doesNotMatch(unrouted, /맞는 행을 제안한다/);
+    assert.match(unrouted, /업무 행에 배정되지 않았다/);
+    assert.match(unrouted, /위임하기.*\/task Rxx/);
+    assert.match(unrouted, /`SUGGEST: NONE` 이다/);
+    for (const p of [routed, unrouted]) assert.match(p, /진행 중이라거나 곧 진행한다고 말하지 않는다/);
+  });
+
   it('맥락이 비면 [최근 대화] 절을 만들지 않는다', () => {
     assert.doesNotMatch(buildDirectPrompt(matrix, '', 'hi'), /최근 대화/);
   });
