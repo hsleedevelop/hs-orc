@@ -7,7 +7,7 @@ import { APPROVAL_MODES, isApprovalMode, type ApprovalMode } from '../data/limit
 import type { Budget } from '../core/budget.ts';
 import type { ConversationSession } from '../core/session.ts';
 import { listScratchSessions, listSessions, readSessionLog, type SessionSummary, type TranscriptRecord } from '../core/transcript.ts';
-import { compactLines, cutLine, ladderLines } from './transcript-lines.ts';
+import { compactLines, cutLine, ladderLines, retryLines } from './transcript-lines.ts';
 
 export function renderRecord(r: TranscriptRecord): string[] {
   switch (r.kind) {
@@ -34,6 +34,7 @@ export function renderRecord(r: TranscriptRecord): string[] {
         // 다음 행동 안내 (D-074) — manual 이면 H4 도 여기 실린다(묻는 이유가 비어서).
         ...(r.guide ?? []).map((g) => `안내   ${g}`),
         ...ladderLines(r.ladder).map((l, i) => (i === 0 ? l : `       ${l}`)),
+        ...retryLines(r.retry),
         // 묻는 카드는 걸린 조건을 이름으로 보인다 (D-064). manual 은 늘 묻고, 이유가 없으면 자동 승인이 뒤따른다.
         ...(r.mode && r.mode !== 'manual' && r.asked && r.asked.length > 0 ? [`묻는 이유  ${r.asked.map((a) => `${a.code} ${a.text}`).join(' · ')}`] : []),
       ];

@@ -12,7 +12,7 @@
  */
 import { createElement as h, useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { compactLines, cutLine, ladderLines } from '../../transcript-lines.ts';
+import { compactLines, cutLine, ladderLines, retryLines } from '../../transcript-lines.ts';
 
 const SCREENS = ['Session', 'Dashboard', 'Agents', 'Reviews', 'Debug'] as const;
 type Screen = (typeof SCREENS)[number];
@@ -39,7 +39,7 @@ interface Compaction { trigger: string; preTokens?: number; postTokens?: number 
 type Rec =
   | { kind: 'user'; turn: number; text: string }
   | { kind: 'direct'; turn: number; text: string; suggest: string | null; cost: string; notes: string[]; guide?: string[]; cut?: Cut }
-  | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; reviewer2?: string; estimateUsd: number; notes: string[]; guide?: string[]; mode?: ApprovalMode; asked?: { code: string; text: string }[]; write?: boolean; ladder?: { stage: string; label: string; from: string; changes: string[] } }
+  | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; reviewer2?: string; estimateUsd: number; notes: string[]; guide?: string[]; mode?: ApprovalMode; asked?: { code: string; text: string }[]; write?: boolean; ladder?: { stage: string; label: string; from: string; changes: string[] }; retry?: true }
   | { kind: 'approval'; turn: number; approved: boolean; write: boolean; by?: 'user' | 'auto'; mode?: ApprovalMode }
   | { kind: 'mode'; turn: number; mode: ApprovalMode }
   | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string; cut?: Cut; compacted?: Compaction[] }
@@ -353,6 +353,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       ...(r.guide ?? []).map((g, j) => h('div', { key: `g${j}`, className: 'hint warn' }, g)),
       // 사다리 상향 카드는 무엇이 올라갔는지 보인다 (D-068) — 같은 요청을 올려 다시 위임하는 카드임을 첫 줄이 말한다.
       ...ladderLines(r.ladder).map((l, j) => h('div', { key: `l${j}`, className: j === 0 ? 'hint warn' : 'hint' }, l)),
+      // 예외로 끝난 같은 배정을 다시 세운 카드다 (D-081) — 자동으로 다시 돌리지 않고 이 카드에서 다시 승인한다.
+      ...retryLines(r.retry).map((l, j) => h('div', { key: `r${j}`, className: 'hint warn' }, l)),
       // 묻는 카드는 걸린 조건을 이름으로 보인다 (D-064) — 이유 없이 선 카드는 무엇을 봐야 할지 모른다.
       active && r.mode && r.mode !== 'manual' && r.asked && r.asked.length > 0
         ? h('div', { className: 'hint warn' }, `묻는 이유: ${r.asked.map((a) => a.text).join(' · ')}`)

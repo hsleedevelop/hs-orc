@@ -80,6 +80,8 @@ export type TranscriptEntry =
       readonly write?: boolean;
       /** 사용자가 눌러 상향한 배정이다 (D-068). 사다리 상태는 이 필드와 뒤따르는 결과에서 계산한다 — 옛 기록은 없다. */
       readonly ladder?: LadderRecord;
+      /** 승인한 같은 배정이 예외(throw)로 끝나 같은 계획으로 다시 세운 카드다 (D-081). 옛 기록에는 없다. */
+      readonly retry?: true;
     }
   | {
       readonly kind: 'approval';

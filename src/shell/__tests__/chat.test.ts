@@ -64,14 +64,20 @@ describe('chat — 기록 렌더', () => {
   });
 });
 
-const drive = async (lines: readonly string[], suggest?: string, mode: ApprovalMode = 'manual', kind: 'scratch' | 'project' = 'scratch') => {
+const drive = async (lines: readonly string[], suggest?: string, mode: ApprovalMode = 'manual', kind: 'scratch' | 'project' = 'scratch', boomOnce = false) => {
   const tmp = mkdtempSync(path.join(os.tmpdir(), 'hs-chat-'));
   process.env['HS_ORC_DECISION_LOG'] = path.join(tmp, 'log.jsonl');
   process.env['HS_ORC_RUN_STORE'] = path.join(tmp, 'runs');
   process.env['HS_ORC_SCRATCH'] = path.join(tmp, 'scratch');
   const calls: string[] = [];
+  let boom = boomOnce;
   const exec: SlotExecutor = (slot, prompt) => {
     calls.push(slot.label);
+    // 첫 위임 primary(R01 Luna) 한 번만 던진다 (D-081).
+    if (boom && slot.role === 'primary' && slot.label === 'Luna') {
+      boom = false;
+      return Promise.reject(new Error('spawn 실패'));
+    }
     // 직접 답 프롬프트에만 [이번 메시지] 가 든다 — suggest 가 주어지면 그 행을 제안한다.
     if (suggest && prompt.includes('[이번 메시지]')) return Promise.resolve({ ok: true, text: `제안한다.\nSUGGEST: ${suggest}`, rawStdout: '', rawStderr: '', durationMs: 1 });
     return Promise.resolve({ ok: true, text: slot.label === 'Haiku' ? 'PASS' : `ran:${prompt}`, rawStdout: '', rawStderr: '', durationMs: 1 });
@@ -288,6 +294,17 @@ describe('chat — Ctrl-C', () => {
   it('입력 대기 중이면 바로 나간다', () => {
     const guard = interruptGuard({ state: 'waiting_input', records: () => [], cancel: () => false }, () => undefined);
     assert.equal(guard(), 'exit');
+  });
+});
+
+describe('chat — 예외 재시도 카드 (D-081)', () => {
+  it('위임이 던지면 같은 배정 카드가 다시 서고 재시도 줄을 찍는다 — y 로 다시 승인하면 돈다', async () => {
+    const { out, calls, session } = await drive(['이 타입 에러 고쳐줘', 'y', 'y'], undefined, 'manual', 'scratch', true);
+    assert.match(out, /오류 {3}위임이 끝나지 못했다: spawn 실패/);
+    assert.match(out, /재시도 — 승인한 같은 배정이 예외로 끝나 같은 계획으로 다시 세운 카드다/);
+    assert.equal(calls.filter((c) => c === 'Luna').length, 2);
+    const kinds = session.records().filter((r) => r.kind !== 'spend' && r.kind !== 'mode').map((r) => r.kind);
+    assert.deepEqual(kinds, ['user', 'plan', 'approval', 'error', 'plan', 'approval', 'result', 'summary']);
   });
 });
 

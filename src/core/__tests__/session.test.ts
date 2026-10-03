@@ -277,9 +277,8 @@ describe('대화 세션 — 승인·결과 처리 (SPEC §6.4.4)', () => {
     const { session } = make(conductSpy().exec, undefined, boom);
     await session.send('이 타입 에러 고쳐줘');
     const out = await session.approve();
-    const last = out.at(-1);
-    assert.ok(last?.kind === 'error' && /위임이 끝나지 못했다: 엔진 폭발/.test(last.text));
-    assert.equal(session.state, 'waiting_input');
+    const error = out.at(-2);
+    assert.ok(error?.kind === 'error' && /위임이 끝나지 못했다: 엔진 폭발/.test(error.text));
     const rows = readDecisions(log);
     assert.deepEqual(rows.map((r) => [r.status, r.outcome]), [['decided', 'pending'], ['ran', 'wrong']]);
     assert.equal(rows[0]?.id, rows[1]?.id);
@@ -330,6 +329,122 @@ describe('대화 세션 — 승인·결과 처리 (SPEC §6.4.4)', () => {
     await session.send('이 타입 에러 고쳐줘');
     await assert.rejects(session.approve({ write: true }), SessionStateError);
     assert.equal(session.state, 'blocked');
+  });
+});
+
+describe('대화 세션 — 위임이 던지면 같은 계획으로 카드를 다시 세운다 (D-081)', () => {
+  /** primary 를 `fails` 번 던지고 그 뒤로는 돈다. reviewer 는 PASS. */
+  const flaky = (fails: number) => {
+    const calls: { role: string; prompt: string }[] = [];
+    let left = fails;
+    const exec: SlotExecutor = (slot, prompt) => {
+      calls.push({ role: slot.role, prompt });
+      if (slot.role === 'reviewer') return Promise.resolve(reply('PASS'));
+      if (left > 0) {
+        left -= 1;
+        return Promise.reject(new Error('spawn 실패'));
+      }
+      return Promise.resolve(reply('ran'));
+    };
+    return { exec, calls, primaries: () => calls.filter((c) => c.role === 'primary').length };
+  };
+  const plans = (s: ConversationSession) => s.records().filter((r) => r.kind === 'plan');
+
+  it('오류를 남기고 같은 배정 카드를 blocked 로 세운다 — 시작하지 않고, 앞 기록은 고치지 않는다', async () => {
+    isolate();
+    const f = flaky(1);
+    const { session } = make(conductSpy().exec, undefined, f.exec);
+    await session.send('이 타입 에러 고쳐줘');
+    const before = session.records();
+    const out = await session.approve();
+    assert.deepEqual(out.map((r) => r.kind), ['approval', 'error', 'plan']);
+    assert.equal(session.state, 'blocked');
+    assert.equal(f.primaries(), 1, '다시 돌리지 않는다 — 카드만 선다');
+    assert.deepEqual(session.records().slice(0, before.length), before, 'append-only');
+    const [first, again] = plans(session);
+    assert.ok(first?.kind === 'plan' && again?.kind === 'plan');
+    assert.equal(again.retry, true);
+    assert.deepEqual({ ...again, at: first.at, retry: undefined }, { ...first, retry: undefined }, '행·슬롯·reason·비용이 같다');
+  });
+
+  it('다시 승인하면 같은 계획으로 실제로 돌고 결과·요약이 붙는다 — 결정은 새 id 다', async () => {
+    const log = isolate();
+    const f = flaky(1);
+    const { session } = make(conductSpy().exec, undefined, f.exec);
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    const out = await session.approve();
+    assert.deepEqual(out.map((r) => r.kind), ['approval', 'result', 'summary']);
+    assert.equal(session.state, 'waiting_input');
+    assert.equal(f.primaries(), 2);
+    const rows = readDecisions(log);
+    assert.deepEqual(rows.map((r) => r.status), ['decided', 'ran', 'decided', 'ran']);
+    assert.notEqual(rows[0]?.id, rows[2]?.id);
+    assert.equal(rows[2]?.task, '이 타입 에러 고쳐줘');
+  });
+
+  it('쓰기로 승인한 위임이면 다시 세운 카드도 쓰기가 켜진 채다', async () => {
+    isolate();
+    const { session } = make(conductSpy().exec, undefined, flaky(1).exec);
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve({ write: true });
+    const again = plans(session).at(-1);
+    assert.ok(again?.kind === 'plan' && again.write === true && again.retry === true);
+  });
+
+  it('다시 세운 카드도 던지면 카드를 또 세우지 않는다 — 같은 실패를 같은 방식으로 2회 연속 재시도하지 않는다', async () => {
+    isolate();
+    const f = flaky(2);
+    const { session } = make(conductSpy().exec, undefined, f.exec);
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    const out = await session.approve();
+    assert.deepEqual(out.map((r) => r.kind), ['approval', 'error', 'error']);
+    assert.match(out[2]?.kind === 'error' ? out[2].text : '', /카드를 또 세우지 않는다/);
+    assert.equal(session.state, 'waiting_input');
+    assert.equal(plans(session).length, 2);
+  });
+
+  it('auto 방식에서도 다시 세운 카드는 자동 승인하지 않고 A3 로 묻는다', async () => {
+    isolate();
+    const f = flaky(1);
+    const session = new ConversationSession({
+      approvalMode: 'auto', matrix, catalog, kind: 'project', dir: mkdtempSync(path.join(os.tmpdir(), 'hs-session-')), id: '1004-1200-rty',
+      budget: new Budget(20, 2_000_000), journal: new Journal(), conduct: conductSpy().exec, executorFor: () => f.exec,
+    });
+    const out = await session.send('이 타입 에러 고쳐줘'); // 규칙 R01 — auto 는 묻지 않고 시작한다
+    assert.deepEqual(out.map((r) => r.kind), ['user', 'plan', 'approval', 'error', 'plan']);
+    assert.equal(session.state, 'blocked');
+    assert.equal(f.primaries(), 1);
+    const again = out.at(-1);
+    assert.ok(again?.kind === 'plan' && again.retry === true);
+    assert.deepEqual(again.asked?.map((a) => a.code), ['A3']);
+  });
+
+  it('위임이 돌려준 뒤의 결과(fail 등)는 카드를 다시 세우지 않는다 — 사다리 영역이다 (D-068)', async () => {
+    isolate();
+    const failing: SlotExecutor = (slot) => Promise.resolve(reply(slot.role === 'reviewer' ? 'FAIL' : 'ran'));
+    const { session } = make(conductSpy().exec, undefined, failing);
+    await session.send('이 타입 에러 고쳐줘');
+    const out = await session.approve();
+    assert.ok(out.some((r) => r.kind === 'result' && r.verdict === 'fail'));
+    assert.equal(plans(session).length, 1);
+    assert.equal(session.state, 'waiting_input');
+  });
+
+  it('취소한 뒤에 던진 예외는 카드를 다시 세우지 않는다 (D-066)', async () => {
+    isolate();
+    const hang: SlotExecutor = (_slot, _prompt, options) =>
+      new Promise((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(new Error('중단')), { once: true }));
+    const { session } = make(conductSpy().exec, undefined, hang);
+    await session.send('이 타입 에러 고쳐줘');
+    const running = session.approve();
+    for (let i = 0; i < 200 && !session.cancellable; i += 1) await new Promise<void>((r) => setImmediate(r));
+    assert.equal(session.cancel(), true);
+    const out = await running;
+    assert.deepEqual(out.map((r) => r.kind), ['approval', 'error']);
+    assert.equal(session.state, 'waiting_input');
+    assert.equal(plans(session).length, 1);
   });
 });
 

@@ -40,14 +40,19 @@ const until = async (cond: () => boolean): Promise<void> => {
 const fake = () => {
   const calls: { role: string; model: string; effort: string; prompt: string; options: SlotRunOptions | undefined }[] = [];
   let hang = false;
+  let boom = false;
   const exec: SlotExecutor = (slot, prompt, options) => {
     calls.push({ role: slot.role, model: slot.model, effort: slot.effort, prompt, options });
+    if (slot.role === 'primary' && boom) {
+      boom = false;
+      return Promise.reject(new Error('spawn 실패'));
+    }
     if (slot.role === 'primary' && hang) {
       return new Promise<SlotRun>((resolve) => options?.signal?.addEventListener('abort', () => resolve(killed()), { once: true }));
     }
     return Promise.resolve(slot.role === 'reviewer' ? done('PASS') : done(`ran:${slot.model}`, { sessionId: `eng-${calls.length}` }));
   };
-  return { exec, calls, primaries: () => calls.filter((c) => c.role === 'primary'), hangNext: () => { hang = true; } };
+  return { exec, calls, primaries: () => calls.filter((c) => c.role === 'primary'), hangNext: () => { hang = true; }, boomNext: () => { boom = true; } };
 };
 
 const conduct: SlotExecutor = (_slot, prompt) => Promise.resolve(done(prompt.startsWith('아래 위임 결과') ? '요약 한 줄' : '직접 답\nSUGGEST: NONE'));
@@ -353,6 +358,26 @@ describe('사다리 — 취소·재열기 (D-066·D-063)', () => {
     assert.equal(x.session.ladderOffer()?.stage, 'evidence', '취소는 실패가 아니고 단계를 쓰지 않는다');
     x.session.escalate();
     assert.equal(lastPlan(x.session).ladder?.stage, 'evidence');
+  });
+
+  it('사다리 위임이 던지면 같은 사다리 카드가 다시 서고, 승인하면 같은 단계로 근거를 싣고 새로 돈다 (D-081)', async () => {
+    isolate();
+    const x = make();
+    await x.session.send(REQUEST);
+    await x.session.approve();
+    x.session.escalate();
+    const ladder = lastPlan(x.session).ladder;
+    x.boomNext();
+    const out = await x.session.approve();
+    assert.deepEqual(out.map((r) => r.kind), ['approval', 'error', 'plan']);
+    const again = lastPlan(x.session);
+    assert.equal(again.retry, true);
+    assert.deepEqual(again.ladder, ladder, '사다리 단계·이전 결정이 그대로다');
+    await x.session.approve();
+    const last = x.primaries().at(-1);
+    assert.equal(last?.options?.resume, undefined, '사다리 위임은 잇지 않는다');
+    assert.match(last?.prompt ?? '', /\[직전 시도 실패 근거 — 사다리 ①/);
+    assert.equal(x.session.ladderOffer()?.stage, 'effort', '①을 지나왔다');
   });
 
   it('옛 ④ 기록(reviewer 를 강화하던 D-068, reviewer2 없음)도 그대로 다시 열린다 — 사다리는 끝이고 카드는 두 슬롯이다', async () => {

@@ -4,6 +4,7 @@
  *
  * H — 어느 방식에서도 묻는다(`manual` 은 전부 묻는다). A — `auto-ask` 만 더 묻는다. `auto` 는 H 만 묻는다.
  * **예외: 사다리 상향 배정(D-068)의 A3 는 `auto` 에서도 묻는다** — 같은 요청을 더 무겁게 다시 돌리는 재위임이다.
+ * 예외로 끝난 배정을 다시 세운 카드(D-081)도 같다.
  * 예상 비용(AA)은 모델 단위라 ③모델·④reviewer 에서만 바뀌고 ②effort 상향은 반영되지 않는다 — 문구가 그렇게 말하지 않는다.
  * 상한 도달은 여기서 묻는 것이 아니라 막는 것이다 (D-030) — 승인 뒤 `approve()` 가 시작하지 않는다.
  */
@@ -68,12 +69,14 @@ export interface ApprovalInput {
   readonly records: readonly TranscriptRecord[];
   /** 사용자가 누른 사다리 상향 배정이다 (D-068). 행은 이미 승인해 돌린 행이라 H1 이 아니지만, 방식과 무관하게 A3 로 묻는다. */
   readonly ladder?: boolean;
+  /** 승인한 같은 배정이 예외로 끝나 다시 세운 카드다 (D-081). 사다리처럼 방식과 무관하게 A3 로 묻는다 — 조용히 다시 돌리지 않는다. */
+  readonly retry?: boolean;
   /** 폴더가 git 작업 트리인가 (D-074). 없으면 git 으로 본다 — 모르는 것을 거절로 예고하지 않는다. */
   readonly inGit?: boolean;
 }
 
 export function evaluateApproval(input: ApprovalInput): ApprovalCheck {
-  const { mode, plan, reason, write, catalog, budget, records, ladder = false, inGit = true } = input;
+  const { mode, plan, reason, write, catalog, budget, records, ladder = false, retry = false, inGit = true } = input;
   if (mode === 'manual') return { mode, asks: [], auto: false };
   const asks: AskReason[] = [];
   const primary = plan.slots.primary;
@@ -87,7 +90,9 @@ export function evaluateApproval(input: ApprovalInput): ApprovalCheck {
   }
 
   // 사다리 상향 (D-068) — `auto` 에서도 묻는다. 버튼은 "이 단계를 보겠다", 카드 승인은 "이 비용으로 돌려라" 다 (D-033).
-  if (ladder) asks.push({ code: 'A3', text: '사다리 상향 배정 — 같은 요청을 올려 다시 위임한다 (예상 비용은 모델이 바뀔 때만 바뀐다 — effort 상향은 반영되지 않는다)' });
+  // 예외 재시도 (D-081) — 같은 배정을 같은 방식으로 다시 돌린다. 사다리 재시도면 이 한 줄이 사다리 A3 를 덮는다.
+  if (retry) asks.push({ code: 'A3', text: '예외로 끝난 같은 배정을 다시 위임한다 — 자동으로 다시 돌리지 않는다' });
+  else if (ladder) asks.push({ code: 'A3', text: '사다리 상향 배정 — 같은 요청을 올려 다시 위임한다 (예상 비용은 모델이 바뀔 때만 바뀐다 — effort 상향은 반영되지 않는다)' });
 
   if (mode === 'auto-ask') {
     const usd = plan.cost.totalUsd;
@@ -103,7 +108,7 @@ export function evaluateApproval(input: ApprovalInput): ApprovalCheck {
 
     // A3 — 직전 위임이 실패했는데 같은 행이거나, 행 기본보다 높은 effort. 취소는 실패가 아니다 (D-066). `unverified` 는 넣지 않는다 (SPEC §8).
     // 사다리 배정은 위의 A3 한 줄이 이 둘을 덮는다 — 이유를 겹쳐 적지 않는다.
-    if (!ladder) {
+    if (!ladder && !retry) {
       const lastResult = records.findLastIndex((r) => r.kind === 'result');
       const failed = lastResult >= 0 && isFailure(records[lastResult] as TranscriptRecord);
       const before = lastResult >= 0 ? records.slice(0, lastResult).findLast((r) => r.kind === 'plan') : undefined;
