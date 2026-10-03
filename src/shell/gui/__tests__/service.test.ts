@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { SlotExecutor } from '../../../core/executor.ts';
 import { readDecisions } from '../../../core/decision-log.ts';
+import { gitEnv } from '../../../core/git-env.ts';
 import { projectStateDir } from '../../../core/project-state.ts';
 import { transcriptPath } from '../../../core/transcript.ts';
 import { GuiService, skipGitCheck } from '../service.ts';
@@ -169,8 +170,7 @@ describe('GUI — 작업 폴더 (폴더 전환)', () => {
 
 /** 훅이 심는 GIT_DIR 류를 지운 환경으로 만든다 — 안 지우면 바깥 저장소를 본다. */
 function initRepo(dir: string): void {
-  const env = { ...process.env };
-  for (const key of ['GIT_DIR', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_WORK_TREE', 'GIT_PREFIX']) delete env[key];
+  const env = gitEnv();
   spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: dir, env });
   spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir, env });
 }

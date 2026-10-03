@@ -8,6 +8,7 @@ import { mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { SlotExecutor } from '../../core/executor.ts';
+import { gitEnv } from '../../core/git-env.ts';
 import { Journal } from '../../core/journal.ts';
 import { appendRecord, prepareSession, transcriptPath } from '../../core/transcript.ts';
 import { assembleSession, restoreBudget } from '../conversation.ts';
@@ -18,13 +19,6 @@ const isolated = () => {
   process.env['HS_ORC_RUN_STORE'] = path.join(dir, 'runs');
   process.env['HS_ORC_SCRATCH'] = path.join(dir, 'scratch');
 };
-
-/**
- * 훅이 심는 `GIT_*`(GIT_DIR·GIT_INDEX_FILE·GIT_WORK_TREE …)를 전부 뺀 환경. 안 빼면 pre-commit 아래에서 `git init` 이
- * `cwd` 가 아니라 바깥 저장소를 다시 초기화한다 — 2026-10-03 공유 config 의 `core.bare` 가 true 로 뒤집혔다.
- */
-const withoutGitEnv = (): NodeJS.ProcessEnv =>
-  Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
 
 const fake = () => {
   const calls: string[] = [];
@@ -58,7 +52,7 @@ describe('세션 조립 (D-056)', () => {
     const empty = mkdtempSync(path.join(os.tmpdir(), 'hs-conv-empty-'));
     assert.equal(await h4(empty), true);
     const repo = mkdtempSync(path.join(os.tmpdir(), 'hs-conv-git-'));
-    spawnSync('git', ['init', '-q'], { cwd: repo, env: withoutGitEnv() });
+    spawnSync('git', ['init', '-q'], { cwd: repo, env: gitEnv() });
     assert.equal(await h4(repo), false);
   });
 

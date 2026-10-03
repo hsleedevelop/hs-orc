@@ -14,6 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { gitEnv } from '../../core/git-env.ts';
 import { legacyStateDir, projectKey } from '../../core/project-state.ts';
 
 export interface WorktreeInfo {
@@ -28,30 +29,6 @@ export interface WorktreeInfo {
 
 /** 워크트리 이름에 쓸 수 있는 글자. `..` 나 `/` 를 막는 것이 요점이다 — 경로가 저장소 밖으로 나가면 안 된다. */
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-
-/**
- * 상속하면 **다른 저장소를 보게 되는** 환경 변수.
- *
- * git 이 훅·필터·별칭을 부를 때 이것들을 심는다. 그 안에서 hs-orc 가 돌면
- * `cwd` 가 무엇이든 자식 git 은 바깥 저장소의 GIT_DIR·인덱스를 쓴다
- * (실측: pre-commit 훅에서 `git worktree add` 가 `.git/index: Not a directory` 로 죽었다).
- */
-const INHERITED_GIT_ENV = [
-  'GIT_DIR',
-  'GIT_COMMON_DIR',
-  'GIT_INDEX_FILE',
-  'GIT_WORK_TREE',
-  'GIT_PREFIX',
-  'GIT_OBJECT_DIRECTORY',
-  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
-] as const;
-
-/** `cwd` 가 유일한 기준이 되도록 위 변수를 지운 환경으로 git 을 띄운다. */
-function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const env = { ...base };
-  for (const key of INHERITED_GIT_ENV) delete env[key];
-  return env;
-}
 
 function git(cwd: string, args: readonly string[]): { ok: boolean; out: string; err: string } {
   const r = spawnSync('git', [...args], { cwd, encoding: 'utf8', env: gitEnv(), stdio: ['ignore', 'pipe', 'pipe'] });

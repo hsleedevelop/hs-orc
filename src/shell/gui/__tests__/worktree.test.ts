@@ -8,18 +8,9 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { gitEnv } from '../../../core/git-env.ts';
 import { projectStateDir } from '../../../core/project-state.ts';
 import { createWorktree, listWorktrees, removeWorktree, repoRoot, samePath, worktreesRoot } from '../worktree.ts';
-
-/**
- * git 이 훅에서 심는 변수를 지운 환경. pre-commit 훅 안에서 이 파일이 돌면
- * 이게 없을 때 자식 git 이 **바깥 저장소**를 본다 (worktree.ts 의 gitEnv 와 같은 이유).
- */
-function bareEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  for (const key of ['GIT_DIR', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_WORK_TREE', 'GIT_PREFIX']) delete env[key];
-  return env;
-}
 
 /**
  * 커밋 하나 있는 빈 저장소. `worktree add` 는 HEAD 가 없으면 실패한다.
@@ -29,7 +20,7 @@ function repo(): string {
   const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'hs-wt-')));
   process.env['HS_ORC_WORKTREES'] = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'hs-wtroot-')));
   const run = (args: string[]): void => {
-    const r = spawnSync('git', args, { cwd: dir, encoding: 'utf8', env: bareEnv() });
+    const r = spawnSync('git', args, { cwd: dir, encoding: 'utf8', env: gitEnv() });
     if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
   };
   run(['init', '-q', '-b', 'main']);
@@ -90,13 +81,13 @@ describe('워크트리', () => {
   it('커밋이 남은 브랜치는 **지우지 않고 그렇다고 말한다**', () => {
     const dir = repo();
     const made = createWorktree(dir, 'keep');
-    const run = (args: string[]): void => { spawnSync('git', args, { cwd: made.dir, env: bareEnv() }); };
+    const run = (args: string[]): void => { spawnSync('git', args, { cwd: made.dir, env: gitEnv() }); };
     run(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'work']);
 
     const result = removeWorktree(dir, made.dir);
     assert.equal(result.branchDeleted, false, '머지 안 된 작업을 조용히 버리면 안 된다');
     assert.match(result.note, /남겼다/);
-    assert.equal(spawnSync('git', ['rev-parse', '--verify', 'hs-orc/keep'], { cwd: dir, env: bareEnv() }).status, 0);
+    assert.equal(spawnSync('git', ['rev-parse', '--verify', 'hs-orc/keep'], { cwd: dir, env: gitEnv() }).status, 0);
   });
 
   it('커밋 안 한 변경이 있으면 거절한다 — --force 를 쓰지 않는다', () => {
