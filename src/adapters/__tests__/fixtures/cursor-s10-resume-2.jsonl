@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/private/tmp/hsorc35/cursor-scratch","session_id":"cac780db-d97a-4528-b315-1bbc7c54f1a0","model":"GPT-5.6 Luna 272K Low","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"What codeword did I ask you to remember? Reply with the codeword only."}]},"session_id":"cac780db-d97a-4528-b315-1bbc7c54f1a0"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ORC-189937"}]},"session_id":"cac780db-d97a-4528-b315-1bbc7c54f1a0"}
+{"type":"result","subtype":"success","duration_ms":4657,"duration_api_ms":4657,"is_error":false,"result":"ORC-189937","session_id":"cac780db-d97a-4528-b315-1bbc7c54f1a0","request_id":"8aa6b4a5-3afd-4f29-b4a0-b5d9f5dc7592","usage":{"inputTokens":3,"outputTokens":9,"cacheReadTokens":23740,"cacheWriteTokens":114}}

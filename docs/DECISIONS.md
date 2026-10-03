@@ -2353,7 +2353,7 @@ D-068 결정 2-④ 는 SPEC §2.4 의 "④ reviewer 추가" 를 **기존 reviewe
 - 기록 형식: `plan` 에 선택 필드 `reviewer2`(`v: 1` 유지). `result` 는 그대로.
 - SPEC §2.4·§5 갱신. D-068 결정 2-④·기각 "세 번째 reviewer 슬롯" 을 이 결정이 대체한다.
 
-**검증 계획** 단위(가짜 실행기·`HS_ORC_JEV=off`, 엔진·Jev 실호출 없음): ④ 가 기존 reviewer 를 두고 같은 벤더 한 칸 위를 더함, 전 행 INV-1·한 칸, 최상위 reviewer 건너뛰기(R11 사다리 소진), 두 번째 reviewer 가 primary 와 같은 벤더면 `assign` 이 던짐, 비용 세 슬롯 합(R01 ④ $6.7), AND 판정 표·unknown 이면 증거 없음, 상한·취소 시 두 번째를 시작하지 않음, reviewer 둘 다 resume 없음·`role: reviewer`, 세 슬롯 과금, 결과 검증 글 머리줄, 결정 로그 `parallel_n: 3`, 옛 ④ 기록(`reviewer2` 없음) 재열기, chat 카드 줄. 실제 엔진 실행(과금)은 하지 않았다 — 세 슬롯 실행의 실측은 다음 사다리 실사용에서 본다.
+**검증 계획** 단위(가짜 실행기·`HS_ORC_JEV=off`, 엔진·Jev 실호출 없음): ④ 가 기존 reviewer 를 두고 같은 벤더 한 칸 위를 더함, 전 행 INV-1·한 칸, 최상위 reviewer 건너뛰기(R11 사다리 소진), 두 번째 reviewer 가 primary 와 같은 벤더면 `assign` 이 던짐, 비용 세 슬롯 합(R01 ④ $6.7), AND 판정 표·unknown 이면 증거 없음, 상한·취소 시 두 번째를 시작하지 않음, reviewer 둘 다 resume 없음·`role: reviewer`, 세 슬롯 과금, 결과 검증 글 머리줄, 결정 로그 `parallel_n: 3`, 옛 ④ 기록(`reviewer2` 없음) 재열기, chat 카드 줄. 실제 엔진 실행(과금)은 하지 않았다 — 세 슬롯 실행의 실측은 다음 사다리 실사용에서 본다. → 실엔진 1회 **D-076** (2026-10-03): 두 reviewer 실행·AND·세 슬롯 과금이 원본과 일치.
 
 **상태** 확정 — 전하 머지 2026-10-02 (#82). 원래 상태: 권장안 적용, 전하 확인 대기 — 2026-10-02 오케스트레이터 권장안(전하 백로그). PR 에서 전하가 확인한다. 기각안 "D-068 그대로 종결" 로 돌리면 이 PR 을 닫으면 된다(기록 형식은 선택 필드만 늘었다).
 
@@ -2567,6 +2567,71 @@ PLAN S10 후속: "GuiService 는 활성 세션 하나. CLI 는 `hs-orc chat` 이
 
 **결정 대기** 전하 몫: S1~S4. 결정 전에는 `engines.json`·코드를 바꾸지 않는다.
 → **전하 결정 (2026-10-03): S1** (권장안 그대로). 구현 PR 이 D 로 닫는다 — 이 Q 는 그때까지 열어 둔다.
+
+---
+
+## D-075 — cursor 는 result 줄에 session_id 를 싣고, 그 id 로 resume 한 2턴이 맥락을 잇는다 (PLAN S10 후속 실측 — 동작 무변경)
+
+**배경**
+PLAN S10 최종 리뷰 Minor: "cursor 의 `result` 줄 `session_id` 는 실측이 아니라 추론이다 (`stream.test.ts` 는 claude 모양만)". 2026-09-24 사용자 결정으로 보류했던 것을 전하 승인(2026-10-03, 상한 API 환산 $1)으로 1회 실측했다. D-031 Q10 은 cursor 의 id 를 `system init` 줄에서 봤고, 어댑터(`stream.ts` `claudeEvents`)는 claude·cursor 공용으로 **result 줄에서만** id 를 읽는다 — 그 줄에 id 가 오는지가 질문이었다. D-057 의 "cursor resume 비용이 누적인지 모른다" 도 같은 실행으로 본다.
+
+**방법** (2026-10-03, cursor-agent 2026.09.28-64d2043 · `gpt-5.6-luna-low`(orc 카탈로그에서 cursor 가 받는 가장 싼 슬롯) · git 아닌 임시 폴더 · n=1)
+orc 어댑터 그대로(`createAdapter('cursor').start`) — argv 는 제품과 같다: 1턴 `-p "<코드워드 심기>" --model gpt-5.6-luna-low --output-format stream-json --trust`, 2턴 `-p "<되묻기>" --model gpt-5.6-luna-low --resume <1턴 id> --output-format stream-json --trust`. 무작위 코드워드 `ORC-189937`(D-031 Q10 과 같은 절차).
+
+**사실 (실측)**
+1. **result 줄에 `session_id` 가 온다.** 1턴 스트림은 `system init`·`user`·`assistant`·`result` 4줄이고 네 줄 모두 `session_id` 를 싣는다. 어댑터는 result 줄에서 한 번만 `session` 이벤트를 냈다(`RunResult.sessionId` = `cac780db-…`). unparsed 0.
+2. **resume 한 2턴이 코드워드를 회수했다** (`result: "ORC-189937"`, exit 0). id 불변.
+3. **resume 한 2턴의 `usage` 는 그 턴 몫이다 — 누적이 아니다.** 1턴 `{inputTokens 3, outputTokens 58, cacheReadTokens 0, cacheWriteTokens 23740}`, 2턴 `{3, 9, 23740, 114}` — 1턴 출력이 2턴에 더해지지 않았고 1턴이 쓴 캐시를 2턴이 읽었다. 그래서 `engines.json` cursor `resume` 에 `cumulative` 를 선언하지 않은 지금 상태(= 빼지 않는다, D-057 결정 1)가 맞다.
+4. cursor 는 여전히 비용 칸(`total_cost_usd`)을 주지 않는다.
+
+**추론·미검증**
+- n=1, 한 모델(luna low)·한 버전이다. 다른 cursor 모델의 result 줄 모양이 같다는 것은 같은 CLI 출력 형식이라는 데서 나온 추론이다.
+- cursor 의 다른 cwd resume·모르는 id resume(claude·codex 는 D-031 Q10 후속에서 exit 1)은 실측하지 않았다.
+
+**코드** 어댑터·`engines.json` 무변경 — 실측이 추론과 같았다. `stream.test.ts` 에 실측 캡처(`fixtures/cursor-s10-resume-{1,2}.jsonl`) 기반 테스트 3개: result 줄 id 1회·2턴 같은 id·unparsed 0 / 2턴 usage 가 턴 몫 / 2턴이 코드워드를 회수.
+
+**비용** API 환산 약 $0.005 (추정 — cursor 는 금액을 주지 않아 `pricing.json` 의 luna 단가 $0.2/$0.02/$1.2 per MTok, 캐시 쓰기는 입력 단가로 셈: 1턴 23,740×0.2 + 58×1.2 ≈ $0.0048, 2턴 ≈ $0.0005). 구독제라 청구 없음.
+
+**상태** 실측 기록 — 2026-10-03. PLAN S10 의 cursor 항목과 D-057 의 cursor 미검증분을 닫는다.
+
+---
+
+## D-076 — 사다리 ④ 세 슬롯 실엔진 1회: 두 reviewer 가 실제로 돌고, AND 판정·세 슬롯 과금이 원본과 맞는다 (D-072 실측 — 동작 무변경)
+
+**배경**
+D-072 는 가짜 실행기로만 검증했고 "세 슬롯 실행의 실측은 다음 사다리 실사용에서 본다" 로 남겼다. 전하 승인(2026-10-03, 상한 API 환산 $3, 읽기 전용 위임)으로 ④ 배정 1건을 실엔진으로 돌렸다.
+
+**방법** (2026-10-03, claude 2.1.287 · codex 0.159.2 · git 임시 저장소(`add.ts` 4줄) · `HS_ORC_JEV=off` · n=1)
+- **가장 싼 행 R01**(Luna·medium + Haiku·low). ①~③ 은 실엔진으로 밟지 않았다 — `planLadder(R01, ['evidence','effort'])`(core 공개 API)로 만든 ③ 배정과 미검증 결과(`unverified`·`unknown`)를 transcript API(`prepareSession`·`appendRecord`)로 세션 기록에 심었다. 심은 것은 기록 4줄(user·plan(`ladder.done = ①②③`)·approval·result)뿐이다.
+- **④ 부터는 제품 경로 그대로다**: `hs-orc chat --resume <id>` 에 `/ladder` → `y`. 셸 조립(`assembleSession`)·실제 실행기·`escalate()`(기록에서 사다리 상태 계산 → `planLadder`) → `approve()` → `delegate` → `runDuo` → Budget → `spend` 기록. 근거: 시드는 `ladderBase()` 가 읽는 기록 모양 그대로이고, 사다리 배정 계산·실행·과금 코드는 하나도 우회하지 않았다. 엔진 stdout 은 PATH shim 이 원본 그대로 떠 두었다. 상태·결정 로그·스크래치는 `HS_ORC_PROJECT_STATE`·`HS_ORC_DECISION_LOG`·`HS_ORC_SCRATCH` 로 임시 폴더에 격리했다.
+- ④ 배정: primary **Terra·high → codex/gpt-5.6-terra**(①②③ 재생), reviewer **Haiku·low**, 추가 reviewer **Sonnet·low → claude/claude-sonnet-5-5**. 카드 추정 $6.7(AA 측정치 1.40+0.21+5.09 — 실제 지출이 아니다).
+
+**사실 (실측)**
+1. **세 슬롯이 차례로 돌았다** — codex primary → Haiku → Sonnet → 지휘자 요약(격리 Haiku). 승인부터 끝까지 61초. 두 reviewer 모두 `--disallowedTools Edit,Write,NotebookEdit`(읽기 전용)이고 `--resume` 이 없다.
+2. **판정·AND**: 두 reviewer 모두 독립적으로 같은 반례(`add(0.1, 0.2)` → `0.30000000000000004`, primary 의 "소수도 정확히" 는 과장)를 내고 `FAIL`. 합친 판정 `fail` → outcome `rework`. 결과 기록 `review` 에 reviewer 마다 `[reviewer Haiku·low (claude/claude-haiku-4-5-20251001) → FAIL]`·`[reviewer Sonnet·low (claude/claude-sonnet-5-5) → FAIL]` 머리줄, `evidence` 에 두 FAIL 이 모두 실렸다(D-072 결정 3·6). 그 뒤 안내는 `사다리를 더 올릴 곳이 없다 — 문제 정의를 다시 본다`(④ 가 마지막).
+3. **결정 로그**: 1차·2차 모두 `parallel_n: 3`, note `reviewer haiku/low + sonnet/low · 예상 $6.7(추정) · … · 사다리 이전 결정 SEED-3`.
+4. **과금이 원본과 맞는다** (`spend` 기록 vs shim 원본):
+
+| 슬롯 | `spend.charges` | 원본 | 대조 |
+|---|---|---|---|
+| Terra·high (codex) | $0.082889 `metered` | `turn.completed.usage` input 119,880 · cached 89,344 · output 329 | (30,536×2 + 89,344×0.2 + 329×12)/1e6 = $0.0828888 ✓ |
+| Haiku·low | $0.0833238 `actual` | `total_cost_usd` 0.0833238 | ✓ |
+| Sonnet·low | $0.1523842 `actual` | `total_cost_usd` 0.1523842 (Sonnet 0.1507542 + Haiku 보조 0.00163) | ✓ |
+| 지휘자 요약 | $0.047443 `actual` | `total_cost_usd` 0.047443 | ✓ |
+
+세 슬롯 합 **$0.318597**, 요약 포함 **$0.366040** = 화면 누적 `$0.3660`. 토큰 298,304·캐시 읽기 170,333 도 원본 4개 실행의 합(claude `modelUsage`, codex 입력에서 캐시를 뺀 값 + 캐시 + 출력)과 같다. `compactionUncounted: 1` 은 codex 선언 그대로다(D-060).
+5. **결과 기록(`result`)에는 금액 칸이 없다** — 설계 그대로다(D-072 결정 6 "`result` 는 그대로", 과금은 D-054 의 `spend` 줄). 세 슬롯 금액은 바로 뒤 `spend` 줄에 슬롯별로 남고, 그 줄에는 요약 실행 몫도 함께 든다(라벨 `지휘자·Haiku·low` 로 구분된다).
+
+**관찰 (n=1, 정책 변경 없음)**
+- **첫 시도는 기록 전에 끊겼다** — 검증 셸의 시간 제한(600s)이 chat 프로세스를 죽였다(제품 결함 아님). 그 시도의 Haiku reviewer 실행은 **총 1,034초**(API 280초)였고 대부분이 사용자 전역 hook 대기다(claude 세션 기록: SessionStart hook 들이 약 9분 뒤 취소, UserPromptSubmit 약 2분, Stop hook 51초). 그때 머신은 곧 재부팅됐고 재부팅 직후 load average 가 800 을 넘었다 — 부하가 원인이라는 것은 **추론**이다. 정상 부하의 재시도에서는 같은 reviewer 가 14초였다. `runTimeoutMs`(900s)를 넘으면 그 reviewer 는 실패 → 판정 `unknown` 이라 AND 는 pass 로 새지 않는다. 위임이 전역 환경을 싣는 것은 D-032·D-069 그대로다.
+- 지휘자 요약이 primary 와 reviewer 를 바꿔 말했다("Reviewer는 … 정확히 처리한다고 판정했습니다"). 판정·outcome 은 맞고 요약 문장만 틀렸다 — n=1 이라 기록만 한다.
+- codex primary 실행 중 `codex app-server --listen stdio://` 가 PATH 의 codex 로 한 번 더 떴다(엔진 내부 동작으로 보인다, 모델 호출 없음·orc 과금 무관).
+
+**미검증**: Budget 상한·취소로 두 번째 reviewer 를 시작하지 않는 경로, reviewer 한쪽만 PASS·`unknown` 인 AND 경로, GUI 카드 — 가짜 실행기 단위 테스트(D-072)로만 본다. ①~③ 의 실엔진 경로는 이번 범위 밖이다.
+
+**비용** (API 환산, 구독제라 청구 없음): 끊긴 첫 시도 $0.191(Terra $0.125 = usage 220,006 / cached 183,040 / output 1,196 × `pricing.json`, Haiku $0.0660 = claude 세션 기록 `cost-state`; Sonnet·요약은 시작 전) + 재시도 $0.366 = **$0.557** (상한 $3).
+
+**상태** 실측 기록 — 2026-10-03. 코드·`engines.json`·matrix 무변경. D-072 의 "세 슬롯 실측" 미검증분을 닫는다.
 
 ---
 

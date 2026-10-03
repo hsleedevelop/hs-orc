@@ -334,7 +334,7 @@ PRD §7 은 v1 을 **"실제 작업 1건이 분류→배정→실행→증거 �
   - ~~세션 목록이 프로젝트 전환을 따라가지 않는다~~ → 해결 (`projects.current.dir` 로 key, 화면 실측 전).
   - ~~세션 목록에 SPEC §7.1 의 상태 열이 없다~~ → §7.1 에서 뺐다 (사용자 결정).
   - ~~위임 중 크래시 후 다시 열면 결과 없는 승인이 남는다~~ → 해결 (`interrupted` 배너). 1차 결정 줄이 고아로 남는 것은 그대로다 — 크래시한 프로세스는 2차를 못 쓴다.
-  - cursor 의 `result` 줄 `session_id` 는 실측이 아니라 추론이다 (`stream.test.ts` 는 claude 모양만) — cursor 실행 1회로 확인. 틀리면 cursor 행은 resume 안 됨(무해·가시). **2026-09-24 사용자 결정으로 보류** (구독 사용량).
+  - ~~cursor 의 `result` 줄 `session_id` 는 실측이 아니라 추론이다~~ → 2026-10-03 실측으로 확인 (DECISIONS **D-075**): result 줄에 id 가 오고, 그 id 로 resume 한 2턴이 코드워드를 회수했다. resume 한 턴의 usage 는 누적이 아니다. 코드 무변경, `stream.test.ts` 에 실측 캡처 테스트.
   - ~~`records()` 가 호출마다 JSONL 을 다시 읽는다~~ → 해결 (열 때 한 번 읽고 append 와 함께 든다).
   - ~~렌더러가 안 쓰는 레거시 `plan`/`run` IPC·preload~~ → IPC·preload 만 지웠다 (사용자 결정). `GuiService.plan`·`run` 과 S7 판정 테스트는 남긴다.
 - SDD 원장 보류 minor — 2026-09-25 정리:

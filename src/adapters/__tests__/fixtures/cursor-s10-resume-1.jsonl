@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/private/tmp/hsorc35/cursor-scratch","session_id":"cac780db-d97a-4528-b315-1bbc7c54f1a0","model":"GPT-5.6 Luna 272K Low","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Remember this codeword for later: ORC-189937. Reply with exactly: stored"}]},"session_id":"cac780db-d97a-4528-b315-1bbc7c54f1a0"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"stored"}]},"session_id":"cac780db-d97a-4528-b315-1bbc7c54f1a0"}
+{"type":"result","subtype":"success","duration_ms":9151,"duration_api_ms":9151,"is_error":false,"result":"stored","session_id":"cac780db-d97a-4528-b315-1bbc7c54f1a0","request_id":"f3767176-b0fb-4176-8c01-b104eaf0aa4b","usage":{"inputTokens":3,"outputTokens":58,"cacheReadTokens":0,"cacheWriteTokens":23740}}
