@@ -226,3 +226,28 @@ describe('캐시 읽기 칸이 없으면 0 과 구분해 남긴다 (D-070)', () 
     }
   });
 });
+
+/** 2026-10-03 실측 원본 (cursor-agent 2026.09.28-64d2043 · gpt-5.6-luna-low) — 1턴과 그 session_id 로 resume 한 2턴 (PLAN S10 후속). */
+describe('cursor resume 실측 캡처 (PLAN S10 후속)', () => {
+  const events = (name: string) => fixture(name).flatMap((l) => parseLine('claude', l));
+  const turn1 = events('cursor-s10-resume-1.jsonl');
+  const turn2 = events('cursor-s10-resume-2.jsonl');
+
+  it('result 줄의 session_id 를 한 번만 내고, resume 한 2턴도 같은 id 다 — system init 줄에도 id 가 있지만 내지 않는다', () => {
+    const ids = (evs: typeof turn1) => evs.filter((e) => e.kind === 'session').map((e) => (e.kind === 'session' ? e.id : ''));
+    assert.deepEqual(ids(turn1), ['cac780db-d97a-4528-b315-1bbc7c54f1a0']);
+    assert.deepEqual(ids(turn2), ids(turn1));
+    assert.ok([...turn1, ...turn2].every((e) => e.kind !== 'unparsed'));
+  });
+
+  it('resume 한 2턴의 usage 는 누적이 아니라 그 턴 몫이다 — cursor 에 cumulative 를 선언하지 않은 것이 맞다 (D-057 미검증분)', () => {
+    const usage = (evs: typeof turn1) => evs.find((e) => e.kind === 'usage')?.usage;
+    assert.deepEqual(usage(turn1), { inputTokens: 3, outputTokens: 58, cachedInputTokens: 0, cacheWriteTokens: 23740 });
+    // 1턴 출력 58 이 2턴에 더해져 있지 않고, 1턴이 쓴 캐시를 2턴이 읽는다.
+    assert.deepEqual(usage(turn2), { inputTokens: 3, outputTokens: 9, cachedInputTokens: 23740, cacheWriteTokens: 114 });
+  });
+
+  it('2턴이 1턴에 심은 코드워드를 회수했다 — 맥락이 이어졌다, 비용 칸은 여전히 없다', () => {
+    assert.deepEqual(turn2.find((e) => e.kind === 'done'), { kind: 'done', ok: true, text: 'ORC-189937' });
+  });
+});
