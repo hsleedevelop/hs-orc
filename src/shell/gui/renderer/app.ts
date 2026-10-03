@@ -2,8 +2,8 @@
  * Electron 렌더러 (D-021).
  *
  * Node 를 못 본다 — `window.orc`(preload)가 유일한 통로다.
- * TUI 와 같은 이유로 **JSX 를 쓰지 않는다**(D-019): 번들러가 있어도 두 셸의 화면 코드가
- * 같은 모양이어야 v1↔v2 이식이 눈으로 대조된다.
+ * **JSX 를 쓰지 않는다**(D-019): 번들러가 있어도 메인 프로세스·뷰모델과 같은 `.ts` 모양을 유지한다.
+ * (원래 근거였던 TUI 와의 대조는 TUI 제거(D-077)로 없어졌다 — 규칙은 그대로 둔다.)
  *
  * 화면이 지키는 것 세 가지:
  *   1. **작업 폴더가 항상 보인다.** 엔진이 어디서 도는지 모르는 채로 --write 를 켜면 안 된다.
@@ -99,7 +99,7 @@ const elide = (s: string, max = 58): string => (s.length <= max ? s : `…${s.sl
 const why = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 // ── 배정 줄 ────────────────────────────────────────────────
-// 뷰모델(`tui/model.ts`)이 만든 문자열을 **다시 해석하지 않는다.** 앞 라벨만 떼어 정렬·색만 준다.
+// 뷰모델(`shell/view-model.ts`)이 만든 문자열을 **다시 해석하지 않는다.** 앞 라벨만 떼어 정렬·색만 준다.
 const LABELS = ['분류', 'primary', 'reviewer', '기준', '쓰기', '비용'] as const;
 
 function planLine(line: string, key: number): ReactElement {

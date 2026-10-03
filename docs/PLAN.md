@@ -20,7 +20,7 @@
 | S2 | 엔진 어댑터 3종 | 어댑터 테스트 통과 + 세 CLI 실제 실행 1회씩 | S1 |
 | S3 | 라우팅 엔진 | 11행 테이블 테스트 통과, INV-1 위반 불가 | S2 |
 | S4 | 진행 방식 3종 | 각 방식이 상한에 걸려 정상 중단된다 | S3 |
-| S5 | TUI 셸 | 실제 작업 1건이 화면에서 끝까지 통과 | S4 |
+| S5 | TUI 셸 (D-077 로 제거) | 실제 작업 1건이 화면에서 끝까지 통과 | S4 |
 | S6 | 관찰가능성 | 결정 로그 2회 append 확인 | S5 |
 | **v1 릴리스** | | PRD §8 지표 전부 충족 | S6 |
 | S7 | GUI 셸 (v2) | v1과 동일 시나리오가 GUI에서 통과 | v1 |
@@ -133,6 +133,8 @@ Goal / Planner / Executor / Evaluator / Critic / Recovery / Stop을 **분리된 
 
 ## S5 — TUI 셸
 
+> **제거됨 (D-077, 2026-10-03).** 이 단계는 v1 릴리스 이력으로 남긴다. 터미널은 CLI(한 번 실행 · `hs-orc chat`), 화면은 GUI 다. 뷰모델은 `src/shell/view-model.ts` 로 옮겨 GUI 가 쓴다.
+
 S1~S4가 전부 헤드리스로 돈 뒤에 붙인다.
 
 1. TUI 프레임워크 선택. 이 시점의 Core는 UI에 의존하지 않으므로 교체 비용이 낮다.
@@ -181,7 +183,7 @@ PRD §8 지표를 실제 실행으로 확인한다. **2026-09-20 실측 (커밋 
       문서 절·리뷰·측정은 `--evidence <file.json>` 이다.
       **모양이 아니면 거절한다**: exit code 없는 명령, `file:line` 아닌 인용, 환경 없는 측정값, 빈 절.
       실측: 증거 없이 실행 → `unverified`, `--verify` 통과 → **`outcome: ok`**.
-- [x] **크래시 리포터 자가 검증** — CLI `--crash-test`(exit 3)와 TUI Debug 화면 `c` 키.
+- [x] **크래시 리포터 자가 검증** — CLI `--crash-test`(exit 3)와 TUI Debug 화면 `c` 키 (TUI 는 D-077 로 제거 — GUI Debug "고의 크래시" 가 그 자리다).
       둘 다 `[error][<module>/crash-test]` 로 리포팅 경로가 살아 있음을 보인다.
 
 **여전히 남는 것:**
@@ -318,16 +320,16 @@ PRD §7 은 v1 을 **"실제 작업 1건이 분류→배정→실행→증거 �
 - ~~`delegate()` 의 journal `charge` 는 reviewer 가 돌면 reviewer 의 charge 다 (`GuiService.run` 때부터).~~ → 해결 (2026-09-25): `runDuo` 가 `primaryCharge` 를 돌려주고 GUI(`delegate`)·TUI 의 journal 실행 줄이 그것을 싣는다. TUI 에도 같은 결함이 있었다.
 - ~~git 이 아닌 **project** 폴더에서 codex 위임은 여전히 거절된다 (nonGit 은 스크래치에만).~~ → **D-055** (읽기 전용만 허용, 쓰기 켠 위임은 그대로 거절).
 - ~~다른 cwd resume~~ → 2026-09-26 실측 (D-031 Q10 후속): claude·codex 모두 id 로 이어지고 모르는 id 는 exit 1 — 조용한 폴백 없음, 코드 변경 없음. **새로 연 결함:** resume 한 실행의 과금이 세션 누적이라 앞 턴을 다시 센다 → ~~Q14~~ **D-057** 로 수정. resume 중 모델 변경은 `resumable()` 이 막아 닿지 않으므로 실측하지 않는다(가드를 풀 때 다시 본다). **긴 세션 압축** — 싼 탐색 완료 (claude 수동 `/compact`: `compact_boundary` 이벤트 확인, 코드워드 보존, 압축 토큰은 `usage` 0). 자동 압축 실측 (D-058, 임계값 override): `trigger: "auto"` 줄을 orc 파서가 읽고, 압축 뒤 목록 세부(사실 13)를 잃었다 → 정책은 ~~Q16~~ → **D-059** (압축된 세션은 다음 위임부터 잇지 않는다). codex 압축 실측: 압축은 하지만 `exec --json` 에 신호가 없어 orc 는 감지 못 한다(세션 로그에만), 사용자 메시지는 원문 보존 → D-058 에 기록. claude 자연 압축(임계값 기본값, 184,573 → 39,936)도 같은 손실을 재현 → D-059 근거 보강. 남은 것: cursor — 보류. 압축 토큰이 Budget 에 안 잡히는 것은 ~~Q17~~ → **D-060** (실측: claude `/compact` 실행은 `usage` 0 이지만 `modelUsage` 누적 차분에 압축 몫 23,016 토큰이 든다 → claude 토큰을 `modelUsage` 로 센다, codex 는 셀 값이 없어 Budget 에 "압축 토큰을 보고하지 않는 엔진" 으로 표시만). D-060 실엔진 검증(2026-09-26, orc 실행기로 한 세션 5회 — resume 3 · 자동 압축 1): 턴별 몫의 합 = 세션 누적(124,098 토큰 · $0.0384377)으로 일치, 자동 압축 몫도 차분에 든다. 곁가지로 claude 2.1.283 은 압축 창이 명시돼야(`autoCompactWindow`·env) 임계값 압축을 한다 — D-060 검증 문단. 경로별 실측(2026-09-26, Haiku low 3회 · $0.1177, D-058 **압축 창 출처 실측**): 지휘자·분류 폴백(격리)은 출처가 `auto` 라 임계값 판정을 건너뛰고, 위임(비격리)은 사용자 설정으로 돈다. D-058·D-059 의 자동 압축도 그 설정에 기댔다 → ~~Q18~~ **D-061** (지휘자·분류 폴백의 격리 실행에만 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000` 을 싣는다 — 부모 env 는 덮고 위임에는 싣지 않는다. 실엔진 1회로 `thresholdSource=env` 확인, $0.0078). orc 가 압축을 기록할지는 ~~Q15~~ → **D-058** (결과 기록 `compacted` + chat `압축` 줄). codex 는 resume 에 쓰기를 실을 수 없어 쓰기 켠 후속은 잇지 않는다 (최종 리뷰 #1).
-- GuiService 는 활성 세션 하나. CLI 는 `hs-orc chat` 이 세션을 쓴다 (D-056). TUI 는 아직 쓰지 않는다 — CLI 실사용 뒤에 정한다. → **Q23** (2026-10-03 조사: chat 은 측정용으로만 돌아 전제가 충족되지 않았다 · TUI 실행 중 Ctrl-C 가 엔진을 멈추지 않는다 · 권장 T3 제거, 결정 대기).
+- GuiService 는 활성 세션 하나. CLI 는 `hs-orc chat` 이 세션을 쓴다 (D-056). ~~TUI 는 아직 쓰지 않는다 — CLI 실사용 뒤에 정한다.~~ → Q23 → **D-077** (2026-10-03 전하 결정 T3): TUI 를 제거하고 터미널은 CLI(한 번 실행 · `chat`)로 일원화했다.
   - 2026-09-26 실측 (`hs-orc chat --scratch`, 격리 Haiku·low): "넌 누구니" 직접 답 1회 $0.0642 API 환산(구독제, 청구 없음)·토큰 31,519 → `--resume` 이 기록과 누적을 그대로 되살렸다. 비용이 S10 GUI 실측($0.0111)의 약 6배지만 **토큰 양은 같다**(engines.json 격리 재실측 2026-09-25: $0.0116/32,385 tok) — chat 경로의 문제가 아니라 엔진 프롬프트 캐시 상태 차이로 본다: 31.5k 전부 1시간 캐시 쓰기(Haiku 입력 $1/MTok × 2) ≈ $0.063 으로 실측과 맞고, 캐시 적중이면 약 $0.01 이다. 추론이다 — 엔진 usage 의 `cache_creation` 내역은 저장되지 않아(safe-mode 실행은 claude 세션 기록도 없다) 직접 확인하지 못했다. → **부분 확인** (D-060 실엔진 캡처 5회, 별도 실행 없음): `claude -p` 본 턴의 캐시 쓰기는 5회 모두 `ephemeral_1h`(5분 0)이고 금액은 1시간 단가($2/MTok, 읽기의 20배)로만 맞는다. 같은 1턴도 캐시 상태로 값이 갈린다 — 새 세션 1턴은 공유 접두 12,972 를 읽고 7,138 을 써 $0.0169 였고, 그 접두까지 새로 썼다면 약 $0.042 다. 메커니즘(1시간 쓰기 단가·캐시 상태 의존)은 확인, 그 chat 실행이 전부 새로 썼다는 것은 여전히 미검증이다 — 캡처는 safe-mode 가 아닌 경로라 접두가 다르고, 그 실행 원본은 없다. → **재현으로 확인** (2026-09-27, D-062 실엔진 검증, 같은 chat 격리 경로 2회): 첫 실행은 캐시 읽기 0·1시간 쓰기 20,206 으로 $0.0438, 17초 뒤 새 세션은 읽기 18,300·쓰기 1,906 으로 $0.0091 — 토큰 합은 21,908 · 21,933 으로 같고 금액만 4.8배다. chat 경로의 문제가 아니라 1시간 캐시가 식었는지의 차이다. 원래 $0.0642 실행의 내역 자체는 원본이 없어 추론으로 남는다(같은 식으로 $0.063, 실측과 2% 안).
-- **결함 (미수정, 2026-10-03 Q23 조사 중 발견): TUI 실행 중 Ctrl-C 가 화면만 닫고 엔진은 멈추지 않는다.** Ink `exitOnCtrlC`(기본값)가 화면을 내리지만 node 프로세스는 남아, 도는 primary 가 끝까지 돌고 **그 뒤 reviewer 를 새로 띄우며** 결정 로그 2차 `ran`·`unverified` 를 쓴다. 사용자에게는 엔진이 끝날 때까지 빈 터미널이다. chat·GUI 는 D-066 으로 막았고 TUI 는 "대화 세션이 없어 제외" 로 남았다. 정책(TUI 존폐)은 **Q23** — 고칠지는 그 결정을 따른다(T3 면 사라지고, T2 면 고친다).
+- ~~**결함 (2026-10-03 Q23 조사 중 발견): TUI 실행 중 Ctrl-C 가 화면만 닫고 엔진은 멈추지 않는다.**~~ → **TUI 제거로 해소 (D-077).** 고치지 않고 경로를 없앴다 — chat·GUI 는 D-066 이 막는다. 아래는 기록으로 남긴다. Ink `exitOnCtrlC`(기본값)가 화면을 내리지만 node 프로세스는 남아, 도는 primary 가 끝까지 돌고 **그 뒤 reviewer 를 새로 띄우며** 결정 로그 2차 `ran`·`unverified` 를 쓴다. 사용자에게는 엔진이 끝날 때까지 빈 터미널이다. chat·GUI 는 D-066 으로 막았고 TUI 는 "대화 세션이 없어 제외" 로 남았다. 정책(TUI 존폐)은 **Q23** — 고칠지는 그 결정을 따른다(T3 면 사라지고, T2 면 고친다).
   - 재현 (가짜 엔진·과금 없음, 2026-10-03 n=2 같은 결과): ① 임시 폴더에 `git init` + 커밋 1개. ② 임시 `bin/` 에 `codex`·`claude`·`cursor-cli`·`cursor-agent` 가짜를 둔다 — 자기 pid·인자를 파일에 한 줄 적고 `exec sleep 12`. ③ `PATH=<가짜 bin>:<node 디렉터리>:/usr/bin:/bin`, `HS_ORC_JEV=off`, `HS_ORC_PROJECT_STATE`·`HS_ORC_RUN_STORE`·`HS_ORC_DECISION_LOG`·`HS_ORC_UNCLASSIFIED_LOG` 를 임시 경로로. ④ 그 폴더에서 `( sleep 5; printf y; sleep 3; printf '\003'; sleep 60 ) | script -q <로그> node <저장소>/bin/hs-orc.mjs tui "타입 오류 고쳐"` (R01 → primary codex Luna·medium, reviewer claude Haiku·low). ⑤ Ctrl-C 5초 뒤 `pgrep -fl "hs-orc.mjs tui"` 와 pid 파일의 각 pid 에 `kill -0`.
   - 관찰: Ctrl-C 뒤 node 생존 · 가짜 codex 생존 → 끝난 뒤 가짜 claude(reviewer) 가 **새로** 기록됨 · 결정 로그 `decided pending` → `ran unverified`.
   - 미검증: 실엔진 과금이 실제로 이어지는지(추론: primary 끝까지 + reviewer 1회), 화면이 내려간 뒤(raw mode 해제) 두 번째 Ctrl-C 로 node 가 SIGINT 에 죽으면 detached 엔진이 남는지(추론: `adapters/run.ts` exit 훅은 SIGTERM 을 보낸 그룹만 죽인다 — 남을 공산).
   - 고친다면(추론): `render(…, { exitOnCtrlC: false })` + 실행 중 Ctrl-C 를 `AbortController` 로 `runDuo` 의 `signal` 에 잇기(이미 받는다) — chat `interruptGuard` 와 같은 두 단계.
 - 최종 리뷰 Minor (2026-09-24 `final-review.md` 에서 옮김, 코드 대조로 미해결 확인. #12 `$evidence.resume` 기록은 반영됨):
   - ~~`approve()` 가 primary 시작 전 `budget.limitReached()` 를 보지 않는다~~ → 해결 (상한이면 시작하지 않고 결정 로그 `blocked`).
-  - ~~거절이 결정 로그에 안 남는다~~ → 해결 (사용자 결정: `decided`+`declined` 두 줄, SPEC §8). ~~**남은 것:** CLI·TUI 의 승인 거절도 결정 로그에 안 남는다 — 같은 규칙을 옮길지.~~ → 옮기지 않는다 (2026-09-25 사용자 결정). GUI 세션에는 지휘자 제안에 대한 **거절 버튼**이 있지만, CLI 는 `--run` 없으면 제시만(dry-run)이고 TUI 는 승인(y/Enter)과 종료뿐이다 — 기록할 거절 행위가 없고, 종료를 거절로 적으면 추측이 로그에 들어간다. TUI 에 명시적 거절 키가 생기면 그때 옮긴다.
+  - ~~거절이 결정 로그에 안 남는다~~ → 해결 (사용자 결정: `decided`+`declined` 두 줄, SPEC §8). ~~**남은 것:** CLI·TUI 의 승인 거절도 결정 로그에 안 남는다 — 같은 규칙을 옮길지.~~ → 옮기지 않는다 (2026-09-25 사용자 결정). GUI 세션에는 지휘자 제안에 대한 **거절 버튼**이 있지만, CLI 는 `--run` 없으면 제시만(dry-run)이고 TUI 는 승인(y/Enter)과 종료뿐이다 — 기록할 거절 행위가 없고, 종료를 거절로 적으면 추측이 로그에 들어간다. TUI 에 명시적 거절 키가 생기면 그때 옮긴다. → TUI 제거(D-077)로 해당 없음.
   - ~~`runDuo` 가 던지면 1차 결정 줄이 `pending` 으로 남는다~~ → 해결 (2차 `ran`/`wrong` + 세션 테스트).
   - ~~`buildInvocation` 이 `write`+`nonGit` 을 함께 받는다~~ → 해결 (resolve 에서 던진다).
   - ~~렌더러 `act()` 가 IPC 거절 시 낡은 `SessionView` 를 남긴다~~ → 해결 (`convView()` 재조회, 화면 실측 전).
