@@ -235,14 +235,16 @@ describe('resume argv (SPEC §3.8, Q10 실측)', () => {
 
 describe('격리 (D-032 B1) — 지휘자만 사용자 전역 설정에서 뗀다', () => {
   const catalog = loadEngines();
-  it('claude 는 isolate 요청 시 선언된 다섯 인자를 그대로, 순서대로 붙인다', () => {
+  it('claude 는 isolate 요청 시 선언된 인자를 그대로, 순서대로 붙인다 — 끝은 내장 도구 전부 제거(D-080)', () => {
     const { argv } = buildInvocation(catalog, 'haiku', 'low', 'hi', { engine: 'claude', isolate: true });
-    assert.deepEqual(argv.slice(-5), ['--setting-sources', 'project,local', '--strict-mcp-config', '--disable-slash-commands', '--safe-mode']);
+    assert.deepEqual(argv.slice(-7), ['--setting-sources', 'project,local', '--strict-mcp-config', '--disable-slash-commands', '--safe-mode', '--tools', '']);
   });
 
-  it('claude 는 isolate 를 요청하지 않으면 격리 인자가 하나도 없다', () => {
-    const { argv } = buildInvocation(catalog, 'haiku', 'low', 'hi', { engine: 'claude' });
-    assert.doesNotMatch(argv.join(' '), /--setting-sources|--strict-mcp-config|--disable-slash-commands|--safe-mode/);
+  it('claude 는 isolate 를 요청하지 않으면 격리 인자가 하나도 없다 — 위임(읽기·쓰기)은 도구를 그대로 받는다', () => {
+    for (const write of [false, true]) {
+      const { argv } = buildInvocation(catalog, 'haiku', 'low', 'hi', { engine: 'claude', ...(write ? { write } : {}) });
+      assert.doesNotMatch(argv.join(' '), /--setting-sources|--strict-mcp-config|--disable-slash-commands|--safe-mode|--tools/);
+    }
   });
 
   it('claude 는 isolate 요청 시에만 압축 창 env 를 함께 돌려준다 (D-061)', () => {

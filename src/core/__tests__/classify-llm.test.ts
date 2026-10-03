@@ -121,6 +121,29 @@ describe('분류 폴백', () => {
     }
   });
 
+  /** D-080: 분류 폴백도 지휘자와 같은 격리 경로라 내장 도구를 전부 끈다 — `--tools` 바로 뒤가 빈 인자일 때만 R06 이다. */
+  it('분류기도 격리 실행이라 `--tools ""` 를 받는다', async () => {
+    const here = mkdtempSync(path.join(os.tmpdir(), 'hs-classify-tools-'));
+    const bin = path.join(here, 'claude');
+    writeFileSync(
+      bin,
+      ['#!/bin/sh', 'id=R01; prev=x',
+       'for a in "$@"; do if [ "$prev" = "--tools" ] && [ -z "$a" ]; then id=R06; fi; prev=$a; done',
+       `printf '{"type":"result","is_error":false,"result":"%s"}\\n' "$id"`, ''].join('\n'),
+      'utf8',
+    );
+    chmodSync(bin, 0o755);
+
+    const realPath = process.env['PATH'];
+    process.env['PATH'] = `${here}${path.delimiter}${realPath ?? ''}`;
+    try {
+      const outcome = await classifyWithModel(matrix, loadEngines(), '아무거나');
+      assert.equal(outcome.assignment?.id, 'R06', '분류기 프로세스에 --tools "" 가 없다');
+    } finally {
+      process.env['PATH'] = realPath;
+    }
+  });
+
   it('엔진이 실패해도 성공 여부·비용은 돌려준다 — 쓴 것은 과금 대상이다', async () => {
     const here = mkdtempSync(path.join(os.tmpdir(), 'hs-classify-outcome-fail-'));
     const bin = path.join(here, 'claude');
