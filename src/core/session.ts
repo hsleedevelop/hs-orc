@@ -10,7 +10,7 @@ import type { Engines } from '../data/engines.ts';
 import type { Matrix } from '../data/matrix.ts';
 import { isApprovalMode, loadLimits, type ApprovalMode } from '../data/limits.ts';
 import type { AssignmentPlan } from './assign.ts';
-import { evaluateApproval, type ApprovalCheck } from './approval.ts';
+import { evaluateApproval, nonGitWriteRefusal, type ApprovalCheck } from './approval.ts';
 import type { Budget, BudgetMark } from './budget.ts';
 import { buildSummaryPrompt, conductorSlot, directAnswer, nextSuggestion } from './conductor.ts';
 import { buildContext, type ContextLimits } from './context.ts';
@@ -59,10 +59,15 @@ export interface SessionDeps {
   readonly context?: ContextLimits;
   /** 기록이 빈 새 세션의 시작 방식 (D-064 결정 8). 없으면 `limits.json` 의 `approvalMode`. 기록에 방식이 있으면 그것이 이긴다. */
   readonly approvalMode?: ApprovalMode;
+  /** project 폴더가 git 작업 트리인가 (D-074). 없으면 git 으로 본다 — 조립(`assembleSession`)이 `repoRoot` 로 정해 넘긴다. */
+  readonly inGit?: boolean;
 }
 
 /** `plan.reason` 에 남는 출처 — 행을 고른 것이 지휘자다. `수동 지정` 이면 사람이 고른 것으로 적힌다 (`pipeline.ts` reasonLabel). */
 const SUGGESTED_LABEL = '지휘자 제안';
+
+/** 스캐폴더는 위임하지 않고 사람이 먼저 돌린다 (D-074 B1) — codex 샌드박스는 네트워크·홈 쓰기를, claude 쓰기 모드는 셸을 막는다 (D-073). */
+export const SCAFFOLD_GUIDE = 'git 아닌 폴더 · 쓰기 위임 — 스캐폴더(예: `npx create-expo-app@latest .`)는 먼저 직접 돌리고 그 뒤 위임하라 (D-074)';
 
 const why = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -280,7 +285,7 @@ export class ConversationSession {
       const notes = routed.fallback ? [routed.fallback.line] : [];
       const result = routed.result;
       // Jev 가 답했는데 행을 확정하지 않았으면(NONE·확신도 미만) 지휘자의 SUGGEST 가 그 판정을 뒤집지 못하게 한다.
-      if (result.stage !== 'assigned') return this.answer(text, notes, routed.jev === 'none' || routed.jev === 'unsure');
+      if (result.stage !== 'assigned') return this.answer(text, notes, routed.jev === 'none' || routed.jev === 'unsure', write);
       const card = this.stage(text, result.plan, result.reason, notes, write);
       // 방식이 허락하면 승인 클릭 없이 시작한다 — 이 메시지가 만든 이 배정 1건만이다 (D-064 결정 2). 카드는 위에 그대로 남는다.
       return [card, ...(await this.autoApprove())];
@@ -294,7 +299,11 @@ export class ConversationSession {
   private stage(title: string, plan: AssignmentPlan, reason: string, notes: readonly string[], write = false, ladder?: LadderRecord): TranscriptRecord {
     const { primary, reviewer, secondReviewer } = plan.slots;
     const { catalog, budget } = this.deps;
-    const check = evaluateApproval({ mode: this.modeValue, plan, reason, write, catalog, budget, records: this.log, ...(ladder ? { ladder: true } : {}) });
+    const inGit = this.deps.inGit ?? true;
+    const check = evaluateApproval({ mode: this.modeValue, plan, reason, write, catalog, budget, records: this.log, inGit, ...(ladder ? { ladder: true } : {}) });
+    // manual 은 묻는 이유(`asked`)가 비므로 H4 를 안내 줄로 싣는다 — 어느 방식이든 카드가 같은 줄을 보인다 (D-074).
+    const refusal = check.mode === 'manual' ? nonGitWriteRefusal(catalog, plan, write, inGit) : null;
+    const guide = [...(refusal ? [refusal.text] : []), ...this.scaffoldGuide(write)];
     this.pending = { title, plan, reason, write, check, ...(ladder ? { ladder } : {}) };
     this.stateValue = 'blocked';
     return this.append({
@@ -307,6 +316,7 @@ export class ConversationSession {
       ...(secondReviewer ? { reviewer2: `${secondReviewer.label}·${secondReviewer.effort} → ${secondReviewer.engine}/${secondReviewer.modelId}` } : {}),
       estimateUsd: plan.cost.totalUsd,
       notes,
+      ...(guide.length > 0 ? { guide } : {}),
       mode: check.mode,
       asked: check.asks,
       ...(write ? { write: true } : {}),
@@ -323,7 +333,12 @@ export class ConversationSession {
     return this.start({}, 'auto');
   }
 
-  private async answer(text: string, notes: readonly string[], ignoreSuggest = false): Promise<TranscriptRecord[]> {
+  /** git 아닌 project 폴더의 쓰기 위임이면 스캐폴더 안내 한 줄 (D-074 B1). */
+  private scaffoldGuide(write: boolean): string[] {
+    return write && this.deps.kind === 'project' && this.deps.inGit === false ? [SCAFFOLD_GUIDE] : [];
+  }
+
+  private async answer(text: string, notes: readonly string[], ignoreSuggest = false, write = false): Promise<TranscriptRecord[]> {
     const { matrix, catalog, budget, conduct } = this.deps;
     // route() 가 이미 working 으로 바꿔 놓았을 수 있다 — 여기서도 다시 대입해 answer() 를 단독으로
     // 불러도(테스트 등) 같은 보장이 서게 하고, 모든 탈출 경로를 finally 하나로 묶는다 (final-review #2).
@@ -342,12 +357,14 @@ export class ConversationSession {
         return [this.append({ kind: 'error', text: `직접 답을 받지 못했다: ${answer.run.text || '엔진이 실패했다'}` })];
       }
       const suggest = ignoreSuggest ? null : answer.suggest;
+      const guide = this.scaffoldGuide(write);
       const direct = this.append({
         kind: 'direct',
         text: answer.body,
         suggest,
         cost: `$${charge.usd.toFixed(4)} ${charge.source}`,
         notes,
+        ...(guide.length > 0 ? { guide } : {}),
         ...(context.cut ? { cut: context.cut } : {}),
         ...(answer.run.cacheWrite ? { cacheWrite: answer.run.cacheWrite } : {}),
       });

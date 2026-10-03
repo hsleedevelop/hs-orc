@@ -16,7 +16,7 @@ import { evaluateApproval, isModelPick } from '../approval.ts';
 import { Budget } from '../budget.ts';
 import { Journal } from '../journal.ts';
 import type { SlotExecutor, SlotRun, SlotRunOptions } from '../executor.ts';
-import { ConversationSession } from '../session.ts';
+import { ConversationSession, SCAFFOLD_GUIDE } from '../session.ts';
 import { readDecisions } from '../decision-log.ts';
 import { appendRecord, transcriptPath, type TranscriptRecord } from '../transcript.ts';
 
@@ -58,6 +58,7 @@ interface Opts {
   dir?: string;
   withJev?: boolean;
   conductor?: SlotExecutor;
+  inGit?: boolean;
 }
 const make = (o: Opts = {}) => {
   const spy = delegateSpy();
@@ -69,6 +70,7 @@ const make = (o: Opts = {}) => {
     conduct: o.conductor ?? conduct(), executorFor: () => o.execute ?? spy.exec,
     ...(o.withJev === false ? {} : { classifier: jev(row) }),
     ...(o.mode ? { approvalMode: o.mode } : {}),
+    ...(o.inGit !== undefined ? { inGit: o.inGit } : {}),
   });
   return { session, spy, row, dir, budget };
 };
@@ -293,6 +295,60 @@ describe('승인 방식 — H 조건 (auto 에서도 묻는다)', () => {
       const p = assign(matrix, catalog, a).slots.primary.engine;
       assert.notEqual(catalog.engines[p].readOnlyArgv, undefined, `${a.id}/${p}`);
     }
+  });
+});
+
+describe('git 아닌 폴더의 쓰기 위임 — H4 예고·스캐폴더 안내 (D-074)', () => {
+  const H4 = 'git 아닌 폴더 · codex 쓰기 → codex 가 거절한다 (D-055). git init 하거나 쓰기를 끄라';
+  const guideOf = (r?: TranscriptRecord) => (r && (r.kind === 'plan' || r.kind === 'direct') ? (r.guide ?? []) : []);
+
+  it('codex primary 쓰기면 어느 방식에서도 H4 를 묻는 이유로 싣고 스캐폴더 안내가 붙는다 — 승인은 막지 않는다', async () => {
+    isolate();
+    for (const mode of ['auto-ask', 'auto'] as const) {
+      const m = make({ mode, inGit: false });
+      await m.session.send('파일을 고쳐줘', { write: true });
+      const plan = lastPlan(m.session);
+      assert.ok(plan?.kind === 'plan' && plan.asked?.some((a) => a.code === 'H4' && a.text === H4), mode);
+      assert.deepEqual(guideOf(plan), [SCAFFOLD_GUIDE], `${mode} — H4 는 묻는 이유에 있으니 안내에 겹쳐 싣지 않는다`);
+      await m.session.approve({ write: true });
+      assert.equal(m.spy.primaries(), 1, `${mode} — 승인하면 그대로 시작한다`);
+    }
+  });
+
+  it('git 폴더·읽기 전용·git 밖 거절이 없는 엔진(claude primary)은 H4 가 없다 — 안내는 git 아닌 쓰기면 엔진과 무관하다', async () => {
+    isolate();
+    const inGit = make({ mode: 'auto-ask', inGit: true });
+    await inGit.session.send('파일을 고쳐줘', { write: true });
+    assert.ok(!codes(inGit.session).includes('H4'));
+    assert.deepEqual(guideOf(lastPlan(inGit.session)), []);
+
+    const readOnly = make({ mode: 'auto-ask', inGit: false });
+    await readOnly.session.send('읽어줘');
+    assert.ok(!codes(readOnly.session).includes('H4'));
+    assert.deepEqual(guideOf(lastPlan(readOnly.session)), []);
+
+    const claude = make({ mode: 'auto-ask', inGit: false, row: 'R10' });
+    await claude.session.send('설계해줘', { write: true });
+    assert.ok(!codes(claude.session).includes('H4'));
+    assert.deepEqual(guideOf(lastPlan(claude.session)), [SCAFFOLD_GUIDE]);
+  });
+
+  it('manual 은 묻는 이유가 비므로 H4 를 안내 줄로 싣는다 — 카드가 같은 줄을 보인다', async () => {
+    isolate();
+    const m = make({ mode: 'manual', inGit: false });
+    await m.session.send('파일을 고쳐줘', { write: true });
+    const plan = lastPlan(m.session);
+    assert.deepEqual(plan?.kind === 'plan' ? plan.asked : null, []);
+    assert.deepEqual(guideOf(plan), [H4, SCAFFOLD_GUIDE]);
+  });
+
+  it('행 없이 직접 답으로 가도 git 아닌 폴더의 쓰기 메시지면 스캐폴더 안내가 붙는다', async () => {
+    isolate();
+    const m = make({ mode: 'auto-ask', inGit: false, withJev: false });
+    const out = await m.session.send('빈 폴더에 Expo 프로젝트 생성해줘', { write: true });
+    assert.deepEqual(guideOf(out.find((r) => r.kind === 'direct')), [SCAFFOLD_GUIDE]);
+    const git = make({ mode: 'auto-ask', inGit: true, withJev: false });
+    assert.deepEqual(guideOf((await git.session.send('빈 폴더에 Expo 프로젝트 생성해줘', { write: true })).find((r) => r.kind === 'direct')), []);
   });
 });
 

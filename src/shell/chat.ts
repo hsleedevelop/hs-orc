@@ -16,6 +16,7 @@ export function renderRecord(r: TranscriptRecord): string[] {
     case 'direct':
       return [
         ...r.notes.map((n) => `분류   ${n}`),
+        ...(r.guide ?? []).map((g) => `안내   ${g}`),
         r.text,
         `비용   ${r.cost}`,
         // 제안이 있으면 곧이어 배정 카드가 붙는다 (D-064) — 카드 이전 기록에는 붙지 않아 openingLines 가 /task 길을 알린다.
@@ -30,6 +31,8 @@ export function renderRecord(r: TranscriptRecord): string[] {
         `       reviewer ${r.reviewer}`,
         ...(r.reviewer2 ? [`       reviewer ${r.reviewer2}  (사다리 ④ 추가 — 둘 다 PASS 일 때만 PASS)`] : []),
         `비용   $${r.estimateUsd} (추정)`,
+        // 다음 행동 안내 (D-074) — manual 이면 H4 도 여기 실린다(묻는 이유가 비어서).
+        ...(r.guide ?? []).map((g) => `안내   ${g}`),
         ...ladderLines(r.ladder).map((l, i) => (i === 0 ? l : `       ${l}`)),
         // 묻는 카드는 걸린 조건을 이름으로 보인다 (D-064). manual 은 늘 묻고, 이유가 없으면 자동 승인이 뒤따른다.
         ...(r.mode && r.mode !== 'manual' && r.asked && r.asked.length > 0 ? [`묻는 이유  ${r.asked.map((a) => `${a.code} ${a.text}`).join(' · ')}`] : []),

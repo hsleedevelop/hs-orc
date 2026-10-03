@@ -36,6 +36,15 @@ describe('chat — 기록 렌더', () => {
     assert.deepEqual(lines.slice(1, 4), ['배정   primary  Terra·high → codex/x', '       reviewer Haiku·low → claude/y', '       reviewer Sonnet·low → claude/z  (사다리 ④ 추가 — 둘 다 PASS 일 때만 PASS)']);
   });
 
+  it('안내 줄(D-074)은 배정이면 비용 아래, 직접 답이면 본문 위에 찍는다 — 옛 기록(guide 없음)은 그대로다', () => {
+    const plan = renderRecord({
+      ...at, kind: 'plan', taskId: 'R01', title: 't', reason: '규칙', primary: 'p', reviewer: 'r', estimateUsd: 0.5, notes: [], guide: ['스캐폴더는 먼저'],
+    });
+    assert.deepEqual(plan.slice(3), ['비용   $0.5 (추정)', '안내   스캐폴더는 먼저']);
+    const direct = renderRecord({ ...at, kind: 'direct', text: '답', suggest: null, cost: '$0 x', notes: [], guide: ['스캐폴더는 먼저'] });
+    assert.deepEqual(direct.slice(0, 2), ['안내   스캐폴더는 먼저', '답']);
+  });
+
   it('맥락을 잘랐으면 잘린 양을 알린다 (D-053)', () => {
     const lines = renderRecord({ ...at, kind: 'direct', text: '답', suggest: null, cost: '$0 x', notes: [], cut: { turns: 2, chars: 300 } });
     assert.ok(lines.includes('맥락   앞 대화 2턴·300자를 싣지 못했다'));

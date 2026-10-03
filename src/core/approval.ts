@@ -20,7 +20,7 @@ export const A2_REMAINING_FACTOR = 2;
 /** A2 토큰 (D-064 U4): 남은 토큰이 `tokenBudget` 의 이 비율 미만이다. 배정별 예상 토큰이 없어 비율로 둔다. */
 export const A2_TOKEN_REMAINING_RATIO = 0.2;
 
-export type AskCode = 'H1' | 'H2' | 'H3' | 'A1' | 'A2' | 'A3' | 'A4';
+export type AskCode = 'H1' | 'H2' | 'H3' | 'H4' | 'A1' | 'A2' | 'A3' | 'A4';
 
 /** 묻는 이유 하나. `text` 는 카드에 이름으로 보인다 — 이유 없이 선 카드는 무엇을 봐야 할지 모른다. */
 export interface AskReason {
@@ -42,6 +42,17 @@ export interface ApprovalCheck {
  */
 export const isModelPick = (reason: string): boolean => !/^(키워드 |Jev |수동 지정 |사다리 )/.test(reason);
 
+/**
+ * H4 — 쓰기 위임인데 폴더가 git 이 아니고, primary 엔진이 git 밖에서 거절하는 엔진이다(D-074 A2). `nonGitArgv` 선언이 곧
+ * "git 밖에서는 이 인자가 있어야 돈다" 는 뜻이고, 쓰기에는 그 인자를 붙이지 않는다(D-055 결정 2) — 승인 뒤 모델 호출 전에 거절된다.
+ * 승인은 막지 않는다: 거절은 과금이 없고, 사람이 행·쓰기를 바꾸거나 그대로 확인할 수 있다.
+ */
+export function nonGitWriteRefusal(catalog: Engines, plan: AssignmentPlan, write: boolean, inGit: boolean): AskReason | null {
+  const engine = plan.slots.primary.engine;
+  if (!write || inGit || catalog.engines[engine].nonGitArgv === undefined) return null;
+  return { code: 'H4', text: `git 아닌 폴더 · ${engine} 쓰기 → ${engine} 가 거절한다 (D-055). git init 하거나 쓰기를 끄라` };
+}
+
 const isFailure = (r: TranscriptRecord): boolean =>
   r.kind === 'result' && (r.outcome === 'wrong' || r.outcome === 'rework' || r.verdict === 'fail');
 
@@ -57,16 +68,20 @@ export interface ApprovalInput {
   readonly records: readonly TranscriptRecord[];
   /** 사용자가 누른 사다리 상향 배정이다 (D-068). 행은 이미 승인해 돌린 행이라 H1 이 아니지만, 방식과 무관하게 A3 로 묻는다. */
   readonly ladder?: boolean;
+  /** 폴더가 git 작업 트리인가 (D-074). 없으면 git 으로 본다 — 모르는 것을 거절로 예고하지 않는다. */
+  readonly inGit?: boolean;
 }
 
 export function evaluateApproval(input: ApprovalInput): ApprovalCheck {
-  const { mode, plan, reason, write, catalog, budget, records, ladder = false } = input;
+  const { mode, plan, reason, write, catalog, budget, records, ladder = false, inGit = true } = input;
   if (mode === 'manual') return { mode, asks: [], auto: false };
   const asks: AskReason[] = [];
   const primary = plan.slots.primary;
 
   if (isModelPick(reason)) asks.push({ code: 'H1', text: `모델이 고른 행 (${reason})` });
   if (write) asks.push({ code: 'H2', text: '쓰기를 켠 위임' });
+  const refusal = nonGitWriteRefusal(catalog, plan, write, inGit);
+  if (refusal) asks.push(refusal);
   if (catalog.engines[primary.engine].readOnlyArgv === undefined) {
     asks.push({ code: 'H3', text: `${primary.engine} 는 읽기 전용이 인자로 보장되지 않는다` });
   }
