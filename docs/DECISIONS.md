@@ -2832,6 +2832,84 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 ---
 
+## Q27 — 지휘자(직접 답·요약·분류 폴백) claude 격리 실행의 내장 도구가 프롬프트로만 막혀 있다: 실제 허용 범위와 막는 방법 (조사)
+
+**배경** Q26 별견 1. 지휘자 프롬프트는 "파일을 고치거나 명령을 실행하지 않는다" 고 하지만(`src/core/conductor.ts:40`), argv 에는 도구를 줄이는 인자가 `readOnlyArgv`(Edit·Write·NotebookEdit 제거, D-052)뿐이다. 무엇이 승인 없이 실제로 도는지 공식 문서와 소액 실측으로 확인했다 (2026-10-03, claude 2.1.288). 코드 변경 없음. 근거는 (사실: 파일·문서·실측으로 확인) · (추론) · (미검증)으로 적는다.
+
+**1. 사실 — 코드·fixture**
+1. **격리 실행은 세 역할이 같은 argv 를 쓴다.** 직접 답·요약은 `createExecutor(…, { isolate: true })`(`src/shell/conversation.ts:63`), 분류 폴백은 `isolate: true`(`src/core/classify-llm.ts:83`). 셋 다 Haiku·low, cwd = 세션 폴더(분류 폴백은 `options.cwd ?? process.cwd()`). `buildInvocation` 결과(저장소 코드로 직접 생성):
+   `claude -p <prompt> --model claude-haiku-4-5-20251001 --effort low --disallowedTools Edit,Write,NotebookEdit --setting-sources project,local --strict-mcp-config --disable-slash-commands --safe-mode --output-format stream-json --verbose` + env `CLAUDE_CODE_AUTO_COMPACT_WINDOW=1000000` (`data/engines.json` `readOnlyArgv`·`isolateArgv`·`isolateEnv`, `src/adapters/resolve.ts:163-182`, 스트림 인자는 `src/adapters/engine.ts` 가 뒤에 붙인다). 권한 모드 인자는 없다.
+2. **세 프롬프트 모두 도구가 필요 없다.** 직접 답은 업무 목록·최근 대화·메시지를, 요약은 위임 결과 3,000자를(`conductor.ts:89-100`), 분류는 행 목록과 작업 문장을 프롬프트에 싣는다. 도구를 써야만 할 수 있는 지시가 없다.
+3. **격리 fixture 의 도구 목록은 25개다** (`src/adapters/__tests__/fixtures/claude-q18-isolated*.jsonl` · `claude-d062-chat-cold.jsonl`, 2.1.283, `permissionMode: default`): `Task Bash CronCreate CronDelete CronList DesignSync EnterWorktree ExitWorktree ListAgents Monitor PushNotification Read RemoteTrigger ReportFindings ScheduleWakeup SendMessage TaskCreate TaskGet TaskList TaskStop TaskUpdate ToolSearch WebFetch WebSearch Workflow`. 2.1.288 실측(§3)도 같은 25개다. Glob·Grep 이 없는 것은 macOS 기본값이다 — Bash 의 내장 `find`·`grep` 으로 대신한다(tools-reference "Glob tool behavior").
+4. **`--safe-mode` 는 도구·권한을 건드리지 않는다.** `claude --help`: "Auth, model selection, built-in tools and plugins, and permissions work normally." D-050 이 끈 것은 사용자 맞춤 설정이다.
+
+**2. 사실 — 공식 문서** (code.claude.com/docs/en/permissions · tools-reference · `claude --help`, 2026-10-03 조회)
+1. **`default` 모드(= Manual)는 처음 쓰는 도구마다 묻는다.** `-p` 에서 묻는 대상은 `--permission-prompts host`(기본값)인데, hs-orc 는 SDK host·`--permission-prompt-tool` 을 주지 않는다 — 실측(§3)에서 물음은 전부 `permission_denials` 로 거절됐다.
+2. **승인 없이 도는 것** (tools-reference "Permission required: No"): `Agent`(=`Task`, 하위 에이전트) · `RemoteTrigger`(claude.ai Routines 를 **만들고·고치고·실행**) · `SendMessage`(다른 에이전트·**이 기기의 다른 Claude Code 세션**에 메시지) · `ListAgents` · `PushNotification`(데스크톱·Remote Control 연결 시 휴대폰 푸시, Anthropic 인프라 경유) · `CronCreate/Delete/List` · `ScheduleWakeup` · `Task*` · `ToolSearch` · `ReportFindings`, 그리고 `Read` — **cwd·추가 디렉터리 안에서만**.
+3. **`Bash` 는 "Yes" 지만 내장 읽기 전용 명령은 모든 모드에서 승인 없이 돈다** — `ls cat echo pwd head tail grep find wc which diff stat du cd` 와 읽기 전용 `git` 등. 이 집합은 설정으로 바꿀 수 없고, **cwd 밖 경로에도 돈다** — `permissions.blockReadsOutsideWorkingDirectories` 를 켜야 막힌다(기본 꺼짐). 즉 `Read` 도구는 cwd 밖을 묻지만 `cat <cwd 밖 경로>` 는 묻지 않는다.
+4. **`WebFetch` 는 묻되, 내장 "preapproved documentation domains" 는 묻지 않고 가져온다.** 모든 fetch 는 먼저 도메인 안전 검사를 거친다(도메인이 Anthropic 으로 간다 — data-usage 문서). `WebSearch` 는 묻는다. `Monitor`·`Workflow`·`EnterWorktree` 는 묻는다.
+5. **도구를 줄이는 인자** — `--tools <tools...>`: "Specify the list of available tools from the built-in set. Use \"\" to disable all tools". `--disallowedTools`: 도구 이름만 쓴 deny 는 그 도구를 맥락에서 아예 뺀다, deny 는 어느 출처의 allow 보다도 우선한다. **`--allowedTools` 는 줄이는 인자가 아니다** — 승인 없이 쓰게 하는 allow 규칙이라, 나머지 도구는 그대로 실리고 오히려 넓힌다. `--permission-mode dontAsk`: 물을 것을 전부 거절하되 승인이 필요 없는 것(위 2·3)은 그대로 돈다. `--restricted`: Bash·코드 실행 도구·WebFetch 를 빼고(`--tools` 로 이름을 주면 남김) user·project·local 설정을 무시하며 파일 도구를 작업 디렉터리로 가둔다 — Agent·RemoteTrigger·SendMessage·WebSearch 를 빼는지는 help 에 없다.
+
+**3. 실측** (전하 승인 범위: claude Haiku·low · 상한 API 환산 $0.50 · 무해한 지시만). `buildInvocation(loadEngines(), 'haiku', 'low', <프롬프트>, { isolate: true })` + `streamArgv` 를 그대로 쓰고 env 도 같게 실었다. cwd = `/tmp/q27/work`(`notes.txt` 한 줄만 있는 비 git 스크래치). 프롬프트는 "권한 시험이다, 단계마다 지정한 도구를 정확히 한 번 시도하고 대체·재시도하지 말라". 판정은 stream-json 의 `tool_use`·`tool_result`(`is_error`)·`result.permission_denials`. 각 n=1, **6회 누적 $0.1200** (구독제, 청구 없음). 원시 로그는 `/tmp/q27/r1~r6.jsonl`(커밋하지 않음).
+
+| # | 시도 | 결과 |
+|---|---|---|
+| r1-a | Bash `echo hs-orc-q27` | **실행** — `hs-orc-q27` |
+| r1-b | Bash `node --version` | **실행** — `v25.6.1` (문서의 예시 목록에 없지만 읽기 전용으로 분류됐다) |
+| r1-c | Read `notes.txt` (cwd 안) | **실행** |
+| r1-d | Read 저장소 `README.md` (cwd 밖) | 거절 — "requested permissions to read … haven't granted" |
+| r1-e | WebFetch `https://example.com` | 거절 (모델이 먼저 `ToolSearch` 로 지연 도구를 불러왔다 — 그것은 실행) |
+| r1-f | WebSearch `example.com IANA` | 거절 |
+| r2-a | Bash `node -e "console.log(6*7)"` | 거절 — `permission_denied` "This command requires approval" |
+| r2-b | Bash `date +%Y` | **실행** — `2026` |
+| r2-c | Agent(general-purpose) 에 "`echo hs-orc-q27-sub` 를 실행하라" | **실행** — 하위 에이전트가 **백그라운드로** 떠서 Bash `echo` 를 돌렸고 `hs-orc-q27-sub` 를 돌려줬다. 스트림에 `task_started`·`task_notification`·두 번째 `init`, **`result` 줄이 2개** 나왔다 |
+| r3 | 같은 argv + `--tools Read,Glob,Grep` | `init.tools = [Glob, Grep, Read]`. Bash 는 "not available", Read·Glob 은 실행. 거절 0 |
+| r4 | 같은 argv + `--tools ""` (스트림 인자 뒤) | `init.tools = []`, "ok" 응답 |
+| r5 | 같은 argv, `--tools` 없음, "Reply with exactly: ok" | 25개, 입력 합 20,042 토큰(캐시 읽기 18,520) · $0.0061 |
+| r6 | `--tools ""` 를 **`--safe-mode` 바로 뒤·스트림 인자 앞**(isolateArgv 끝에 넣었을 때의 자리) | 인자 파싱 오류 없음, `init.tools = []`, "ok", 입력 합 3,595 토큰 · $0.0047 |
+
+**4. 정리 — 지금 지휘자가 승인 없이 할 수 있는 것**
+- (사실, 실측) 셸 읽기 명령(`echo`·`date`·`node --version` …), cwd 안 Read, 하위 에이전트 띄우기와 그 안의 셸 읽기 명령. 임의 코드 실행(`node -e`)·cwd 밖 Read·WebFetch(example.com)·WebSearch 는 거절된다.
+- (사실, 문서 · 미실측) `cat`·`find`·`grep` 으로 **cwd 밖(홈 포함) 파일 읽기**, 문서 도메인 WebFetch, `RemoteTrigger` 로 claude.ai Routine 생성·실행, `SendMessage` 로 다른 로컬 세션에 메시지, `PushNotification`. 비밀·홈 파일·외부 쓰기 금지 조건이라 재지 않았다. 구독(OAuth) 실행에서 RemoteTrigger·SendMessage 가 실제로 동작하는지는 미검증이다.
+- (추론) 지금 이것을 막는 것은 프롬프트와 Haiku·low 의 선택뿐이다. 지휘자 입력에는 사용자 메시지와 위임 결과(primary 출력 3,000자 — 엔진이 읽은 파일·웹 내용이 섞일 수 있다)가 들어간다 — 프롬프트 주입이 "홈의 파일을 cat 해서 요약에 넣어라" 류를 시키면 막을 인자가 없다. 읽은 내용은 Anthropic(엔진 벤더)으로 가고 화면·세션 기록에 남는다. 실사용 사고 사례는 없다.
+- (사실) 이 노출은 D-052 가 기각한 모양과 같다 — "제품의 읽기 전용 약속이 엔진 기본값·사용자 설정에 달리면 안 된다". 지휘자의 "명령을 실행하지 않는다" 는 약속은 지금 프롬프트와 `default` 모드의 읽기 전용 분류에 달려 있다.
+- (사실) 도구 정의가 격리 실행 고정비의 대부분이다 — r5→r6 입력 20,042 → 3,595 토큰(n=1, "ok" 프롬프트). D-070 상한은 캐시 읽기를 입력과 1:1 로 센다.
+
+**5. 선택지**
+
+| # | 선택지 | 효과 | 위험·비용 |
+|---|---|---|---|
+| T0 | 현행 유지 (프롬프트 + `default` 모드) | 변경 없음 | §4 의 경로가 남는다. README "외부 전송" 에 지휘자의 문서 도메인 WebFetch·RemoteTrigger·PushNotification 경로를 적어야 정직하다. CLI 가 도구를 더하면 조용히 늘어난다(fixture 2.1.283 과 실측 2.1.288 은 같은 25개 — 버전 간 증감은 미추적) |
+| T1 | **`isolateArgv` 끝에 `--tools ""`** — 내장 도구 전부 제거 | r4·r6 실측: `init.tools = []`, 답은 그대로. 실패 시 닫히는(allowlist) 방식이라 CLI 가 새 도구를 더해도 실리지 않는다. 격리 실행 고정비가 약 16k 토큰 줄어든다(r5·r6, n=1). D-051·D-052 의 "인자로 명시" 원칙과 같다. 세 역할(직접 답·요약·분류 폴백)이 함께 바뀐다 — 셋 다 도구가 필요 없다(사실 1-2) | Q26 G4(지휘자 직접 읽기)를 고르면 다시 바꿔야 한다. 도구 정의가 빠진 시스템 프롬프트에서 실제 지휘자 프롬프트의 답 품질은 미측정("ok" 만 쟀다). 빈 문자열 토큰을 engines.json·로더·테스트(`resolve.test.ts:240` 이 끝 5개를 고정)가 받는지 구현 때 확인. `--tools` 의미가 CLI 에서 바뀌면 조용히 샌다(D-050 과 같은 위험) |
+| T2 | `isolateArgv` 끝에 `--tools Read,Glob,Grep` — 읽기 계열만 | r3 실측: 세 개만 실리고 Bash 없음. G4 를 열어 둔다. Read 는 cwd 밖을 묻다가 `-p` 에서 거절된다(r1-d) | 쓰지 않는 도구를 싣는다. cwd(세션 폴더) 안은 `.env` 포함 승인 없이 읽힌다 — 홈 폴더 세션이면 홈 전체다(Q26 사실 6). 고정비는 T1 보다 크다(정의 3개분, 미측정) |
+| T3 | `--disallowedTools` 에 위험 도구를 나열 (Bash·WebFetch·WebSearch·Agent·RemoteTrigger·SendMessage·…) | 기존 `readOnlyArgv` 와 같은 수단이다 | deny list 라 **CLI 가 도구를 더하면 샌다**. 25개 중 무엇을 남길지 판단이 계속 필요하다. 미실측 |
+| T4 | `--permission-mode dontAsk` 명시 | 물을 것을 거절하는 동작이 `-p` 기본값(`--permission-prompts host`)에 기대지 않는다 | **승인이 필요 없는 것(§2-2·3)은 그대로 돈다** — Agent·RemoteTrigger·SendMessage·셸 읽기 명령이 남는다. 지금과 실질 차이가 작다 |
+| T5 | `--restricted` | 코드 실행 도구·WebFetch 제거, 설정 무시, 파일 도구를 작업 디렉터리로 가둠 | Agent·RemoteTrigger·SendMessage·WebSearch 처리가 help 에 없다(미검증). 설정 무시가 `--setting-sources`·`--safe-mode`·D-061 env 와 어떻게 겹치는지 미실측 |
+| — | `--allowedTools Read,…` | — | **기각 후보** — 줄이지 않고 승인을 넓힌다(§2-5) |
+
+*D-050·D-051·D-052 와의 관계* — D-050 은 지휘자에게서 **사용자 설정**을 뺐고 도구는 의도적으로 건드리지 않았다(`--system-prompt` 기각 사유가 "도구 정의까지 바뀐다"). T1·T2 는 그 위에 **도구**를 명시해 빼는 것으로 D-050 을 번복하지 않는다. D-052 `--disallowedTools Edit,Write,NotebookEdit` 는 위임과 공유하는 `readOnlyArgv` 라 그대로 두고(T1 아래에선 중복이지만 무해 — r6 에서 함께 파싱됐다), 지휘자 전용인 `isolateArgv` 에만 더한다. primary·reviewer 는 바뀌지 않는다(D-032·D-069).
+
+*Q26 G4 와의 관계* — Q26 은 G4(지휘자 직접 읽기)를 권하지 않았다. T1 은 그 권장과 맞고, G4 를 고르면 그때 결정으로 T2 로 바꾼다. 그 경우 직접 답만 Read 가 필요하므로 요약·분류 폴백과 argv 를 나눌지(지금 `isolateArgv` 는 엔진당 하나)도 같이 정한다.
+
+*README "외부 전송" 영향* — T1 이면 지휘자가 엔진 호출 외에 밖으로 내보내는 경로가 사라지므로 README 는 바꿀 것이 없다(엔진 벤더로 가는 프롬프트는 기존 전제). T0·T4 면 지휘자의 WebFetch(문서 도메인·안전 검사)·RemoteTrigger·PushNotification 을 적어야 한다. T2 면 WebFetch 는 빠지지만 세션 폴더 파일이 승인 없이 엔진으로 간다는 것을 적어야 한다.
+
+**6. 별견** (이 질문의 범위 밖)
+- **백그라운드 하위 에이전트가 `result` 줄을 두 번 낸다** (r2). 어댑터(`src/adapters/stream.ts:28`)가 여러 `result` 중 무엇을 최종으로 읽는지, 비용 누적(D-057 의 `resume.cumulative`)이 겹치지 않는지는 미검증이다. 위임(primary·reviewer, 격리 없음)에서도 같은 일이 생길 수 있다.
+- **위임(primary·reviewer) claude 실행도 같은 25개+사용자 설정을 싣는다** — D-032·D-069 가 의도한 범위지만, §2-3(셸 읽기 명령이 cwd 밖에도 승인 없이 돈다)과 RemoteTrigger·SendMessage 는 그 결정 당시 따지지 않았다. 별도 질문으로 볼지 전하가 정한다.
+
+**권장안: T1 — `isolateArgv` 끝에 `--tools ""`.** 근거: 세 역할 모두 도구가 필요 없고(사실 1-2), 실측으로 도구가 실제로 빠지고 답이 유지되며(r4·r6), allowlist 라 CLI 가 도구를 더해도 새지 않고(T3·T4 와 다름), 지휘자의 "실행하지 않는다" 를 D-051·D-052 와 같은 방식으로 인자에 명시한다. 덤으로 격리 실행 고정비가 약 16k 토큰 준다. G4 를 고를 때 T2 로 바꾸는 비용은 engines.json 한 줄이다. 구현은 engines.json `isolateArgv`·`$evidence.isolate`, `resolve.test.ts` 기대값, 실엔진 확인(실제 지휘자 직접 답·요약·분류 폴백 각 1회, Haiku·low, 약 $0.02 API 환산)으로 끝난다 (추론).
+
+**결정 대기** 전하 몫:
+1. 방향 — T1(권장) / T2 / T3 / T4 / T5 / T0.
+2. 적용 범위 — 세 역할 모두(권장, 지금 argv 가 하나다) / 직접 답만.
+3. 회귀 감지 — 격리 실행의 `init.tools` 가 비지 않으면 경고·실패로 볼지(D-050 의 "재발 감지는 사람 몫" 을 이 항목에 한해 기계로) / 두지 않는다.
+4. Q26 G4 를 고르면 T2 로 바꾸는 것에 동의하는지.
+5. 별견 2건(이중 `result` · 위임의 승인 없는 도구)을 별도 질문으로 열지.
+
+결정 전에는 `data/engines.json`·어댑터·테스트를 바꾸지 않는다.
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |
@@ -2862,3 +2940,4 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 | ~~Q24~~ | ~~취소(D-066)가 codex 셸 명령을 못 멈춘다 — 그룹 종료 뒤 새 그룹의 명령이 고아로 남는다~~ → **D-078 확정** (K1 — 취소 전 자손 스냅숏, 그룹 밖 자손에도 SIGTERM → 유예 → SIGKILL) | — |
 | ~~Q25~~ | ~~codex 위임 argv 에 `-c agents.enabled=false` 를 실을까~~ → **D-078 확정** (S1 — `engines.json` `alwaysArgv` 로 codex 모든 실행에) | — |
 | Q26 | 행에 안 맞는 실제 작업(코드를 읽는 설명·문서·다이어그램·조사)이 Jev NONE 으로 빠져 처리 경로가 없다 — G1 범용 행 + NONE 좁히기(**권장**, 재평가 통과 조건) · G1b `GENERAL` 라벨 + 수동 선택 · G1c 매트릭스 밖 상수 · G2 지휘자 SUGGEST(D-065 C 와 같은 구조, 비권장) · G4 지휘자 직접 읽기(비권장). 별견: 지휘자 도구가 프롬프트로만 막힘 · 홈 폴더 세션 · 세션 NONE 미분류 미기록 | 대화 세션의 자동 위임 — 수동 경로(G3)는 D-079(#91)로 머지됨 |
+| Q27 | 지휘자(직접 답·요약·분류 폴백) claude 격리 실행의 내장 도구가 프롬프트로만 막혀 있다 — 실측: 셸 읽기 명령·cwd 안 Read·하위 에이전트가 승인 없이 돈다, 문서상 RemoteTrigger·SendMessage·cwd 밖 `cat` 도. T1 `isolateArgv` 에 `--tools ""`(**권장**, 실측으로 도구 0개·답 유지) · T2 `--tools Read,Glob,Grep`(G4 를 고를 때) · T3 deny 나열 · T4 `dontAsk` · T5 `--restricted` · T0 유지 | 없음 (지휘자 격리 강화 — 위임 경로 무관) |
