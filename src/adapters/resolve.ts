@@ -150,6 +150,8 @@ export function buildInvocation(
       // effort 가 이미 모델 id 에 녹아 있다 (SPEC §0.1-3). 별도 플래그가 없다.
       break;
   }
+  // 실행 종류와 무관하게 싣는다 (D-078) — codex 하위 에이전트 끄기처럼 셈·통제 밖 경로를 닫는 인자다.
+  if (spec.alwaysArgv) argv.push(...spec.alwaysArgv);
 
   // 쓰기 권한은 **선언이 있는 엔진만** 받는다. 없으면 읽기 전용으로 떨어뜨리지 않고 던진다 —
   // 조용히 못 쓰면 "고쳤다"는 산출물이 실제로는 아무것도 안 바꾼 채 통과한다 (D-025).
