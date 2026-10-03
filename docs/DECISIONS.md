@@ -1999,6 +1999,55 @@ PR #70 의 codex 조사(`~/.codex/models_cache.json`, client 0.158.0, 2026-09-30
 
 **교체 반영(PR #74, 2026-09-30)** — sol 슬롯 codex id `gpt-5.6-sol` → `gpt-6.1-sol` (전하 결정, 권장안 그대로). cursor 는 0.159.2 시점 `--list-models` 에 6.1 변형이 없어 `gpt-5.6-sol-{effort}` 유지. 단가는 공식 표 $2/$0.1/$10 을 `pricing.json` 에 선언(estimate 아님). 확인 실행 1회(codex low "ok") 환산 약 $0.06~0.09. ultra 보류 그대로, luna·terra·astra 무변경.
 
+**추가 실측 2 — ultra 위험 3종 · luna medium · 단가·목록 재확인** (2026-10-03, codex-cli 0.159.2, `models_cache.json` fetched 2026-10-03T01:27:49Z, 구독제 — 금액은 API 환산, 전하 승인 상한 ① $3 · ② $0.5)
+방법: orc 어댑터와 같은 argv(`exec <prompt> -m … -c model_reasoning_effort=… -c sandbox_mode="read-only" --skip-git-repo-check --json`)·같은 실행 방식(`detached` 그룹, stdin 닫음)을 흉내 낸 임시 러너를 `/tmp` 스크래치(비 git)에서 돌렸다(`Effort` 유니온이 ultra 를 받지 않아 어댑터를 직접 쓰지 않았다). 자식 토큰은 codex 세션 로그(`~/.codex/sessions/…/rollout-*.jsonl` 의 `session_meta.parent_thread_id`·`token_usage_record`)로 대조했다 — 제품 경로가 아니라 실측용으로만 읽었다. 스크래치 파일 sha 는 전 실행에서 전후 동일(변경 0), unparsed 0.
+
+| 실행 | 설정 | 하위 에이전트 | 결과 | 환산 $ (자식 포함) |
+|---|---|---|---|---|
+| U1 | gpt-6.1-sol ultra, "파일마다 하위 에이전트 1개, 각자 쓰기 1회 시도" | 2 (부모가 `spawn_agent` 로 **gpt-6-luna low** 지정) | 둘 다 `zsh:1: operation not permitted: sub_a.txt` — 쓰기 막힘 | 0.111 |
+| U2 | gpt-6.1-sol ultra, "하위 에이전트 2개가 `sleep 90` 실행" → 25s 에 그룹 SIGTERM, 2s 뒤 SIGKILL | 2 (fork — gpt-6.1-sol ultra 상속) | 하위 에이전트의 `sleep 90` 이 **살아남음** (아래 c) | 0.113 |
+| C0 | gpt-6.1-sol low, 하위 에이전트 없이 부모가 `sleep 90` → 같은 그룹 종료 | 0 | **같이 살아남음** — ultra 무관 | 0.058 |
+| M1 | U1 + `-c features.multi_agent=false` | 2 (gpt-6-luna low) — **안 먹음** | 자식 1개가 끝나지 않아(입력 384,632) 부모가 `wait_agent` 를 반복하다 러너 하드 타임아웃으로 종료 | 0.155 |
+| M2 | U1 + `-c agents.enabled=false` | 0 — **먹음** (모델: "내장 하위 에이전트 생성 도구가 없어") | 대신 셸로 `codex exec` 자식 2개를 띄우려 했고 read-only sandbox 에서 `failed to initialize in-process app-server client: Operation not permitted` 로 실패 | 0.151 |
+
+①합계 환산 **$0.588** / 상한 $3 (미도달).
+
+사실
+- **(a) 자식 토큰은 `turn.completed.usage` 에 합쳐지지 않는다.** U1 부모 스트림 usage(입력 267,749 · 캐시 233,088 · 출력 1,223)는 부모 rollout 의 `token_usage_record` 합과 정확히 같고, 자식 2개(입력 126,893 · 126,843)는 빠졌다 — 전체 입력의 48.7%. 이번엔 자식이 luna 라 금액 누락은 $0.006(5.6%)뿐이었지만, U2 처럼 자식이 부모 모델(sol ultra)을 상속하면 자식 1개가 부모와 비슷한 금액($0.053 vs $0.059)을 쓴다. 취소된 실행(U2)은 `turn.completed` 자체가 없어 스트림 usage 가 0 이다(D-066 결정 6 의 "측정값 없음" 경로).
+- **스트림에 자식이 안 보인다.** `exec --json` 에는 `spawn_agent` 가 item 으로 나오지 않고 `collab_tool_call`(tool `wait`, `receiver_thread_ids: []`, `agents_states: {}`)만 나온다. 자식의 명령(`echo written > …`)도 부모 스트림에 없다 — 위 위험 4 가 사실로 확인됐다.
+- **(b) 읽기 전용은 자식에 상속된다.** 자식 rollout 의 `turn_context.sandbox_policy` 가 `read-only`(U1 의 luna 자식·U2 의 fork 자식 모두), 쓰기 시도는 `operation not permitted` 로 실패, 스크래치 무변경. 자식 모델·effort 는 상속이 기본이지만 부모가 `spawn_agent` 인자로 바꿀 수 있다(U1·M1: `model: gpt-6-luna, reasoning_effort: low`). 공식 문서(learn.chatgpt.com/codex/agent-configuration/subagents)도 "Explicit spawn values override …" 라고 적는다.
+- **(c) 프로세스 그룹 종료로 자식 *스레드*는 죽지만 자식이 띄운 *셸 명령*은 살아남는다.** 하위 에이전트는 별도 프로세스가 아니라 codex 프로세스 안의 스레드다(프로세스 트리에 codex 바이너리 1개) — 그룹 종료 뒤 자식 rollout 기록도 멈췄다. 그런데 codex 는 셸 명령마다 **새 프로세스 그룹**을 만든다(U2: codex pgid 88640, `sleep 90` pgid 91379). 그래서 `process.kill(-pid)` 가 닿지 않고, codex 가 SIGTERM 에 정상 종료(exit 0)한 뒤에도 명령은 ppid 1 로 고아가 되어 돌았다. **C0 에서 하위 에이전트 없이도 똑같이 재현** — ultra 의 문제가 아니라 D-066 취소 경로가 실제 codex 에서 셸 명령을 못 멈추는 결함이다(D-066 검증은 같은 그룹에 손자를 띄우는 가짜 바이너리라 이 경우를 못 봤다). 남은 프로세스는 수동으로 정리했다. claude 의 Bash 도구가 같은지는 미실측.
+- **multi_agent 끄기**: `-c features.multi_agent=false` 는 효과가 없다(M1 — 이 모델은 `multi_agent_version: v2` 이고 `codex features list` 의 `multi_agent_v2` 는 원래 false 인데도 v2 도구가 있다). 공식 문서의 스위치 `agents.enabled`(“Enable or disable multi-agent tools”)를 `-c agents.enabled=false` 로 주면 spawn 도구가 사라진다(M2, ultra 에서도). 단 모델이 **셸로 `codex exec` 를 직접 띄워 우회하려 했다** — read-only 에서는 홈 쓰기가 막혀 실패했다.
+
+추론 · 미검증
+- 사용자 전역 `~/.agents/skills/delegation-router`(D-032 로 위임 엔진에 실린다)를 부모가 매번 먼저 읽었고(U1·M1·M2), 그 "하향 위임 우선" 이 자식 모델을 luna low 로 고른 이유로 보인다(추론). **ultra 가 아닌 effort 에서도** 이 전역 스킬이 평소 orc 위임에서 하위 에이전트를 띄우게 하는지는 미실측 — 띄운다면 ultra 를 꺼 둔 지금도 (a)의 셈 누락이 생긴다.
+- `-c agents.enabled=false` 가 `codex exec resume` 에도 먹는지, `workspace-write`(쓰기 위임)에서 셸 `codex exec` 우회가 막히는지는 미실측.
+- M1 의 멈춘 자식은 1회 관찰(n=1)이다. 러너 하드 타임아웃(600s)이 실제로는 약 1,033s 에 걸렸다 — 그 무렵 머신 부하가 극단적이었고 곧 재부팅됐다(원인 미확인).
+
+**luna medium 재현** (작업 ① 같은 프롬프트 "Read cart.ts … at most 6 lines … one edge-case risk", 9-30 세션 로그에서 복원한 `cart.ts` — 이번 스크래치에는 `bad.ts` 가 없다. 읽기 전용 argv, 각 1회씩)
+
+| 모델 effort | n | 성공 | 실패 | 실패 서명 |
+|---|---|---|---|---|
+| gpt-6-luna medium | 5 | 3 | **2** | 명령 0 · 입력 37,634 / 캐시 12,032 · 출력 52~67 — "cart.ts 를 찾을 수 없다/읽을 수 없다" |
+| gpt-6-luna low (오늘 대조) | 5 | 3 | **2** | 같은 서명(입력·캐시 동일, 출력 69~71). 하나는 "파일시스템 읽기 권한도 제한되어 있다"고 지어냈다 |
+| gpt-5.6-luna low (현행 슬롯 대조) | 3 | 3 | 0 | — (전부 읽기 명령 1~2회) |
+
+- **medium 으로 올려도 실패한다** — 2/5. low 와 같은 비율·같은 서명(첫 응답에서 도구를 부르지 않고 답한다)이라 effort 축의 문제가 아니라 gpt-6-luna 의 경향으로 본다(추론). low 는 9-30 의 3/4 와 합쳐 5/9 실패. 성공한 실행의 답은 모두 정확했다(할인율 범위 미검증 위험).
+- 금액(②): gpt-6-luna 10회 $0.032 + gpt-5.6-luna 3회 $0.023 = **$0.055** / 상한 $0.5. 실패 실행은 짧아서 싸다($0.0027) — 비용으로는 못 잡는다.
+
+**단가·목록 재확인** (2026-10-03)
+- 공식 가격표(developers.openai.com/api/docs/pricing, Standard 단문): gpt-6.1-sol $2/$0.1/$10, gpt-6-sol $2/$0.2/$10, gpt-6-luna $0.1/$0.01/$0.5, gpt-6-astra $10/$1/$50, gpt-5.6-sol $4/$0.4/$20, gpt-5.6-luna $0.2/$0.02/$1.2, gpt-5.6-terra $2/$0.2/$12 — 9-30 과 같다. **gpt-reserve 는 여전히 표에 없다.**
+- 캐시: gpt-reserve 는 여전히 `visibility: hide` · `multi_agent_version: v1` · ultra 없음 · 기본 medium. 다른 모델 목록·설명도 9-30 추가 실측 때와 같다.
+- `cursor-agent --list-models`(2026.10.01-e373342): gpt-6* 변형이 **없다** — `gpt-5.6-sol-{none|low|medium|high|xhigh|max}`·각 `-fast` 그대로.
+
+**권장안 (2026-10-03 갱신 — 교체·활성화는 전하 결정 후 별도 PR; engines·matrix·코드 무변경)**
+- **luna 슬롯: gpt-5.6-luna 유지 (갱신 — medium 도 근거가 없다).** gpt-6-luna 는 medium 에서도 파일을 열지 않고 "없다"고 답하는 실패가 2/5 였고, 현행 gpt-5.6-luna 는 같은 조건 3/3 이다. 9-30 권장의 "medium 이상이면 쓸 수도" 단서는 이번 실측으로 닫는다. gpt-reserve 는 단가 미공개·`hide` 그대로라 보류 유지.
+- **sol 슬롯**: gpt-6.1-sol 그대로(#74). **cursor** 의 `gpt-5.6-sol-{effort}` 도 그대로 — 목록에 6.1 변형이 아직 없다.
+- **ultra: 켜지 않는다(유지).** (a) 자식 토큰이 스트림 usage 에 안 잡혀 `tokenBudget`·`budgetUsd` 가 새고, 자식을 스트림에서 볼 수 없으며, 자식 모델을 부모가 임의로 고른다. orc 가 이를 셀 공식 경로가 없다(세션 로그 읽기는 D-020 과 같은 비공식 경로). (b)는 통과했지만 (a)만으로 막힌다.
+- **새 질문 두 개를 연다** — ultra 와 별개로 지금 codex 위임에 걸리는 것들이다: **Q24**(취소가 codex 셸 명령을 못 멈춘다 — 위 c), **Q25**(하위 에이전트를 인자로 끌지 — 위 multi_agent 끄기).
+
+**상태(추가 실측 2)** 기록만 — `engines.json`·`matrix.json`·코드 무변경. 실측은 `/tmp` 임시 러너로 했고 저장소에 스크립트를 더하지 않았다.
+
 ---
 
 ## D-068 — 상향 사다리를 사용자가 눌러 실제 배정에 적용한다 (D-064 A3 를 실제로 건다)
@@ -2481,6 +2530,44 @@ PLAN S10 후속: "GuiService 는 활성 세션 하나. CLI 는 `hs-orc chat` 이
 
 ---
 
+## Q24 — 취소(D-066)가 codex 의 셸 명령을 멈추지 못한다: 프로세스 그룹 밖 자손을 어떻게 죽일까 (D-067 추가 실측 2 (c))
+
+**배경** D-066 은 위임 취소를 어댑터의 프로세스 그룹 종료(`process.kill(-pid)` SIGTERM → 2초 → SIGKILL, 종료 시 동기 SIGKILL)로 한다. 실제 codex 0.159.2 는 셸 명령마다 **새 프로세스 그룹**을 만들어(실측: codex pgid 88640, `sleep 90` pgid 91379) 그룹 신호가 닿지 않는다. codex 는 SIGTERM 에 exit 0 으로 끝나면서 명령을 정리하지 않고, 명령은 ppid 1 로 고아가 되어 계속 돈다 — ultra·하위 에이전트와 무관하게 low 단일 실행(C0)에서도 재현. 영향: 취소·타임아웃 뒤에도 긴 명령(빌드·테스트·`sleep`·네트워크)이 남는다. 읽기 전용이면 쓰기는 sandbox 가 막지만 CPU·네트워크·시간은 쓰고, 쓰기 위임(`workspace-write`)이면 **취소 뒤에도 파일이 바뀔 수 있다**(추론). 모델 호출은 codex 가 죽어 멈추므로 토큰 과금은 늘지 않는다(추론). D-066 검증은 같은 그룹에 손자를 띄우는 가짜 바이너리라 이 경우를 못 봤다.
+
+**선택지**
+
+| # | 선택지 | 효과 | 위험·비용 |
+|---|---|---|---|
+| K1 | **취소 시점에 자손 트리를 스냅숏해 각 자손의 프로세스 그룹에도 신호를 보낸다** — `ps -axo pid=,ppid=,pgid=` 로 엔진 pid 의 자손을 ppid 로 따라가 모은 pgid 집합에 SIGTERM → 유예 → SIGKILL. **엔진에 신호를 보내기 전에** 모아야 한다(엔진이 죽으면 자손이 ppid 1 로 옮겨 연결이 끊긴다) | 실측한 고아 경로를 막는다. 엔진 이름을 코드에 박지 않는다(모든 엔진에 같이 건다) | `ps` 의존(macOS·Linux 공통 옵션). 스냅숏 뒤 생긴 자손은 놓친다 — 유예 중 한 번 더 모으면 줄어든다. exit 훅(동기)에서도 같은 일을 하려면 `execSync('ps …')` 가 든다 |
+| K2 | K1 + 엔진 실행 동안 자손 pgid 를 주기적으로(예: 1초) 모아 둔다 | 엔진이 먼저 죽은 경우(크래시)도 덮는다 | 상시 `ps` 폴링 비용, 구현이 커진다 |
+| K3 | 엔진에 맡긴다 — codex 의 종료 처리 개선을 기다린다 | 코드 변경 없음 | 지금 고아가 남는 것이 확인됐다. 기한 없음 |
+| K4 | 그대로 두고 문서·카드에 "취소해도 엔진이 띄운 명령은 남을 수 있다" 고 적는다 | 작다 | 쓰기 위임 취소의 의미가 약해진다 |
+
+**권장안: K1.** 확인된 결함을 확인된 수단(그룹이 아니라 pgid 집합)으로 막고, 범위는 어댑터 `run.ts` 의 `terminate`·exit 훅 한 곳이다. 검증은 "새 그룹을 만드는 손자"(`setsid`/`set -m` 류)를 띄우는 가짜 바이너리로 그 손자가 사라지는지, 실제 codex `sleep` 1회로 확인한다. K2 는 크래시 고아가 실사용에서 보이면 본다. claude Bash 도구의 그룹 동작은 K1 구현 때 같이 실측한다(미실측).
+
+**결정 대기** 전하 몫: K1~K4. 결정 전에는 코드를 바꾸지 않는다.
+
+---
+
+## Q25 — codex 위임에서 하위 에이전트를 인자로 끌까 (`-c agents.enabled=false`) (D-067 추가 실측 2 (a)·multi_agent 끄기)
+
+**배경** codex 의 하위 에이전트 토큰은 `exec --json` 의 `turn.completed.usage` 에 합쳐지지 않고, 스트림에 자식이 보이지 않으며, 부모가 자식 모델·effort 를 바꿀 수 있다(D-067 추가 실측 2 (a)). 지금 ultra 는 `Effort` 밖이라 orc 가 쓰지 않지만, **ultra 가 아니어도** 프롬프트가 요청하면 하위 에이전트를 띄운다(공식 문서) — D-032 로 위임 엔진에 실리는 사용자 전역 `delegation-router` 스킬이 위임을 권하는데, 이것이 평소 위임에서 실제로 spawn 을 일으키는지는 **미실측**이다. 실측된 스위치: `-c features.multi_agent=false` 는 효과 없음, `-c agents.enabled=false` 는 spawn 도구를 없앤다(ultra 에서도). 이때 모델이 셸로 `codex exec` 를 띄워 우회하려 했고 read-only 에서는 실패했다.
+
+**선택지**
+
+| # | 선택지 | 효과 | 위험·비용 |
+|---|---|---|---|
+| S1 | **codex 의 모든 위임 argv(읽기·쓰기·resume)에 `-c agents.enabled=false` 를 engines.json 선언으로 싣는다** | 셈 밖 자식이 생기는 경로를 닫는다. ultra 를 켜지 않는 한 잃는 기능이 없다(orc 는 하위 위임을 행·사다리로 직접 한다) | 사용자 전역 설정·스킬이 기대하는 위임을 막는다(D-032 "전역 환경을 싣는다" 와 결이 다르다 — 단 비용 셈의 정확성 문제라 별개로 본다). resume·`workspace-write` 에서의 효과와 셸 `codex exec` 우회 차단은 미실측 → 같이 확인 |
+| S2 | 끄지 않고, 자식 몫을 codex 세션 로그(`rollout-*.jsonl` 의 `parent_thread_id`·`token_usage_record`)에서 읽어 더한다 | 하위 에이전트를 살린 채 셈이 맞는다 | 비공식 파일 형식에 기댄다(D-020 과 같은 이유로 비권장). 형식이 바뀌면 조용히 틀린다 |
+| S3 | 먼저 실측만 — 평소 effort(ultra 아님)의 orc 위임에서 하위 에이전트가 실제로 뜨는지 n 회 본 뒤 정한다 | 근거가 생긴다 | 결정이 늦어진다. 그 사이 뜨면 셈이 샌다(현재 빈도 미상) |
+| S4 | 그대로 둔다 | 없음 | 위 위험이 열린 채 남는다 |
+
+**권장안: S1 (+ 같은 PR 에서 resume·`workspace-write`·셸 우회를 소액 실측).** 인자 한 줄이고 확인된 수단이며, orc 가 하위 위임을 스스로 관리하는 설계(행·사다리·승인 단위)와 맞는다. ultra 를 나중에 켜려면 S2 같은 셈 경로가 먼저라 그때 따로 연다.
+
+**결정 대기** 전하 몫: S1~S4. 결정 전에는 `engines.json`·코드를 바꾸지 않는다.
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |
@@ -2508,3 +2595,5 @@ PLAN S10 후속: "GuiService 는 활성 세션 하나. CLI 는 `hs-orc chat` 이
 | ~~Q21~~ | ~~세션 토큰 상한이 캐시 읽기를 입력과 1:1 로 센다~~ → **D-070 확정** (셈 유지 + 캐시 읽기 별도 표시). 가중 셈·금액 상한 중심은 **미결** — 구독 한도의 캐시 읽기 셈을 1차 자료로 확인한 뒤에만 다시 본다 (D-070 미결 절) | — |
 | ~~Q22~~ | ~~빈 폴더 스캐폴딩 — (가) git 아닌 폴더 codex 쓰기 위임이 거절될 것을 승인 전에 알릴지 (나) `npx create-*` 를 위임으로 돌릴지·사람이 돌릴지~~ → **D-074 확정** (A2 카드 예고 · B1 스캐폴더는 사람이 먼저) | — |
 | Q23 | TUI 를 어떻게 할까 — 대화 세션 전환(T1) · 단발 전용 고정 + Ctrl-C 결함 수리(T2) · 제거하고 CLI 로 일원화(T3) · 보류(T4). 권장 T3, 안 고르면 최소 T2 | — (S10 후속) |
+| Q24 | 취소(D-066)가 codex 셸 명령을 못 멈춘다 — codex 가 명령마다 새 프로세스 그룹을 만들어 그룹 종료 뒤 고아로 남는다 (D-067 추가 실측 2). 선택지 K1 자손 pgid 스냅숏 후 신호 / K2 상시 수집 / K3 엔진에 맡김 / K4 문서만. **권장 K1** | 취소·타임아웃의 실효 (특히 쓰기 위임) |
+| Q25 | codex 위임 argv 에 `-c agents.enabled=false` 를 실을까 — 하위 에이전트 토큰이 `turn.completed.usage` 에 안 잡힌다 (D-067 추가 실측 2). 선택지 S1 인자로 끈다 / S2 세션 로그로 셈 / S3 실측 먼저 / S4 그대로. **권장 S1** | Budget 셈 정확성, ultra 재검토 |
