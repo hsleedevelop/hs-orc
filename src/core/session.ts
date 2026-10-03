@@ -82,6 +82,8 @@ interface Pending {
   readonly check: ApprovalCheck;
   /** 사용자가 누른 사다리 상향 배정이다 (D-068). 위임은 새 엔진 세션으로 돌고 직전 실패 근거가 프롬프트에 실린다. */
   readonly ladder?: LadderRecord;
+  /** 승인한 같은 배정이 예외로 끝나 다시 세운 카드다 (D-081). 이것이 또 던지면 다시 세우지 않는다. */
+  readonly retry?: boolean;
 }
 
 /** 사다리가 다음에 올릴 단계 (D-068). 화면의 버튼과 chat `/ladder` 가 이것을 본다. */
@@ -296,15 +298,15 @@ export class ConversationSession {
   }
 
   /** 배정을 승인 대기로 세우고 `plan` 을 남긴다. 상태를 `blocked` 로 바꾼다. */
-  private stage(title: string, plan: AssignmentPlan, reason: string, notes: readonly string[], write = false, ladder?: LadderRecord): TranscriptRecord {
+  private stage(title: string, plan: AssignmentPlan, reason: string, notes: readonly string[], write = false, ladder?: LadderRecord, retry = false): TranscriptRecord {
     const { primary, reviewer, secondReviewer } = plan.slots;
     const { catalog, budget } = this.deps;
     const inGit = this.deps.inGit ?? true;
-    const check = evaluateApproval({ mode: this.modeValue, plan, reason, write, catalog, budget, records: this.log, inGit, ...(ladder ? { ladder: true } : {}) });
+    const check = evaluateApproval({ mode: this.modeValue, plan, reason, write, catalog, budget, records: this.log, inGit, ...(ladder ? { ladder: true } : {}), ...(retry ? { retry: true } : {}) });
     // manual 은 묻는 이유(`asked`)가 비므로 H4 를 안내 줄로 싣는다 — 어느 방식이든 카드가 같은 줄을 보인다 (D-074).
     const refusal = check.mode === 'manual' ? nonGitWriteRefusal(catalog, plan, write, inGit) : null;
     const guide = [...(refusal ? [refusal.text] : []), ...this.scaffoldGuide(write)];
-    this.pending = { title, plan, reason, write, check, ...(ladder ? { ladder } : {}) };
+    this.pending = { title, plan, reason, write, check, ...(ladder ? { ladder } : {}), ...(retry ? { retry } : {}) };
     this.stateValue = 'blocked';
     return this.append({
       kind: 'plan',
@@ -321,12 +323,13 @@ export class ConversationSession {
       asked: check.asks,
       ...(write ? { write: true } : {}),
       ...(ladder ? { ladder } : {}),
+      ...(retry ? { retry: true as const } : {}),
     });
   }
 
   /**
    * 선 카드가 자동 승인 대상이면 시작한다. 판정은 `stage()` 가 이미 냈다. 카드가 서는 세 경로 중 route 만 부른다 —
-   * 지휘자 제안 카드(`suggestedPlan`)는 H1 이라 어떤 방식에서도 사람이 누르고, 다음 제안·사다리·재시도는 카드만 세운다.
+   * 지휘자 제안 카드(`suggestedPlan`)는 H1 이라 어떤 방식에서도 사람이 누르고, 다음 제안·사다리·예외 재시도(D-081)는 카드만 세운다.
    */
   private async autoApprove(): Promise<TranscriptRecord[]> {
     if (!this.pending?.check.auto) return [];
@@ -420,6 +423,9 @@ export class ConversationSession {
     const mark = budget.mark();
     const controller = new AbortController();
     this.delegation = controller;
+    // delegate() 가 돌려줬나 — 그 뒤(기록·요약)에서 던진 것은 위임이 끝난 것이라 다시 세우지 않는다 (D-081).
+    let returned = false;
+    let thrown = false;
     try {
       // 사다리 위임은 잇지 않는다 — 같은 실패를 같은 방식으로 재시도하지 않고, 실패 근거는 프롬프트에 명시해 싣는다 (D-068 결정 9).
       const ref = pending.ladder ? null : this.resumable(pending.plan, write);
@@ -444,6 +450,7 @@ export class ConversationSession {
         signal: controller.signal,
         ...(ref ? { resumePrimary: ref.id, ...(ref.baseline ? { resumeBaseline: ref.baseline } : {}) } : {}),
       });
+      returned = true;
       this.delegation = null; // 이후(기록·요약)는 취소할 위임이 아니다.
       if (d.outcome === 'cancelled') {
         // 사용자가 멈췄다 (D-066). 요약을 부르지 않고(돈을 더 쓰지 않는다) 엔진 세션은 남기지 않는다 — 다음 위임은 새로 띄운다.
@@ -483,12 +490,27 @@ export class ConversationSession {
       out.push(...(await this.summarize(pending.title, d)));
     } catch (error) {
       out.push(this.append({ kind: 'error', text: `위임이 끝나지 못했다: ${why(error)}` }));
+      // 사용자가 취소한 뒤의 예외는 재시도 대상이 아니다 (D-066).
+      thrown = !returned && !controller.signal.aborted;
     } finally {
       this.delegation = null;
       this.stateValue = 'waiting_input';
       this.recordSpend(mark);
     }
+    if (thrown) out.push(this.restage(pending, write));
     return out;
+  }
+
+  /**
+   * 승인한 배정이 예외로 끝났다 — 같은 계획(행·슬롯·reason·쓰기·사다리)으로 카드를 다시 세운다 (D-081). **시작하지 않는다** —
+   * 어느 방식에서도 A3 로 묻는다. 다시 세운 카드가 또 던지면 세우지 않는다: 같은 실패를 같은 방식으로 2회 연속 재시도하지 않는다 (PLAN 중단 조건).
+   * 쓰기는 이번 실행에 켠 값이다 — 사람이 승인 때 켠 것을 다시 끄지 않는다.
+   */
+  private restage(pending: Pending, write: boolean): TranscriptRecord {
+    if (pending.retry) {
+      return this.append({ kind: 'error', text: '다시 세운 같은 배정도 예외로 끝났다 — 카드를 또 세우지 않는다. 메시지를 다시 보내거나 행을 다시 지정한다.' });
+    }
+    return this.stage(pending.title, pending.plan, pending.reason, [], write, pending.ladder, true);
   }
 
   /**

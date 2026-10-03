@@ -341,7 +341,7 @@ PRD §7 은 v1 을 **"실제 작업 1건이 분류→배정→실행→증거 �
   - ~~렌더러가 안 쓰는 레거시 `plan`/`run` IPC·preload~~ → IPC·preload 만 지웠다 (사용자 결정). `GuiService.plan`·`run` 과 S7 판정 테스트는 남긴다.
 - SDD 원장 보류 minor — 2026-09-25 정리:
   - 고침: `readTranscript` 는 없는 기록(ENOENT·ENOTDIR)만 빈 대화로 보고 다른 읽기 오류는 던진다(목록은 그 세션을 "(읽지 못한 기록)" 으로 보여준다) · `parseSuggest` 주석을 실제 규칙(마지막 줄 전체 일치, `parseVerdict` 보다 엄격)으로 · `limits.json` 을 읽을 때 검사(`checkLimits` — 상한은 양수, `contextChars` 는 2 이상 정수) · 스크래치 `openConversation` 은 실제 경로로 비교하고 뿌리 자체를 막는다 · 세션 목록 행은 Tab·Enter/Space 로 연다.
-  - 남김: 승인 계획을 `delegate()` 전에 비워 throw 시 버려짐 — `planAs` 로 다시 배정할 수 있어 재시도 승인 흐름이 필요해질 때 · `send('')` 의 조용한 `[]` — GUI 와 `hs-orc chat`(D-056) 이 빈 입력을 먼저 거른다.
+  - 남김: ~~승인 계획을 `delegate()` 전에 비워 throw 시 버려짐 — `planAs` 로 다시 배정할 수 있어 재시도 승인 흐름이 필요해질 때~~ → 해결 (DECISIONS **D-081**: 예외면 같은 계획으로 카드를 한 번 다시 세우고 어느 방식에서도 A3 로 다시 묻는다) · `send('')` 의 조용한 `[]` — GUI 와 `hs-orc chat`(D-056) 이 빈 입력을 먼저 거른다.
   - 버림: `run.ts` 의 truthy `sessionId` — 빈 id 는 이어 붙일 수 없어 버리는 것이 맞다.
 - ~~Q12 스크래치 보존·정리~~ → 자동 정리 없음 (DECISIONS Q12).
 - **승인 방식 실사용 검증 (D-064 3단계, 2026-09-30):** GUI(가짜 엔진, 과금 없음) — 방식 3종 전환·재열기 유지, auto-ask 에서 첫 위임 A4·쓰기 위임 H2·R05 A1 은 묻는 이유를 이름으로 보이고, 조건 없는 R01 은 카드가 보인 채 자동 승인·실행, 자동 실행 중 취소(D-066) 통과. 결함 1건 — 자동 승인 위임이 도는 동안 카드·취소 버튼이 안 보임(렌더러가 요청 반환 전 뷰를 안 읽음) → 진행 중 뷰 폴링으로 수정. 실엔진(스크래치 chat, Jev 켬, 읽기 전용) — 첫 R01 은 `approval{by:user, asked:[A4]}`·note `승인 user` $0.0913, 같은 세션 두 번째 R01 은 `approval{by:auto, asked:[]}`·note `승인 auto` $0.0567, 합계 약 $0.195 API 환산. 근거·미검증(H1 실엔진·A2·A3) 는 DECISIONS D-064 '실사용 검증'.

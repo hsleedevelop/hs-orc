@@ -12,6 +12,10 @@ interface Ladder { readonly label: string; readonly from: string; readonly chang
 export const ladderLines = (ladder: Ladder | undefined): string[] =>
   ladder ? [`사다리 ${ladder.label} — 결정 ${ladder.from} 의 같은 요청을 상향한다`, ...ladder.changes] : [];
 
+/** 예외 재시도 카드 (D-081) — 같은 배정을 다시 세웠다는 것과 한 번뿐이라는 것. chat 과 GUI 가 같은 문구를 쓴다. */
+export const retryLines = (retry: boolean | undefined): string[] =>
+  retry ? ['재시도 — 승인한 같은 배정이 예외로 끝나 같은 계획으로 다시 세운 카드다 (한 번뿐 — 또 예외면 다시 세우지 않는다)'] : [];
+
 export const cutLine = (cut: Cut | undefined): string[] => (cut ? [`맥락   앞 대화 ${cut.turns}턴·${cut.chars}자를 싣지 못했다`] : []);
 
 export const compactLines = (compacted: readonly Compaction[] | undefined): string[] =>
