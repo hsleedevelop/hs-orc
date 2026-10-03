@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, globSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Evidence } from './evidence.ts';
+import { gitEnv } from './git-env.ts';
 
 /** 명령을 실제로 돌려 exit code 를 받는다. **출력이 아니라 코드가 증거다.** */
 export function runCommand(cmd: string, cwd = process.cwd(), phase?: string, timeout = 300_000): Evidence {
@@ -20,9 +21,9 @@ export function runCommand(cmd: string, cwd = process.cwd(), phase?: string, tim
   };
 }
 
-/** 변경 파일 목록 — git 이 진실이다. 모델이 말한 목록을 믿지 않는다. */
+/** 변경 파일 목록 — git 이 진실이다. 모델이 말한 목록을 믿지 않는다. 훅 아래에서도 `cwd` 의 저장소를 읽는다. */
 export function changedFiles(cwd = process.cwd()): Evidence {
-  const r = spawnSync('git', ['status', '--porcelain'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const r = spawnSync('git', ['status', '--porcelain'], { cwd, encoding: 'utf8', env: gitEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
   const files = (r.stdout ?? '')
     .split('\n')
     .map((l) => l.slice(3).trim())

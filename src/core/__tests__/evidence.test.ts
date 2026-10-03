@@ -6,6 +6,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { changedFiles, runCommand, snapshotTests, testChanges } from '../evidence-gather.ts';
+import { gitEnv } from '../git-env.ts';
+import { spawnSync } from 'node:child_process';
 
 const matrix = loadMatrix();
 const row = (id: string) => matrix.assignments.find((a) => a.id === id)!;
@@ -177,5 +179,28 @@ describe('기계적 수집', () => {
   it('변경 파일은 git 이 진실이다 — 모델이 말한 목록을 믿지 않는다', () => {
     const e = changedFiles();
     assert.equal(e.kind, 'changed-files');
+  });
+
+  it('훅이 심은 GIT_DIR 이 있어도 작업 폴더의 저장소를 읽는다', () => {
+    // 저장소 둘 다 임시 폴더다 — git init 도 gitEnv() 로 띄워 훅의 GIT_DIR(공유 .git)을 건드리지 않는다.
+    const repo = (file: string): string => {
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-ev-git-'));
+      spawnSync('git', ['init', '-q'], { cwd: dir, env: gitEnv() });
+      writeFileSync(path.join(dir, file), 'x');
+      return dir;
+    };
+    const work = repo('mine.txt');
+    const outer = repo('outer.txt');
+    // 바깥 인덱스에 올려 둔다 — GIT_DIR 만 새면 작업 트리는 cwd 라, 인덱스가 비면 틀려도 같은 답이 나온다.
+    spawnSync('git', ['add', 'outer.txt'], { cwd: outer, env: gitEnv() });
+    const saved = process.env['GIT_DIR'];
+    process.env['GIT_DIR'] = path.join(outer, '.git');
+    try {
+      const e = changedFiles(work);
+      assert.deepEqual(e.kind === 'changed-files' ? e.files : null, ['mine.txt']);
+    } finally {
+      if (saved === undefined) delete process.env['GIT_DIR'];
+      else process.env['GIT_DIR'] = saved;
+    }
   });
 });
