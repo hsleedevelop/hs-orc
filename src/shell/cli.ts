@@ -200,7 +200,7 @@ async function main(): Promise<void> {
     // 정상 비즈니스 상태다 — notice 로 내린다 (PLAN S6-4).
     const note = reportNotice('pipeline', 'unclassified', result.message);
     // Jev 가 답했으면(D-065) 그 판정이 끝이다 — Haiku 로 다시 묻지 않는다.
-    const jevDecided = routed.jev === 'none' || routed.jev === 'unsure';
+    const jevDecided = routed.jev === 'none' || routed.jev === 'general' || routed.jev === 'unsure';
     const second = jevDecided
       ? 'Jev 가 판정했다 — LLM 폴백은 돌리지 않는다.'
       : args.classifyLlm ? 'LLM 폴백도 맞는 행을 고르지 못했다.' : 'LLM 폴백은 --no-classify-llm 으로 꺼져 있다.';

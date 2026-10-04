@@ -320,6 +320,15 @@ describe('routeWithFallback — Jev (D-065)', () => {
     assert.equal(r.fallback?.outcome, 'none');
   });
 
+  it('GENERAL 도 배정하지 않는다 — 행에 안 맞는 작업이라고 말한다 (D-082)', async () => {
+    const jev = returns(answer('GENERAL', { GENERAL: 0.9, NONE: 0.08, R02: 0.02 }, 0.86));
+    const r = await routeWithFallback(matrix, catalog, '모듈 의존 관계를 mermaid 로 그려줘', { ...opts, jev });
+    assert.equal(r.result.stage, 'unclassified');
+    assert.equal(r.jev, 'general');
+    assert.equal(r.fallback?.outcome, 'general');
+    assert.match(r.fallback?.line ?? '', /Jev 분류 → 행에 안 맞는 작업 \(GENERAL p=0\.90 · conf=0\.86 · /);
+  });
+
   it('Jev 로 붙은 행도 하한선이 먼저 막는다', async () => {
     const jev = returns(answer('R10', { R10: 0.99, NONE: 0.01 }, 0.98));
     const r = await routeWithFallback(matrix, catalog, '설계 검토', { ...opts, jev, gate: { irreversibleChange: true } });

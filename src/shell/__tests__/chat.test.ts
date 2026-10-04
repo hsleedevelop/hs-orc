@@ -45,6 +45,11 @@ describe('chat — 기록 렌더', () => {
     assert.deepEqual(direct.slice(0, 2), ['안내   스캐폴더는 먼저', '답']);
   });
 
+  it('GENERAL 직접 답은 행에 안 맞는 작업이라고 말하고 /task 길을 알린다 — 옛 기록(general 없음)은 그대로다 (D-082)', () => {
+    const lines = renderRecord({ ...at, kind: 'direct', text: '답', suggest: null, cost: '$0 x', notes: [], general: true });
+    assert.deepEqual(lines.slice(1), ['비용   $0 x', '안내   행에 안 맞는 작업 (Jev GENERAL) — 위임하려면 /task Rxx 로 가장 가까운 행을 고른다.']);
+  });
+
   it('맥락을 잘랐으면 잘린 양을 알린다 (D-053)', () => {
     const lines = renderRecord({ ...at, kind: 'direct', text: '답', suggest: null, cost: '$0 x', notes: [], cut: { turns: 2, chars: 300 } });
     assert.ok(lines.includes('맥락   앞 대화 2턴·300자를 싣지 못했다'));

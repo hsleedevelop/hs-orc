@@ -21,6 +21,8 @@ export function renderRecord(r: TranscriptRecord): string[] {
         `비용   ${r.cost}`,
         // 제안이 있으면 곧이어 배정 카드가 붙는다 (D-064) — 카드 이전 기록에는 붙지 않아 openingLines 가 /task 길을 알린다.
         ...(r.suggest ? [`제안   ${r.suggest} (지휘자)`] : []),
+        // GENERAL 은 배정이 서지 않는다 — 고르는 행은 가장 가까운 것일 뿐이라고 말한다 (D-082).
+        ...(r.general ? ['안내   행에 안 맞는 작업 (Jev GENERAL) — 위임하려면 /task Rxx 로 가장 가까운 행을 고른다.'] : []),
         ...cutLine(r.cut),
       ];
     case 'plan':

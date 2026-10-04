@@ -21,6 +21,7 @@ import { estimateUsd, type EngineReport, type SlotExecutor } from './executor.ts
 import type { Journal } from './journal.ts';
 import { LadderError, planLadder, requestStage, type EscalationStage } from './ladder.ts';
 import { route as routeTask, routeWithFallback } from './pipeline.ts';
+import { readUnclassifiedWithLegacy, recordUnclassified, suggestRows, unclassifiedLogPath } from './unclassified.ts';
 import {
   appendRecord,
   readSessionLog,
@@ -286,8 +287,10 @@ export class ConversationSession {
       });
       const notes = routed.fallback ? [routed.fallback.line] : [];
       const result = routed.result;
-      // Jev 가 답했는데 행을 확정하지 않았으면(NONE·확신도 미만) 지휘자의 SUGGEST 가 그 판정을 뒤집지 못하게 한다.
-      if (result.stage !== 'assigned') return this.answer(text, notes, routed.jev === 'none' || routed.jev === 'unsure', write);
+      const general = routed.jev === 'general';
+      if (general) notes.push(...this.countGeneral(text));
+      // Jev 가 답했는데 행을 확정하지 않았으면(NONE·GENERAL·확신도 미만) 지휘자의 SUGGEST 가 그 판정을 뒤집지 못하게 한다.
+      if (result.stage !== 'assigned') return this.answer(text, notes, general || routed.jev === 'none' || routed.jev === 'unsure', write, general);
       const card = this.stage(text, result.plan, result.reason, notes, write);
       // 방식이 허락하면 승인 클릭 없이 시작한다 — 이 메시지가 만든 이 배정 1건만이다 (D-064 결정 2). 카드는 위에 그대로 남는다.
       return [card, ...(await this.autoApprove())];
@@ -336,12 +339,26 @@ export class ConversationSession {
     return this.start({}, 'auto');
   }
 
+  /**
+   * Jev GENERAL — 행이 모자라다는 신호다. CLI 와 같은 미분류 로그에 세고, 임계치를 넘은 행 추가 제안을 분류 줄 뒤에 싣는다 (D-082, D-022).
+   * NONE(대화성)은 세지 않는다 — 세면 대화가 행 추가 제안으로 둔갑한다. 로그를 못 남긴 것이 답을 잃을 이유는 아니다.
+   */
+  private countGeneral(text: string): string[] {
+    const { dir } = this.deps;
+    try {
+      recordUnclassified(text, unclassifiedLogPath(dir));
+      return suggestRows(readUnclassifiedWithLegacy(dir)).map((s) => s.message);
+    } catch (error) {
+      return [`미분류 로그를 남기지 못했다: ${why(error)}`];
+    }
+  }
+
   /** git 아닌 project 폴더의 쓰기 위임이면 스캐폴더 안내 한 줄 (D-074 B1). */
   private scaffoldGuide(write: boolean): string[] {
     return write && this.deps.kind === 'project' && this.deps.inGit === false ? [SCAFFOLD_GUIDE] : [];
   }
 
-  private async answer(text: string, notes: readonly string[], ignoreSuggest = false, write = false): Promise<TranscriptRecord[]> {
+  private async answer(text: string, notes: readonly string[], ignoreSuggest = false, write = false, general = false): Promise<TranscriptRecord[]> {
     const { matrix, catalog, budget, conduct } = this.deps;
     // route() 가 이미 working 으로 바꿔 놓았을 수 있다 — 여기서도 다시 대입해 answer() 를 단독으로
     // 불러도(테스트 등) 같은 보장이 서게 하고, 모든 탈출 경로를 finally 하나로 묶는다 (final-review #2).
@@ -368,6 +385,7 @@ export class ConversationSession {
         cost: `$${charge.usd.toFixed(4)} ${charge.source}`,
         notes,
         ...(guide.length > 0 ? { guide } : {}),
+        ...(general ? { general: true as const } : {}),
         ...(context.cut ? { cut: context.cut } : {}),
         ...(answer.run.cacheWrite ? { cacheWrite: answer.run.cacheWrite } : {}),
       });

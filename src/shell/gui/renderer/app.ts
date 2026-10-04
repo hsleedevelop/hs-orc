@@ -38,7 +38,7 @@ interface Cut { turns: number; chars: number }
 interface Compaction { trigger: string; preTokens?: number; postTokens?: number }
 type Rec =
   | { kind: 'user'; turn: number; text: string }
-  | { kind: 'direct'; turn: number; text: string; suggest: string | null; cost: string; notes: string[]; guide?: string[]; cut?: Cut }
+  | { kind: 'direct'; turn: number; text: string; suggest: string | null; cost: string; notes: string[]; guide?: string[]; general?: true; cut?: Cut }
   | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; reviewer2?: string; estimateUsd: number; notes: string[]; guide?: string[]; mode?: ApprovalMode; asked?: { code: string; text: string }[]; write?: boolean; ladder?: { stage: string; label: string; from: string; changes: string[] }; retry?: true }
   | { kind: 'approval'; turn: number; approved: boolean; write: boolean; by?: 'user' | 'auto'; mode?: ApprovalMode }
   | { kind: 'mode'; turn: number; mode: ApprovalMode }
@@ -412,13 +412,16 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
           // 제안이 없으면(Jev NONE·확신도 미만이면 지휘자 제안을 버린다, D-065) 사람이 행을 고른다 — CLI `/task Rxx` 와 같은 경로다 (D-079).
           // 카드만 선다 — 쓰기 스위치·승인은 그 카드에서 한다.
           !suggest && r === last && view.state === 'waiting_input'
-            ? h('div', { className: 'row', style: { marginTop: 8, whiteSpace: 'normal' } },
-                h('select', {
-                  value: pick, disabled: busy, 'aria-label': '위임할 업무 행',
-                  onChange: (e: { target: { value: string } }) => setPick(e.target.value),
-                }, h('option', { value: '' }, '업무 행 선택…'), ...props.rows.map((row) => h('option', { key: row.id, value: row.id }, `${row.id} · ${row.task}`))),
-                h('button', { className: 'btn', disabled: busy || !pick, onClick: () => { setPick(''); act(orc.convPlanAs(pick)); } }, '위임하기'),
-                h('span', { className: 'hint' }, '행을 직접 골라 위임 — 배정 카드가 서고 승인은 그대로다'))
+            ? h('div', { style: { marginTop: 8 } },
+                // GENERAL 이면 선택기 앞에서 행에 안 맞는 작업이라고 말한다 — 고르는 행은 가장 가까운 것일 뿐이다 (D-082).
+                r.general ? h('div', { className: 'hint warn' }, '행에 안 맞는 작업 (Jev GENERAL) — 업무 행 어디에도 맞지 않는다. 위임하려면 가장 가까운 행을 고른다') : null,
+                h('div', { className: 'row', style: { whiteSpace: 'normal' } },
+                  h('select', {
+                    value: pick, disabled: busy, 'aria-label': '위임할 업무 행',
+                    onChange: (e: { target: { value: string } }) => setPick(e.target.value),
+                  }, h('option', { value: '' }, '업무 행 선택…'), ...props.rows.map((row) => h('option', { key: row.id, value: row.id }, `${row.id} · ${row.task}`))),
+                  h('button', { className: 'btn', disabled: busy || !pick, onClick: () => { setPick(''); act(orc.convPlanAs(pick)); } }, '위임하기'),
+                  h('span', { className: 'hint' }, '행을 직접 골라 위임 — 배정 카드가 서고 승인은 그대로다')))
             : null);
       }
       case 'plan':
