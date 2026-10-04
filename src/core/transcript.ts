@@ -54,6 +54,8 @@ export type TranscriptEntry =
       readonly notes: readonly string[];
       /** 다음 행동 안내 (D-074) — git 아닌 폴더의 쓰기 위임. 분류 사실(`notes`)과 따로 둔다. 옛 기록에는 없다. */
       readonly guide?: readonly string[];
+      /** Jev 가 GENERAL(행에 안 맞는 작업)로 판정한 턴 (D-082) — 셸이 행 선택 앞에 그 사실을 말한다. 옛 기록에는 없다. */
+      readonly general?: true;
       /** 맥락을 잘랐으면 버린 양. 안 잘랐으면 없다 (D-053). */
       readonly cut?: ContextCut;
       /** 이 답 실행의 캐시 쓰기 TTL 내역 (D-062). 관측 전용 — 엔진이 안 줬으면 없다. 직접 답은 원시 로그가 없어 여기에 남긴다. */

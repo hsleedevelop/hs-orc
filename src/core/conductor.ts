@@ -29,7 +29,7 @@ export function conductorSlot(catalog: Engines): ResolvedSlot {
 }
 
 /**
- * `unrouted` — Jev 가 답했는데 행을 확정하지 않은 턴(NONE·확신도 미만, D-065). 그 턴의 SUGGEST 는 세션이 어차피 버리므로
+ * `unrouted` — Jev 가 답했는데 행을 확정하지 않은 턴(NONE·GENERAL·확신도 미만, D-065·D-082). 그 턴의 SUGGEST 는 세션이 어차피 버리므로
  * 행을 제안하라고 시키지 않고, 위임은 사람이 행을 골라야 한다고 안내하게 한다 (D-079). 마지막 줄 형식은 그대로 둔다.
  */
 export function buildDirectPrompt(matrix: Matrix, context: string, message: string, options: { readonly unrouted?: boolean } = {}): string {

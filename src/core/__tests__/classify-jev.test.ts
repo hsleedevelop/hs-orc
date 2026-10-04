@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadMatrix } from '../../data/matrix.ts';
 import { JevUnavailableError, type JevChoiceAnswer, type JevChoiceRequest, type RowClassifier } from '../../adapters/jev.ts';
-import { NONE, buildCriteria, candidatesText, classifyWithJev, jevReason } from '../classify-jev.ts';
+import { GENERAL, NONE, buildCriteria, candidatesText, classifyWithJev, jevReason } from '../classify-jev.ts';
 
 const matrix = loadMatrix();
 const answer = (choice: string, probabilities: Record<string, number>, confidence: number): JevChoiceAnswer => ({
@@ -14,9 +14,12 @@ const fake = (a: JevChoiceAnswer): { classifier: RowClassifier; requests: JevCho
 };
 
 describe('Jev 분류 (D-065)', () => {
-  it('criteria 는 매트릭스 11행에서 만들고 NONE 을 반드시 넣는다 — 모델·effort 는 싣지 않는다', () => {
+  it('criteria 는 매트릭스 11행에서 만들고 GENERAL·NONE 을 반드시 넣는다 — 모델·effort 는 싣지 않는다', () => {
     const criteria = buildCriteria(matrix);
-    assert.deepEqual(Object.keys(criteria), [...matrix.assignments.map((a) => a.id), NONE]);
+    // 순서·문구는 Q26 2단계 B′ 와 같다 (D-082) — 행 다음 GENERAL, 마지막 NONE.
+    assert.deepEqual(Object.keys(criteria), [...matrix.assignments.map((a) => a.id), GENERAL, NONE]);
+    assert.match(criteria[GENERAL] ?? '', /^범용 — 코드·파일을 읽어 설명·문서 초안 작성·다이어그램·조사·운영 상태 확인 — /);
+    assert.match(criteria[NONE] ?? '', /이 대화에 이미 나온 결과·위임에 대한 질문·설명 요청은 해당 없음이다/);
     assert.match(criteria['R05'] ?? '', /복잡한 버그/);
     assert.doesNotMatch(Object.values(criteria).join(' '), /Astra|Fable|Luna|Haiku/);
   });
@@ -41,6 +44,12 @@ describe('Jev 분류 (D-065)', () => {
   it('NONE 은 확신이 있어도 행이 아니다', async () => {
     const { classifier } = fake(answer('NONE', { NONE: 0.99, R01: 0.01 }, 0.98));
     assert.equal((await classifyWithJev(matrix, classifier, '넌 누구니', { confidenceMin: 0.6 })).kind, 'none');
+  });
+
+  it('GENERAL 은 확신이 있어도 행이 아니다 — 배정 없이 general 로 돌려준다 (D-082)', async () => {
+    const { classifier } = fake(answer(GENERAL, { GENERAL: 0.88, NONE: 0.1, R02: 0.02 }, 0.84));
+    const v = await classifyWithJev(matrix, classifier, 'src/core 구조를 처음 보는 사람용으로 설명해줘', { confidenceMin: 0.6 });
+    assert.ok(v.kind === 'general' && v.probability === 0.88);
   });
 
   it('맥락이 있으면 message 와 함께 보낸다 — 없으면 문장만 간다', async () => {

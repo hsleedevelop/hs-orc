@@ -15,6 +15,7 @@ import { ConversationSession, SessionStateError } from '../session.ts';
 import { readDecisions } from '../decision-log.ts';
 import { JevUnavailableError, type JevChoiceAnswer, type JevChoiceRequest, type RowClassifier } from '../../adapters/jev.ts';
 import { appendRecord, replaySpend, transcriptPath, type TranscriptRecord } from '../transcript.ts';
+import { readUnclassified, unclassifiedLogPath } from '../unclassified.ts';
 
 const isolate = () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-log-'));
@@ -896,6 +897,34 @@ describe('대화 세션 — Jev 분류 (D-065)', () => {
       assert.equal(/업무 행에 배정되지 않았다/.test(c.prompts[0] ?? ''), unrouted);
       assert.equal(/맞는 행을 제안한다/.test(c.prompts[0] ?? ''), !unrouted);
     }
+  });
+
+  it('GENERAL 이면 카드 없이 직접 답하고 행을 고르라고 묻는다 — 지휘자 SUGGEST 는 버리고 기록에 general 을 남긴다 (D-082)', async () => {
+    const c = conductSpy('행에 맞지 않는 작업입니다.\nSUGGEST: R02');
+    const session = makeJev(c.exec, jevSpy(answer('GENERAL', 0.86, { GENERAL: 0.9, NONE: 0.1 })).classifier);
+    const out = await session.send('src/core 구조를 처음 보는 사람용으로 설명해줘');
+    assert.deepEqual(out.map((r) => r.kind), ['user', 'direct']);
+    const direct = out[1];
+    assert.ok(direct?.kind === 'direct' && direct.suggest === null && direct.general === true);
+    assert.match(direct.notes[0] ?? '', /Jev 분류 → 행에 안 맞는 작업 \(GENERAL/);
+    assert.match(c.prompts[0] ?? '', /업무 행에 배정되지 않았다/);
+    assert.equal(session.state, 'waiting_input');
+  });
+
+  it('GENERAL 은 미분류 로그에 세고 임계치를 넘으면 행 추가 제안을 싣는다 — NONE 은 세지 않는다 (D-082, D-022)', async () => {
+    const none = makeJev(conductSpy().exec, jevSpy(answer('NONE', 0.99, { NONE: 0.99 })).classifier);
+    await none.send('넌 누구니');
+    assert.equal(readUnclassified(unclassifiedLogPath(none.dir)).length, 0);
+
+    const session = makeJev(conductSpy().exec, jevSpy(answer('GENERAL', 0.86, { GENERAL: 0.9, NONE: 0.1 })).classifier);
+    const notes: string[][] = [];
+    for (let i = 0; i < 3; i++) {
+      const out = await session.send('모듈 의존 관계를 mermaid 로 그려줘');
+      notes.push(out[1]?.kind === 'direct' ? [...out[1].notes] : []);
+    }
+    assert.deepEqual(readUnclassified(unclassifiedLogPath(session.dir)).map((r) => r.task), Array(3).fill('모듈 의존 관계를 mermaid 로 그려줘'));
+    assert.equal(notes[1]?.length, 1);
+    assert.match(notes[2]?.[1] ?? '', /미분류가 3회 반복됐다/);
   });
 
   it('확신도 미만이면 카드 없이 직접 답하고 후보를 보인다', async () => {

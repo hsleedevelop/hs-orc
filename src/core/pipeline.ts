@@ -66,7 +66,7 @@ export function route(matrix: Matrix, catalog: Engines, task: string, options: P
 /** 폴백이 돌았다는 사실. **셸이 반드시 사용자에게 보여준다** — 말없이 도는 유료 호출은 없다 (D-026). */
 export interface FallbackNote {
   /** skipped = 예산이 이미 상한이라 시작조차 하지 않았다 (D-034). */
-  readonly outcome: 'matched' | 'none' | 'failed' | 'skipped' | 'unsure' | 'jev-unavailable';
+  readonly outcome: 'matched' | 'none' | 'general' | 'failed' | 'skipped' | 'unsure' | 'jev-unavailable';
   /** 화면에 그대로 찍을 한 줄. 셸마다 다시 쓰지 않는다. */
   readonly line: string;
 }
@@ -77,9 +77,10 @@ export interface RoutedWithFallback {
   readonly fallback: FallbackNote | null;
   /**
    * Jev 가 어떻게 끝났나 (D-065). `null` = 시도하지 않았다(끔·수동 지정). `unavailable` 이면 옛 방식(규칙 → Haiku)으로 돌았다.
-   * `none`·`unsure` 는 Jev 가 **답을 했고** 행을 확정하지 않았다 — 셸은 Haiku 로 다시 묻지 않는다.
+   * `none`·`general`·`unsure` 는 Jev 가 **답을 했고** 행을 확정하지 않았다 — 셸은 Haiku 로 다시 묻지 않는다.
+   * `general` 은 "행에 안 맞는 실제 작업" 이다 (D-082) — 배정은 서지 않고 미분류로 센다.
    */
-  readonly jev: 'row' | 'none' | 'unsure' | 'unavailable' | null;
+  readonly jev: 'row' | 'none' | 'general' | 'unsure' | 'unavailable' | null;
 }
 
 export interface FallbackOptions extends PipelineOptions {
@@ -144,7 +145,7 @@ export async function routeWithFallback(
 
 /**
  * Jev 가 분류한다 (D-065). 행만 고른다 — 모델·effort·reviewer 는 `route()` 안의 매트릭스가 정한다.
- * 확신도 미만·NONE 은 사람에게 올린다(Haiku 로 다시 묻지 않는다, D-022). 못 쓰면 옛 방식으로 돌리고 사유를 붙인다.
+ * 확신도 미만·NONE·GENERAL 은 사람에게 올린다(Haiku 로 다시 묻지 않는다, D-022). 못 쓰면 옛 방식으로 돌리고 사유를 붙인다.
  */
 async function routeViaJev(
   matrix: Matrix,
@@ -189,6 +190,13 @@ async function routeViaJev(
       result: { stage: 'unclassified', message: `Jev: 맞는 행 없음 (NONE p=${verdict.probability.toFixed(2)} conf=${conf})${hint}` },
       fallback: { outcome: 'none', line: `Jev 분류 → 맞는 행 없음 (NONE p=${verdict.probability.toFixed(2)} · conf=${conf} · ${cost})` },
       jev: 'none',
+    };
+  }
+  if (verdict.kind === 'general') {
+    return {
+      result: { stage: 'unclassified', message: `Jev: 행에 안 맞는 작업 (GENERAL p=${verdict.probability.toFixed(2)} conf=${conf})${hint}` },
+      fallback: { outcome: 'general', line: `Jev 분류 → 행에 안 맞는 작업 (GENERAL p=${verdict.probability.toFixed(2)} · conf=${conf} · ${cost})` },
+      jev: 'general',
     };
   }
   return {
