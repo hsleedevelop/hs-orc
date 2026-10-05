@@ -3264,12 +3264,13 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 **검증**
 - `npm run gate` 통과 — 테스트 655 → 674 (`session-lock.test.ts` 7 · `session-cmd.test.ts` 7 · `service.test.ts` 4 · `chat.test.ts` 1).
 - 실제 진입점 스모크(격리 상태 폴더): `hs-orc session ls` → `세션 없음`, `show nope` → exit 1 `그런 세션이 없다`, 인자·옵션 오류 → exit 1 + 사용법.
+- **Electron 실기 (2026-10-05, 격리 상태 폴더 · `HS_ORC_JEV=off`, CDP 로 조작·캡처)**: GUI 에 세션 `probe` 를 연 채 다른 프로세스에서 `hs-orc session send probe "안녕, 한 문장으로만 답해줘"`(지휘자 직접 답 1회 $0.0082) — (a) 도는 약 6초 동안 GUI 가 "다른 곳에서 도는 중 · cli · pid 12590", 사이드바 칩 "진행 중", 입력·방식·이름·행 선택이 잠기고 id 복사·터미널·세션 닫기만 남았다. (b) 끝나고 2초 안에 그 턴(말풍선 2개)이 이어 보이고, 세션 Budget 이 $0.0082 로 다시 계산됐다. (c) GUI 에서 "이 타입 에러 고쳐줘" 로 배정 카드를 세우자(엔진 없음) lock 이 `gui · blocked` 가 되고 `session send` 는 exit 1 "배정 카드가 승인을 기다리는 중" 으로 거절, 기록은 그대로였다. GUI 에서 거절하자 lock 이 지워지고 칩이 idle 로 돌아왔다.
 - 렌더러 번들을 가짜 `window.orc` 로 브라우저(Playwright)에 띄워 사이드바 상태 칩 6종·이름 · id·"다른 곳에서 도는 중" 표시·입력 잠금을 눈으로 확인했다. 콘솔 오류 0.
 
 **미검증·위험**
-- Electron 으로 띄운 실제 GUI 에서 `hs-orc session send` 를 섞어 본 적이 없다 — 프로세스 간 경로는 단위 테스트(두 프로세스 대신 같은 프로세스 + 남의 pid 흉내)뿐이다.
 - 사이드바 4초 다시 읽기는 아는 세션의 기록 전체를 읽는다. 세션이 수백 개로 늘면 무거워진다 — 그때 목록 캐시(mtime)를 둔다.
 - 쥐기는 확인 → 쓰기 사이에 틈이 있다('wx' 로 빈 자리 경합만 막는다). 죽은 표식을 둘이 동시에 넘겨받는 경합은 막지 않는다.
+- (c) 의 GUI `working` 점유 중 거절은 실기로 보지 않았다(엔진 과금) — 같은 lock·같은 판정 경로이고 단위 테스트가 덮는다.
 - `send` 는 `auto-ask`·`auto` 세션에서 `--run` 없이도 읽기 전용 위임을 돌린다(세션 방식을 따른다) — 오케스트레이터가 반복 호출하면 그만큼 과금된다. 세션 Budget 상한이 막는다.
 
 **영향** `core/session-lock.ts`(신규) · `transcript.ts`(`name`·`status`) · `session.ts`(`rename`·`isStale`·`origin`) · `project-state.ts`(`origin.json`) · `shell/session-registry.ts`·`session-cmd.ts`·`session-main.ts`(신규) · `chat.ts`(찾기·점유) · GUI `service.ts`·`main.ts`·`preload.cjs`·`renderer/*` · `bin/hs-orc.mjs` · SPEC §6.4.1·§7.1 · README.
