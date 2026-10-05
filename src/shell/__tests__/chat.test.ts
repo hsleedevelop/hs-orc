@@ -84,6 +84,17 @@ describe('chat — 기록 렌더', () => {
     assert.throws(() => parseOrchestratorArgs(now, ['gpt']), /모르는 지휘자 인자/);
   });
 
+  it('기록된 지휘자 모델이 카탈로그에 없으면 기본 지휘자로 열고 안내한다 — 세션을 못 여는 대신 (리뷰 #114-4)', () => {
+    const tmp = mkdtempSync(path.join(os.tmpdir(), 'hs-chat-'));
+    process.env['HS_ORC_SCRATCH'] = path.join(tmp, 'scratch');
+    const { dir, id } = prepareSession('scratch', tmp);
+    appendRecord(transcriptPath(dir, id), { ...at, kind: 'orchestrator', model: 'gone' as 'opus', effort: 'high' });
+    const session = assembleSession({ kind: 'scratch', dir, id, budget: restoreBudget(dir, id), journal: new Journal() });
+    const lines = openingLines(session, restoreBudget(dir, id));
+    assert.ok(lines.some((l) => /^안내 {3}기록된 지휘자 gone·high 를 띄울 수 없어 기본 지휘자 opus·high 로 연다/.test(l)));
+    assert.equal(session.orchestrator.model, 'opus');
+  });
+
   it('spend 줄은 화면에 찍지 않는다 (D-054)', () => {
     assert.deepEqual(renderRecord({ ...at, kind: 'spend', charges: [], tokens: 0, unreported: 0 } as unknown as TranscriptRecord), []);
   });

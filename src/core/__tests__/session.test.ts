@@ -1121,6 +1121,42 @@ describe('지휘자 선택·단계 계획 (D-087)', () => {
     assert.deepEqual(writes, [false, false], '쓰기 단계가 없으면 스위치를 켜도 쓰지 않는다');
   });
 
+  it('승인했지만 시작하지 않은 단계(선행 실패로 건너뜀)도 사유와 함께 결정 로그에 남는다 (SPEC §8, 리뷰 #114-2)', async () => {
+    const log = isolate();
+    const three = JSON.stringify({ steps: [
+      { id: 's1', task: 'R01', prompt: '하나', dependsOn: [] },
+      { id: 's2', task: 'R01', prompt: '둘', dependsOn: ['s1'] },
+      { id: 's3', task: 'R01', prompt: '셋', dependsOn: [] },
+    ] });
+    // s1 의 primary 만 실패한다 — s2 는 건너뛰고 s3 는 돈다.
+    const exec: SlotExecutor = (slot, prompt) =>
+      Promise.resolve(slot.role === 'reviewer' ? reply('PASS') : prompt.includes('[이번 단계 s1]') ? reply('', false) : reply('ran'));
+    const { session } = make(orcSpy(three).exec, undefined, exec);
+    await session.send('넌 누구니');
+    await session.planSteps();
+    await session.approve();
+    const s2 = readDecisions(log).filter((r) => r.task.endsWith('단계 s2'));
+    assert.deepEqual(s2.map((r) => r.status), ['decided', 'blocked']);
+    assert.match(s2[1]?.note ?? '', /미실행 선행 단계 s1 가 실패하거나 건너뛰었다$/);
+    assert.deepEqual(readDecisions(log).filter((r) => r.task.endsWith('단계 s3')).map((r) => r.status), ['decided', 'ran']);
+  });
+
+  it('옛 기록(제안 직답 뒤 카드 없음)에서 지휘자·방식을 바꾼 뒤 제안 행을 눌러도 지휘자 제안(H1)으로 선다 (리뷰 #114-3)', async () => {
+    isolate();
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-'));
+    const file = transcriptPath(dir, '0923-1200-aaa');
+    appendRecord(file, { v: 1, at: '2026-09-28T00:00:00Z', turn: 1, kind: 'user', text: '넌 누구니' });
+    appendRecord(file, { v: 1, at: '2026-09-28T00:00:01Z', turn: 1, kind: 'direct', text: '답', suggest: 'R01', cost: '$0', notes: [] });
+    const { session } = make(orcSpy().exec, dir);
+    session.setMode('auto');
+    session.setOrchestrator({ model: 'sol', effort: 'high' });
+    const [plan] = await session.planAs('R01');
+    assert.ok(plan?.kind === 'plan');
+    assert.match(plan.reason, /^지휘자 제안/);
+    assert.ok(plan.asked?.some((a) => a.code === 'H1'), '자동 승인으로 새지 않는다');
+    assert.equal(session.state, 'blocked');
+  });
+
   it('계획을 못 읽으면 받은 답과 함께 오류를 남기고 입력 대기다 · 거절한 계획은 단계마다 미실행으로 남는다', async () => {
     const log = isolate();
     const bad = make(orcSpy('계획은 이렇습니다').exec);

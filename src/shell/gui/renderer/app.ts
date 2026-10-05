@@ -12,7 +12,7 @@
  */
 import { createElement as h, useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { compactLines, cutLine, ladderLines, retryLines } from '../../transcript-lines.ts';
+import { compactLines, cutLine, lastEvent, ladderLines, retryLines } from '../../transcript-lines.ts';
 
 const SCREENS = ['Session', 'Dashboard', 'Agents', 'Reviews', 'Debug'] as const;
 type Screen = (typeof SCREENS)[number];
@@ -501,8 +501,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     act(orc.convSend(t, sendWrite && view.kind !== 'scratch'));
   };
 
-  // 설정 줄(승인 방식·지휘자)은 건너뛴다 — 지휘자를 바꾸자마자 마지막 답·카드의 버튼이 사라지면 바꾼 지휘자로 할 일이 없다 (D-087).
-  const last = view.records.findLast((r) => r.kind !== 'mode' && r.kind !== 'orchestrator');
+  // 설정 줄(승인 방식·지휘자)은 건너뛴다 — Core 와 같은 규칙 (D-087).
+  const last = lastEvent(view.records);
   // 배정 카드가 선 채 보내면 그 배정은 거절로 남는다 (D-064) — 제안 카드가 대화를 막지 않는다.
   const canType = (view.state === 'waiting_input' || view.state === 'blocked') && !busy;
 

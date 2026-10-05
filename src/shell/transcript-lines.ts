@@ -20,3 +20,10 @@ export const cutLine = (cut: Cut | undefined): string[] => (cut ? [`맥락   앞
 
 export const compactLines = (compacted: readonly Compaction[] | undefined): string[] =>
   (compacted ?? []).map((c) => `압축   엔진이 앞 맥락을 요약으로 바꿨다 (${c.trigger}${c.preTokens !== undefined && c.postTokens !== undefined ? ` ${c.preTokens}→${c.postTokens} 토큰` : ''})`);
+
+/**
+ * 대화 흐름의 마지막 기록 — 설정 줄(승인 방식·지휘자 D-087)은 건너뛴다. 화면이 "지금 살아 있는 카드·제안" 을 이것으로 가린다:
+ * 지휘자를 바꿨다고 카드·제안 버튼이 사라지면 안 된다. Core `ConversationSession.lastEvent` 와 같은 규칙이다.
+ */
+export const lastEvent = <T extends { readonly kind: string }>(records: readonly T[]): T | undefined =>
+  records.findLast((r) => r.kind !== 'mode' && r.kind !== 'orchestrator');

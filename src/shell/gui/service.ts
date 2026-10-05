@@ -407,7 +407,7 @@ export class GuiService {
         // 기록의 모델이 카탈로그에서 빠졌어도 화면은 열린다 — 지휘자를 부르는 호출이 그때 던진다.
         try {
           const slot = s.conductor();
-          return { ...s.orchestrator, engine: slot.engine, line: slotLine(slot) };
+          return { ...s.orchestrator, engine: slot.engine, line: s.orchestratorNotice ? `${slotLine(slot)} · ${s.orchestratorNotice}` : slotLine(slot) };
         } catch (error) {
           return { ...s.orchestrator, engine: '', line: `지휘자를 띄울 수 없다: ${error instanceof Error ? error.message : String(error)}` };
         }

@@ -11,7 +11,7 @@ import { slotLine } from '../core/reader.ts';
 import type { Budget } from '../core/budget.ts';
 import type { ConversationSession } from '../core/session.ts';
 import { listScratchSessions, listSessions, readSessionLog, type SessionSummary, type TranscriptRecord } from '../core/transcript.ts';
-import { compactLines, cutLine, ladderLines, retryLines } from './transcript-lines.ts';
+import { compactLines, cutLine, lastEvent, ladderLines, retryLines } from './transcript-lines.ts';
 
 export function renderRecord(r: TranscriptRecord): string[] {
   switch (r.kind) {
@@ -269,12 +269,13 @@ export function findSession(cwd: string, id: string): SessionSummary | undefined
 
 export function openingLines(session: ConversationSession, budget: Budget, tail = 10): string[] {
   const records = session.records().filter((r) => r.kind !== 'spend');
-  const last = records.at(-1);
+  const last = lastEvent(records);
   const broken = readSessionLog(session.dir, session.id).broken;
   return [
     `세션   ${session.kind} ${session.id} · ${session.dir}`,
     `방식   승인 방식 ${session.mode}`,
     `지휘   ${slotLine(session.conductor())}`,
+    ...(session.orchestratorNotice ? [`안내   ${session.orchestratorNotice} · /orc 로 바꾼다`] : []),
     `누적   ${budget.summary()}`,
     ...(broken > 0 ? [`경고   기록에 깨진 줄 ${broken}개 — 건너뛰고 보여준다`] : []),
     ...(records.length > tail ? [`       (앞 기록 ${records.length - tail}개 생략)`] : []),
