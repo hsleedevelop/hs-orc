@@ -249,8 +249,15 @@
       .bubble { max-width: 80%; padding: 10px 12px; border-radius: 10px; white-space: pre-wrap; line-height: 1.5; }
       .bubble.user { align-self: flex-end; background: color-mix(in srgb, var(--blue) 15%, transparent); }
       .bubble.orc { align-self: flex-start; background: var(--panel-2); }
-      /* 입력창은 기록과 같이 스크롤되지 않고 본문 아래에 떠 있다. */
-      .composer { position: sticky; bottom: 12px; z-index: 1; box-shadow: 0 6px 24px rgba(0, 0, 0, .45); }
+      /* 입력창은 기록과 같이 스크롤되지 않고 본문 바닥에 붙는다. 아래에 틈이 있으면 그 틈으로 기록이 비친다.
+         -14px 는 .stack 의 gap — 뒤의 끝 표식까지 바닥에 붙여 스크롤 끝에서도 입력창이 뜨지 않게 한다. */
+      .composer {
+        position: sticky; bottom: 0; z-index: 1; margin-bottom: -14px;
+        border-bottom: none; border-radius: var(--radius) var(--radius) 0 0;
+        box-shadow: 0 -6px 24px rgba(0, 0, 0, .45);
+      }
+      /* 세션 화면에선 main 아래 여백을 없앤다 — 남겨 두면 스크롤 끝에서 입력창이 그만큼 떠오른다. */
+      main:has(> div:not([hidden]) .composer) { padding-bottom: 0; }
     </style>
   </head>
   <body>
