@@ -923,7 +923,7 @@ describe('대화 세션 — Jev 분류 (D-065)', () => {
       notes.push(out[1]?.kind === 'direct' ? [...out[1].notes] : []);
     }
     assert.deepEqual(readUnclassified(unclassifiedLogPath(session.dir)).map((r) => r.task), Array(3).fill('모듈 의존 관계를 mermaid 로 그려줘'));
-    assert.equal(notes[1]?.length, 1);
+    assert.equal(notes[1]?.length, 2, 'Jev 줄 + manual 이라 읽고 답하기를 묻는다는 줄 (D-083)');
     assert.match(notes[2]?.[1] ?? '', /미분류가 3회 반복됐다/);
   });
 

@@ -11,6 +11,9 @@ export interface ContextLimits {
   readonly contextChars: number;
 }
 
+/** 읽기 답(D-083)을 맥락에 싣는 글자 수 — 위임 요약에 primary 출력을 싣는 양(3,000자)의 절반이다. */
+const READ_CHARS = 1500;
+
 /** 취소된 위임 한 줄 (D-066). 행은 같은 턴의 배정에서, 단계는 결과 evidence("취소됨 — primary|reviewer 실행 중")에서 읽는다 — 없으면 뺀다. */
 function cancelledLine(r: Extract<TranscriptRecord, { kind: 'result' }>, records: readonly TranscriptRecord[]): string {
   const plan = records.find((p) => p.turn === r.turn && p.kind === 'plan');
@@ -25,7 +28,8 @@ function line(r: TranscriptRecord, records: readonly TranscriptRecord[]): string
     case 'user':
       return `사용자: ${r.text}`;
     case 'direct':
-      return `orc: ${r.text}`;
+      // 읽기 답(D-083)은 엔진 출력이라 길다 — 통째로 실으면 글자 상한이 그 앞의 질문을 밀어낸다. 앞부분만 싣는다.
+      return r.read ? `orc(코드를 읽고 답함): ${r.text.length > READ_CHARS ? `${r.text.slice(0, READ_CHARS)}…` : r.text}` : `orc: ${r.text}`;
     case 'summary':
       return r.text ? `orc(위임 결과 요약): ${r.text}${r.next ? ` · 다음 제안: ${r.next}` : ''}` : null;
     case 'result':

@@ -47,7 +47,7 @@ describe('chat — 기록 렌더', () => {
 
   it('GENERAL 직접 답은 행에 안 맞는 작업이라고 말하고 /task 길을 알린다 — 옛 기록(general 없음)은 그대로다 (D-082)', () => {
     const lines = renderRecord({ ...at, kind: 'direct', text: '답', suggest: null, cost: '$0 x', notes: [], general: true });
-    assert.deepEqual(lines.slice(1), ['비용   $0 x', '안내   행에 안 맞는 작업 (Jev GENERAL) — 위임하려면 /task Rxx 로 가장 가까운 행을 고른다.']);
+    assert.deepEqual(lines.slice(1), ['비용   $0 x', '안내   행에 안 맞는 작업 (Jev GENERAL) — 코드를 읽고 답하려면 /read · 위임하려면 /task Rxx 로 가장 가까운 행을 고른다.']);
   });
 
   it('맥락을 잘랐으면 잘린 양을 알린다 (D-053)', () => {
@@ -140,6 +140,13 @@ describe('chat — 입력 루프', () => {
     assert.deepEqual(calls, []);
     assert.equal(session.records().length, 0);
     assert.match(out, /모르는 명령이다: \/foo/);
+  });
+
+  it('/read 는 마지막 메시지를 읽기 전용 1슬롯이 답한다 — 카드·승인 없이, 지휘자 아닌 답이라고 찍는다 (D-083)', async () => {
+    const { out, calls, session } = await drive(['넌 누구니', '/read']);
+    assert.deepEqual(calls, ['지휘자·Haiku', '읽기·Luna']);
+    assert.match(out, /읽기 {3}읽기·Luna·medium → codex\/\S+ · 읽기 전용 · reviewer 없음 · 사용자 요청/);
+    assert.ok(!session.records().some((r) => r.kind === 'plan' || r.kind === 'approval'));
   });
 
   it('/task Rxx 는 마지막 메시지를 그 행으로 배정한다', async () => {

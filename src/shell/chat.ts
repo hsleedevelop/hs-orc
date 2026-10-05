@@ -17,12 +17,14 @@ export function renderRecord(r: TranscriptRecord): string[] {
       return [
         ...r.notes.map((n) => `분류   ${n}`),
         ...(r.guide ?? []).map((g) => `안내   ${g}`),
+        // 읽기 답(D-083)은 지휘자가 아니라 읽기 전용 엔진 1슬롯이 낸 답이다 — reviewer 판정이 없다는 것을 같이 말한다.
+        ...(r.read ? [`읽기   ${r.read.slot} · 읽기 전용 · reviewer 없음 · ${r.read.by === 'auto' ? 'Jev GENERAL 자동' : '사용자 요청'}`] : []),
         r.text,
         `비용   ${r.cost}`,
         // 제안이 있으면 곧이어 배정 카드가 붙는다 (D-064) — 카드 이전 기록에는 붙지 않아 openingLines 가 /task 길을 알린다.
         ...(r.suggest ? [`제안   ${r.suggest} (지휘자)`] : []),
         // GENERAL 은 배정이 서지 않는다 — 고르는 행은 가장 가까운 것일 뿐이라고 말한다 (D-082).
-        ...(r.general ? ['안내   행에 안 맞는 작업 (Jev GENERAL) — 위임하려면 /task Rxx 로 가장 가까운 행을 고른다.'] : []),
+        ...(r.general ? [`안내   행에 안 맞는 작업 (Jev GENERAL) — ${r.read ? '' : '코드를 읽고 답하려면 /read · '}위임하려면 /task Rxx 로 가장 가까운 행을 고른다.`] : []),
         ...cutLine(r.cut),
       ];
     case 'plan':
@@ -67,7 +69,7 @@ export function renderRecord(r: TranscriptRecord): string[] {
 }
 
 export const CHAT_HELP = [
-  '명령   메시지를 그냥 쓰면 보낸다 · /write <문장> 쓰기 위임으로 보낸다 · /task Rxx 마지막 메시지를 그 행으로 배정 · /ladder 실패·미검증 뒤 사다리 다음 단계로 다시 위임(카드만 선다) · /mode [방식] · /help · /quit (Ctrl-D)',
+  '명령   메시지를 그냥 쓰면 보낸다 · /write <문장> 쓰기 위임으로 보낸다 · /task Rxx 마지막 메시지를 그 행으로 배정 · /read 마지막 메시지를 읽기 전용 1슬롯이 코드를 읽고 답한다(카드 없이 바로) · /ladder 실패·미검증 뒤 사다리 다음 단계로 다시 위임(카드만 선다) · /mode [방식] · /help · /quit (Ctrl-D)',
   '방식   /mode manual 매번 묻는다 · auto-ask 쓰기·모델이 고른 행·비싼 조합·상한 근접·첫 위임만 묻는다 · auto 쓰기·모델이 고른 행만 묻는다 — 자동은 이 메시지의 배정 1건만 시작한다',
   '승인   배정이 뜨면 y 읽기 전용 · w 쓰기 · n 거절 · a 지휘자에게 묻기 · 문장을 쓰면 거절하고 그 메시지를 보낸다',
   '취소   위임이 도는 중 Ctrl-C 한 번 — 그 위임만 멈추고 세션은 남는다 · 한 번 더 누르면 나간다',
@@ -141,6 +143,9 @@ export async function runChat(
           // 공백이 든 문장은 새 메시지다 — 배정은 거절로 남는다 (D-064). 한 단어(오타 y·yes 등)는 유료 호출로 새지 않게 되묻는다.
           else if (/\s/.test(line) && !line.startsWith('/')) show(await session.send(line));
           else say('y·w·n·a 중 하나로 답한다 (새 메시지는 문장으로 쓴다).');
+        } else if (line === '/read') {
+          // 질문형 경로 (D-083) — 이 명령이 승인이다. 카드 없이 바로 돈다.
+          show(await session.readAnswer());
         } else if (line.startsWith('/task')) {
           const m = /^\/task\s+(R\d{2})$/i.exec(line);
           if (m?.[1]) show(await session.planAs(m[1].toUpperCase()));

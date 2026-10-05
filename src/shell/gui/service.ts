@@ -388,6 +388,12 @@ export class GuiService {
     return this.conversation();
   }
 
+  /** 마지막 메시지를 읽기 전용 1슬롯이 코드를 읽고 답한다 (D-083). 엔진을 부르므로 `running` 으로 돈다 — 취소(D-066)가 같은 통로로 붙는다. */
+  async converseRead(): Promise<SessionView> {
+    await this.running((s) => s.readAnswer());
+    return this.conversation();
+  }
+
   async converseApprove(payload: { verify: readonly string[]; write: boolean }): Promise<SessionView> {
     await this.running((s) => s.approve(payload));
     return this.conversation();

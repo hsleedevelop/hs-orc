@@ -72,6 +72,7 @@ ipcMain.handle('conv-view', () => service.conversation());
 ipcMain.handle('conv-send', (_e, text: string, write?: boolean) => service.converse(text, write === true));
 ipcMain.handle('conv-mode', (_e, mode: ApprovalMode) => service.converseMode(mode));
 ipcMain.handle('conv-plan-as', (_e, taskId: string) => service.conversePlanAs(taskId));
+ipcMain.handle('conv-read', () => service.converseRead());
 ipcMain.handle('conv-approve', (_e, p: { verify: string[]; write: boolean }) => service.converseApprove(p));
 ipcMain.handle('conv-cancel', () => service.converseCancel());
 ipcMain.handle('conv-escalate', () => service.converseEscalate());

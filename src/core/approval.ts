@@ -10,7 +10,7 @@
  */
 import type { Engines } from '../data/engines.ts';
 import type { ApprovalMode } from '../data/limits.ts';
-import type { AssignmentPlan } from './assign.ts';
+import type { AssignmentPlan, ResolvedSlot } from './assign.ts';
 import type { Budget } from './budget.ts';
 import type { TranscriptRecord } from './transcript.ts';
 
@@ -73,6 +73,27 @@ export interface ApprovalInput {
   readonly retry?: boolean;
   /** 폴더가 git 작업 트리인가 (D-074). 없으면 git 으로 본다 — 모르는 것을 거절로 예고하지 않는다. */
   readonly inGit?: boolean;
+}
+
+/**
+ * 질문형 경로를 Jev `GENERAL` 에서 클릭 없이 돌릴지 (D-083). 배정이 아니라 읽기 전용 1슬롯이라 H1·H2·H4·A1·A3·A4 는 해당 없다 —
+ * 행을 고르지 않고, 쓰기가 없고, 상수 비용이 작고, 재위임이 아니다. 남는 것은 H3(읽기 전용이 인자로 보장되지 않는 엔진)과
+ * `auto-ask` 의 A2(상한 근접) 뿐이다. 사람이 "코드를 읽고 답하기" 를 누른 것은 이 판정을 거치지 않는다 — 그 클릭이 승인이다.
+ */
+export function evaluateRead(input: { readonly mode: ApprovalMode; readonly slot: ResolvedSlot; readonly catalog: Engines; readonly budget: Budget; readonly estimateUsd: number }): ApprovalCheck {
+  const { mode, slot, catalog, budget, estimateUsd } = input;
+  if (mode === 'manual') return { mode, asks: [], auto: false };
+  const asks: AskReason[] = [];
+  if (catalog.engines[slot.engine].readOnlyArgv === undefined) asks.push({ code: 'H3', text: `${slot.engine} 는 읽기 전용이 인자로 보장되지 않는다` });
+  if (mode === 'auto-ask') {
+    const tokenLimit = budget.limitTokens;
+    if (slot.plan === 'api' && budget.remainingUsd < A2_REMAINING_FACTOR * estimateUsd) {
+      asks.push({ code: 'A2', text: `남은 금액 $${budget.remainingUsd} < 예상 $${estimateUsd} × ${A2_REMAINING_FACTOR}` });
+    } else if (tokenLimit > 0 && tokenLimit - budget.spentTokens < tokenLimit * A2_TOKEN_REMAINING_RATIO) {
+      asks.push({ code: 'A2', text: `남은 토큰 ${tokenLimit - budget.spentTokens} < 상한의 ${A2_TOKEN_REMAINING_RATIO * 100}%` });
+    }
+  }
+  return { mode, asks, auto: asks.length === 0 };
 }
 
 export function evaluateApproval(input: ApprovalInput): ApprovalCheck {
