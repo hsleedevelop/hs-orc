@@ -69,6 +69,11 @@ export interface SessionDeps {
   readonly context?: ContextLimits;
   /** 기록이 빈 새 세션의 시작 방식 (D-064 결정 8). 없으면 `limits.json` 의 `approvalMode`. 기록에 방식이 있으면 그것이 이긴다. */
   readonly approvalMode?: ApprovalMode;
+  /**
+   * false 면 이 객체는 세션 방식과 무관하게 위임·읽기 답을 자동으로 시작하지 않는다 — 판정을 manual 로 한다 (D-085 결정 5).
+   * `hs-orc session send` 는 `--run` 이 없으면 이것을 끈다. 기록된 방식은 바꾸지 않는다(GUI·chat 에서는 그대로 auto 다). 기본 true.
+   */
+  readonly autoStart?: boolean;
   /** project 폴더가 git 작업 트리인가 (D-074). 없으면 git 으로 본다 — 조립(`assembleSession`)이 `repoRoot` 로 정해 넘긴다. */
   readonly inGit?: boolean;
 }
@@ -147,6 +152,11 @@ export class ConversationSession {
 
   get mode(): ApprovalMode {
     return this.modeValue;
+  }
+
+  /** 자동 시작 판정에 쓰는 방식 — `autoStart: false` 면 manual 이다 (D-085 결정 5). */
+  private get decisionMode(): ApprovalMode {
+    return this.deps.autoStart === false ? 'manual' : this.modeValue;
   }
 
   /**
@@ -398,7 +408,7 @@ export class ConversationSession {
     const { primary, reviewer, secondReviewer } = plan.slots;
     const { catalog, budget } = this.deps;
     const inGit = this.deps.inGit ?? true;
-    const check = evaluateApproval({ mode: this.modeValue, plan, reason, write, catalog, budget, records: this.log, inGit, ...(ladder ? { ladder: true } : {}), ...(retry ? { retry: true } : {}) });
+    const check = evaluateApproval({ mode: this.decisionMode, plan, reason, write, catalog, budget, records: this.log, inGit, ...(ladder ? { ladder: true } : {}), ...(retry ? { retry: true } : {}) });
     // manual 은 묻는 이유(`asked`)가 비므로 H4 를 안내 줄로 싣는다 — 어느 방식이든 카드가 같은 줄을 보인다 (D-074).
     const refusal = check.mode === 'manual' ? nonGitWriteRefusal(catalog, plan, write, inGit) : null;
     const guide = [...(refusal ? [refusal.text] : []), ...this.scaffoldGuide(write)];
@@ -450,7 +460,7 @@ export class ConversationSession {
   private readCheck(): ApprovalCheck {
     const { matrix, catalog, budget } = this.deps;
     const slot = readerSlot(catalog);
-    return evaluateRead({ mode: this.modeValue, slot, catalog, budget, estimateUsd: estimateUsd(matrix, slot) });
+    return evaluateRead({ mode: this.decisionMode, slot, catalog, budget, estimateUsd: estimateUsd(matrix, slot) });
   }
 
   /**

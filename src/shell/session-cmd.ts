@@ -27,8 +27,9 @@ export const SESSION_USAGE = [
   '                                                      메시지 1건을 보내고 그 턴의 기록을 찍는다',
   '  name <id|이름> <새 이름>                            이름을 붙인다 ("" 은 지운다). 영문자로 시작, 영문·숫자·. _ -',
   '',
-  'send 는 세션의 승인 방식을 그대로 따른다. 배정 카드가 서면 --run 이 그 카드를 승인한다(--write 면 쓰기 켬).',
-  '--run 이 없으면 카드는 거절로 남는다 — 제시만 했다. 다른 곳(GUI·chat)이 그 세션을 쥐고 있으면 거절한다.',
+  'send 는 --run 이 있어야 위임(읽기 위임·읽기 답 포함)을 시작한다 — 세션 방식이 auto·auto-ask 여도 같다(auto 는 GUI·chat 몫).',
+  '--run 이 없으면 배정 카드는 거절로 남는다 — 제시만 했다. --run 이면 세션 방식대로 승인하고, 선 카드는 --run 이 승인한다(--write 면 쓰기 켬).',
+  '예외로 끝난 위임의 재시도 카드는 --run 이 있어도 승인하지 않는다. 다른 곳(GUI·chat)이 그 세션을 쥐고 있으면 거절한다.',
 ].join('\n');
 
 export type SessionCommand =
@@ -156,6 +157,8 @@ export async function sendToSession(input: SendInput): Promise<SendOutcome> {
       id,
       budget,
       journal: new Journal(),
+      // --run 이 없으면 세션 방식이 auto·auto-ask 여도 위임·읽기 답을 시작하지 않는다 (D-085 결정 5, 전하 결정) — auto 는 GUI·chat 몫이다.
+      autoStart: input.run,
       ...(input.classifier ? { classifier: input.classifier } : {}),
       ...(input.execute ? { execute: input.execute } : {}),
     });

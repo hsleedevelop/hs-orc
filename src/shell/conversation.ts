@@ -40,10 +40,12 @@ export interface AssembleInput {
   readonly classifier?: RowClassifier;
   /** 기록이 빈 새 세션의 시작 방식 — 없으면 `limits.json`. 테스트가 고정한다 (D-064). */
   readonly approvalMode?: ApprovalMode;
+  /** false 면 세션 방식과 무관하게 자동 시작하지 않는다 (D-085 결정 5 — `session send` 의 `--run` 없음). */
+  readonly autoStart?: boolean;
 }
 
 export function assembleSession(input: AssembleInput): ConversationSession {
-  const { kind, dir, id, budget, journal, execute, classifier, approvalMode } = input;
+  const { kind, dir, id, budget, journal, execute, classifier, approvalMode, autoStart } = input;
   const catalog = loadEngines();
   const timeout = loadLimits().runTimeoutMs;
   const inGit = kind === 'project' && repoRoot(dir) !== null;
@@ -57,6 +59,7 @@ export function assembleSession(input: AssembleInput): ConversationSession {
     journal,
     ...(classifier ? { classifier } : {}),
     ...(approvalMode ? { approvalMode } : {}),
+    ...(autoStart === false ? { autoStart } : {}),
     // 카드가 git 아닌 폴더의 쓰기 거절을 미리 말한다 (D-074). 실행기의 `nonGit` 과 같은 판정이다.
     inGit,
     // 지휘자(직접 답·요약)만 격리한다 (D-032 B1) — 위임 실행기(executorFor)는 그대로 사용자 설정을 싣는다.

@@ -130,3 +130,20 @@ describe('session — 재시도 카드 (PR #111 리뷰 3)', () => {
     assert.match(out.lines.join('\n'), /재시도 카드는 자동으로 승인하지 않는다/);
   });
 });
+
+describe('session — --run 이 없으면 위임을 시작하지 않는다 (PR #111 리뷰 5, 전하 결정)', () => {
+  it('auto 세션이어도 --run 없는 send 는 위임 엔진을 부르지 않고 카드를 거절로 남긴다 — 세션 방식은 그대로다', async () => {
+    const { dir, id } = fixture('auto1');
+    assembleSession({ kind: 'project', dir, id, budget: restoreBudget(dir, id), journal: new Journal(), execute: fake }).setMode('auto');
+    const delegated: string[] = [];
+    const watch: SlotExecutor = (slot, prompt, options) => {
+      delegated.push(slot.role);
+      return fake(slot, prompt, options);
+    };
+    const out = await sendToSession({ cwd: dir, ref: 'auto1', message: '이 타입 에러 고쳐줘', write: false, run: false, verify: [], execute: watch });
+    assert.deepEqual(delegated, [], `기록: ${out.records.map((r) => r.kind).join(',')}`);
+    assert.ok(out.records.some((r) => r.kind === 'approval' && !r.approved));
+    const reopened = assembleSession({ kind: 'project', dir, id, budget: restoreBudget(dir, id), journal: new Journal(), execute: fake });
+    assert.equal(reopened.mode, 'auto', 'GUI·chat 에서는 auto 가 그대로다');
+  });
+});
