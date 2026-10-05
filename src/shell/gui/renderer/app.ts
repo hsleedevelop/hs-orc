@@ -697,8 +697,6 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
         value: view.mode, disabled: busy, title: MODES.find((m) => m.id === view.mode)?.hint ?? '',
         onChange: (e: { target: { value: string } }) => act(orc.convMode(e.target.value as ApprovalMode)),
       }, ...MODES.map((m) => h('option', { key: m.id, value: m.id, title: m.hint }, `승인 · ${m.label}`))),
-      // 지휘자 (D-087) — 엔진을 바꾸면 그 벤더의 기본 모델·effort 로 시작한다. 도는 호출은 시작한 지휘자로 끝난다.
-      ...orchestratorSelects(orcOptions, view.orchestrator, busy, (choice) => act(orc.convOrchestrator(choice))),
       h('span', { className: 'dim mono' }, view.budget),
       h('span', { className: 'dim mono' }, view.appBudget),
       // 엔진이 도는 중에도 연다 — 세션 상태를 건드리지 않고 그 폴더를 사람 손에 넘길 뿐이다.
@@ -708,6 +706,11 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       }, ...TERMINALS.map((t) => h('option', { key: t.id, value: t.id }, t.label))),
       h('button', { className: 'btn', title: `${view.dir} 에서 터미널 열기`, onClick: () => { orc.convTerminal(terminal).catch((e: unknown) => setError(why(e))); } }, '터미널'),
       h('button', { className: 'btn', onClick: props.onClose }, '세션 닫기')),
+    // 지휘자 (D-087) — 머리 줄과 따로 둔다: 한 줄에 넣으면 좁은 창에서 Budget 글이 접히고 터미널 선택이 밀려난다.
+    // 엔진을 바꾸면 그 벤더의 기본 모델·effort 로 시작한다. 도는 호출은 시작한 지휘자로 끝난다.
+    h('div', { className: 'row' },
+      ...orchestratorSelects(orcOptions, view.orchestrator, busy, (choice) => act(orc.convOrchestrator(choice))),
+      h('span', { className: 'hint' }, '지휘자 — 직접 답·요약·단계 계획을 맡는다. 위임 슬롯은 매트릭스가 배정한다')),
     view.broken > 0 ? h('div', { className: 'banner error' }, `기록에 깨진 줄 ${view.broken}개 — 건너뛰고 보여준다`) : null,
     view.interrupted ? h('div', { className: 'banner error' }, '승인한 위임의 결과가 기록되지 않았다 — 실행 중 앱이 끊겼다. 결정 로그 1차 줄만 남아 있을 수 있다.') : null,
     ...view.records.map(record),
