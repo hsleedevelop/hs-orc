@@ -387,7 +387,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
   }, [busy]);
 
   // 새 기록·진행 표시가 뜨면 그 자리로 간다 — 입력 아래에 가려 "아무 일 없음"으로 보이지 않게.
-  useEffect(() => { endRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [view.records.length, busy]);
+  // 'start' 는 맨 끝 표식에선 바닥까지 내린다. 'nearest' 는 main 아래 padding 만큼 덜 내려가 떠 있는 입력창이 최신 기록을 덮는다.
+  useEffect(() => { endRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, [view.records.length, busy]);
 
   const act = (p: Promise<SessionView>) => {
     setBusy(true);
@@ -572,8 +573,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
           h('pre', { className: 'plain mono' }, view.progress.slice(-60).join('\n')))
       : null,
     error ? h('div', { className: 'banner error' }, error) : null,
-    h('div', { ref: endRef }),
-    card(null,
+    h('section', { className: 'card composer' },
       h('textarea', {
         rows: 3, value: draft, disabled: !canType,
         placeholder: view.state === 'blocked' ? '배정을 승인·거절하거나, 메시지를 보내면 이 배정은 거절로 남는다 · ⌘↵ 전송' : '메시지 · ⌘↵ 전송',
@@ -589,7 +589,9 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
             onChange: (e: { target: { checked: boolean } }) => setSendWrite(e.target.checked),
           }), ' 쓰기 위임으로 보내기'),
         h('div', { className: 'spacer' }),
-        h('button', { className: 'btn accent', disabled: !canType || !draft.trim(), onClick: send }, '전송'))));
+        h('button', { className: 'btn accent', disabled: !canType || !draft.trim(), onClick: send }, '전송'))),
+    // 끝 표식은 떠 있는 입력창 뒤에 둔다 — 앞에 두면 그 자리로 가도 입력창이 최신 기록을 덮는다.
+    h('div', { ref: endRef }));
 }
 
 // ── 나머지 화면 ────────────────────────────────────────────
