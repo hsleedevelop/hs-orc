@@ -195,6 +195,19 @@
 
       .cost-figure { font-family: var(--mono); font-size: 18px; font-weight: 700; color: var(--yellow); letter-spacing: -.2px; }
 
+      .running { display: flex; align-items: center; gap: 8px; }
+      .spinner {
+        width: 12px; height: 12px; flex: 0 0 auto; border-radius: 50%;
+        border: 2px solid var(--border-2); border-top-color: var(--blue);
+        animation: spin .8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      /* 움직임을 줄인 사용자에게는 돌리지 않고 깜빡임으로 바꾼다 — 경과 초가 살아 있다는 신호를 대신한다. */
+      @media (prefers-reduced-motion: reduce) {
+        .spinner { animation: pulse 1.6s ease-in-out infinite; }
+        @keyframes pulse { 50% { opacity: .35; } }
+      }
+
       .dim { color: var(--dim); }
       .warn { color: var(--orange); }
       .bad { color: var(--red); }

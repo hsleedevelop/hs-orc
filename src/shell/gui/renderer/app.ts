@@ -88,6 +88,24 @@ interface DebugInfo { title: { text: string }; node: string; electron: string; p
 const orc = (window as unknown as { orc: Bridge }).orc;
 
 const text = (s: string, className?: string) => h('div', className ? { className } : null, s);
+
+/**
+ * 도는 중 표시 — 스피너와 경과 초. 글자만 있으면 도는지 멈췄는지 눈으로 가릴 수 없다.
+ * 초는 이 표시가 뜬 때부터 센다 — 다시 연 화면(D-063)은 실행 시작 시각을 모르므로 그 화면이 본 시간이다.
+ */
+function Running(props: { label: string }): ReactElement {
+  const [start] = useState(() => Date.now());
+  const [now, setNow] = useState(start);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const s = Math.floor((now - start) / 1000);
+  return h('div', { className: 'running dim', role: 'status' },
+    h('span', { className: 'spinner', 'aria-hidden': true }),
+    h('span', null, props.label),
+    h('span', { className: 'mono' }, s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`));
+}
 const card = (label: string | null, ...children: ReactNode[]) =>
   h('section', { className: 'card' }, label ? h('span', { className: 'label' }, label) : null, ...children);
 
@@ -558,9 +576,10 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     // 도는 중 받은 뷰에 이미 그 메시지가 실려 있으면 임시 말풍선을 또 띄우지 않는다.
     sending && !(peek && peek.records.length > props.view.records.length) ? h('div', { className: 'bubble user dim' }, sending) : null,
     // 다시 연 화면은 `busy` 를 모른다 — 서비스가 working 이면 도는 실행에 붙은 것이다 (D-063). 결과는 앞 화면이 건 요청이 돌아오며 싣는다.
+    // key 를 고정한다 — 도는 중 기록 줄이 늘면(승인·방식 줄) 자리가 밀려 다시 마운트되고 경과 초가 0 으로 돌아간다.
     busy || view.state === 'working'
-      ? h('div', { className: 'row' },
-          text(delegation === 'cancelling' ? '취소하는 중…' : (view.state === 'blocked' || last?.kind === 'plan' || last?.kind === 'approval') ? '실행 중…' : '생각 중…', 'dim'),
+      ? h('div', { key: 'running', className: 'row' },
+          h(Running, { label: delegation === 'cancelling' ? '취소하는 중…' : (view.state === 'blocked' || last?.kind === 'plan' || last?.kind === 'approval') ? '실행 중…' : '생각 중…' }),
           // 위임(primary·reviewer)이 도는 동안만 뜬다 (D-066). 다시 연 화면(D-063)은 서비스가 준 `cancellable` 로 같이 뜬다.
           // 취소는 그 위임만 멈춘다 — 세션은 남고, 돌아오는 뷰가 취소 결과 카드를 싣는다.
           delegation === 'running' || (delegation === '' && view.cancellable)
