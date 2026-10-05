@@ -257,6 +257,7 @@ cursor  -p "<prompt>" --model gpt-5.6-sol-xhigh --output-format stream-json
 
 - 취소는 자식 프로세스를 **실제로 종료**해야 한다. 프로세스 그룹 단위 종료. 좀비 검출 테스트 필수.
   - 대화 세션의 위임 취소도 이 경로를 쓴다 — `AbortSignal` 이 `SlotRunOptions.signal` 로 내려가 어댑터 `cancel()` 을 부른다 (D-066).
+- 진행 줄 (D-084): `RunEvent` 의 `progress` 는 claude·cursor `assistant` 줄(중간 글·`tool_use`)과 codex `command_execution`·`file_change` 에서 나온다. 결과 `text`·과금·증거에 들지 않는다. 실행기는 `SlotRunOptions.onProgress` 가 있을 때만 `progress`·`text`·`notice` 를 한 줄씩 넘기고, 대화 세션이 그것을 모아 GUI 의 "실행 중…" 아래에 보인다(기록에는 남기지 않는다).
   - 엔진이 자기 그룹 밖으로 띄운 자손(codex 는 셸 명령마다 새 그룹)도 죽인다 — 신호 전에 `ps` 로 자손을 모아 그 그룹·pid 에도 SIGTERM → 2초 → SIGKILL. 엔진이 먼저 끝나도 SIGKILL 유예는 지우지 않는다 (D-078).
 - 타임아웃은 작업 유형별 기본값을 두되 사용자가 덮어쓸 수 있다.
 - stdout/stderr 원본을 실행별로 보존한다. 파싱 실패가 원본 손실로 이어지지 않게 한다.

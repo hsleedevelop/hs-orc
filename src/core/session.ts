@@ -71,6 +71,10 @@ const SUGGESTED_LABEL = '지휘자 제안';
 /** 스캐폴더는 위임하지 않고 사람이 먼저 돌린다 (D-074 B1) — codex 샌드박스는 네트워크·홈 쓰기를, claude 쓰기 모드는 셸을 막는다 (D-073). */
 export const SCAFFOLD_GUIDE = 'git 아닌 폴더 · 쓰기 위임 — 스캐폴더(예: `npx create-expo-app@latest .`)는 먼저 직접 돌리고 그 뒤 위임하라 (D-074)';
 
+/** 진행 줄 상한 (D-084) — 화면에는 끝부분만 보이므로 오래된 줄부터 버린다. */
+const PROGRESS_MAX = 200;
+const PROGRESS_LINE_MAX = 2000;
+
 const why = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 interface Pending {
@@ -108,6 +112,8 @@ export class ConversationSession {
   private pending: Pending | null = null;
   /** 도는 위임의 취소 신호 (D-066). primary·reviewer·읽기 답(D-083) 실행 동안만 있다 — 지휘자의 요약·직접 답은 취소 대상이 아니다. */
   private delegation: AbortController | null = null;
+  /** 도는(또는 마지막으로 돈) 엔진 실행의 진행 줄 (D-084). 기록에 남기지 않는다 — 화면이 "실행 중…" 아래에 보여줄 뿐이다. */
+  private progressLog: string[] = [];
   /** 기록은 열 때 한 번 읽고 이후엔 append 와 함께 들고 있는다 — 메시지마다 JSONL 을 다시 읽지 않는다. */
   private readonly log: TranscriptRecord[];
   /** 지금 승인 방식 (D-064). 마지막 `mode` 기록을 재생한다 — 없으면 새 세션은 `limits.json` 기본값, 옛 세션은 `manual`. */
@@ -173,6 +179,27 @@ export class ConversationSession {
 
   records(): TranscriptRecord[] {
     return [...this.log];
+  }
+
+  /** 엔진 진행 줄 (D-084). 위임·읽기 답이 시작할 때 비우고, 끝난 뒤에는 다음 시작까지 남는다. */
+  get progress(): readonly string[] {
+    return this.progressLog;
+  }
+
+  /**
+   * 실행기를 감싸 진행 줄을 모은다 (D-084). 슬롯마다 머리줄을 하나 달아 primary·reviewer 를 구분한다.
+   * 줄 수·줄 길이를 잘라 둔다 — 화면이 400ms 마다 뷰를 다시 읽는다.
+   */
+  private tapProgress(execute: SlotExecutor, role: boolean): SlotExecutor {
+    this.progressLog = [];
+    const push = (line: string): void => {
+      this.progressLog.push(line.length > PROGRESS_LINE_MAX ? `${line.slice(0, PROGRESS_LINE_MAX)}…` : line);
+      if (this.progressLog.length > PROGRESS_MAX) this.progressLog.splice(0, this.progressLog.length - PROGRESS_MAX);
+    };
+    return (slot, prompt, options) => {
+      push(`── ${role ? `${slot.role} ` : ''}${slotLine(slot)}`);
+      return execute(slot, prompt, { ...options, onProgress: push });
+    };
   }
 
   /** 지금 취소할 수 있는 위임이 도는가 — primary·reviewer 실행 중이고 아직 취소를 보내지 않았다 (D-066). */
@@ -401,7 +428,7 @@ export class ConversationSession {
       const slot = readerSlot(catalog);
       const context = buildContext(this.records(), this.contextLimits, { before: this.turn });
       this.delegation = controller;
-      const run = await this.deps.executorFor(false)(slot, buildReadPrompt(context.text, text), { signal: controller.signal });
+      const run = await this.tapProgress(this.deps.executorFor(false), false)(slot, buildReadPrompt(context.text, text), { signal: controller.signal });
       this.delegation = null;
       const charge = budget.charge(`${slot.label}·${slot.effort}`, run.actualUsd, estimateUsd(matrix, slot), run.meteredUsd, slot.plan);
       budget.countTokens(run.usage, run.compactionUncounted);
@@ -536,7 +563,7 @@ export class ConversationSession {
         prompt,
         verify: options.verify ?? [],
         cwd: dir,
-        execute: this.deps.executorFor(write),
+        execute: this.tapProgress(this.deps.executorFor(write), true),
         budget,
         journal,
         note: this.noteOf(pending, by),

@@ -3225,6 +3225,26 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 ---
 
+## D-084 — 위임·읽기 답이 도는 동안 엔진의 진행 줄(중간 답 글·도구 호출)을 화면에 보인다
+
+**배경** 2026-10-05 전하 피드백: GUI 에서 위임을 승인하면 끝날 때까지 "실행 중…" 한 줄뿐이다 — claude·codex 를 직접 띄웠을 때 보이는 출력이 없다. 원인(사실): 어댑터는 `onEvent` 를 받지만(`adapters/engine.ts` `start`) `createExecutor` 가 넘기지 않았고, claude 스트림 파서는 `result`·`compact_boundary` 줄만 읽어 `assistant`(중간 글·`tool_use`) 줄을 버렸다. 화면은 이미 실행 중 400ms 마다 `convView` 를 다시 읽는다.
+
+**결정**
+1. **`RunEvent` 에 `progress`(한 줄 글)를 더한다.** claude·cursor `assistant` 줄의 `text` 블록은 그대로, `tool_use` 는 `▸ <도구> <명령|file_path|path|pattern|url|query|description 중 첫 값>`(160자)로 낸다. thinking 은 claude 가 빈 문자열로 주어 내지 않는다. codex 는 `item.started` 의 `command_execution` 을 `▸ $ <명령>` 으로, 0 이 아닌 종료 코드를 `  exit N` 으로, `file_change` 를 `▸ 파일 변경 <경로>` 로 낸다. 중간 답(`agent_message`)은 원래의 `text` 이벤트가 그 자리다.
+   - claude 중간 글을 `text` 로 내지 않는 이유: `run.ts` 는 `text` 를 이어 붙이고 `result` 가 비면 그것을 결과로 쓴다 — 결과 글이 바뀐다. `progress` 는 결과·과금·증거 어디에도 들지 않는다.
+2. **`SlotRunOptions.onProgress`** — 실행기가 `progress`·`text`·`notice`(`⚠ …`)를 한 줄로 바꿔 넘긴다. 넘기지 않으면 지금과 같다(지휘자·분류·`--run` CLI 는 바뀌지 않는다).
+3. **세션이 실행기를 감싸 모은다** (`ConversationSession.tapProgress`) — `delegate`·`runDuo` 는 바뀌지 않는다. 슬롯마다 머리줄 `── <role> <slotLine>`(읽기 답은 role 없이)을 달고, 최근 200줄·줄당 2,000자로 자른다. 위임·읽기 답이 시작할 때 비운다. **기록(JSONL)에 남기지 않는다** — 원시 출력은 이미 run-store 에 있고, 진행 줄은 보기용이다.
+4. **GUI** — `SessionView.progress` 는 `working` 일 때만 싣는다. "실행 중…" 줄 아래에 끝 60줄을 높이 240px 상자에 보이고, 스크롤은 늘 최신 줄에 붙는다(column-reverse).
+
+**검증**
+- 실측 캡처(2026-10-05, claude 2.1.289 Haiku·low · codex-cli 0.160.0 Luna·low, 스크래치 폴더): claude `assistant` 줄에 `tool_use`(Read `file_path`, Bash `command`)와 `text` 블록, codex 에 `item.started`/`item.completed` `command_execution`(`command`·`exit_code`). 이 줄로 `stream.test.ts` 3건, 세션 머리줄·비우기 1건(`session.test.ts`). `npm test` 643 → 647.
+- 실엔진 스모크: `createExecutor(...)(slot, "Run 'wc -l a.txt' …", { onProgress })` — claude `▸ Bash wc -l a.txt` → 답 글, codex `⚠ Under-development features…` → 중간 답 → `▸ $ /bin/zsh -lc 'wc -l a.txt'` → 답 글. 두 실행 모두 최종 `text` 는 이전과 같다.
+
+**미검증·위험**
+- GUI 화면은 Electron 으로 띄워 보지 않았다 — 타입 검사·단위만 통과. 첫 실사용에서 상자 높이·줄 수가 적당한지 본다.
+- codex `file_change` 의 칸 모양은 이 결정에서 캡처하지 못했다(D-051 근거에 `file_change completed` 가 있을 뿐) — 경로를 못 읽으면 `▸ 파일 변경` 만 낸다. cursor 의 `assistant` 줄은 fixture 상 claude 와 같지만 `tool_use` 는 미실측이다.
+- `hs-orc chat`(줄 입력)은 진행 줄을 찍지 않는다 — 같은 `session.progress` 를 쓰면 되지만 이번 범위가 아니다.
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |

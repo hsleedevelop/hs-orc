@@ -49,7 +49,9 @@ export type RunEvent =
   /** 파싱 실패한 줄. **버리지 않는다** — 한 줄 실패가 실행 전체를 죽이지 않게 하되 침묵하지도 않는다. */
   | { readonly kind: 'unparsed'; readonly line: string; readonly reason: string }
   | { readonly kind: 'session'; readonly id: string }
-  | { readonly kind: 'compact'; readonly compaction: EngineCompaction };
+  | { readonly kind: 'compact'; readonly compaction: EngineCompaction }
+  /** 엔진이 도는 중 한 일 한 줄 (D-084) — 중간 답 글·도구 호출. 화면 표시 전용이라 결과 `text` 에 들지 않는다. */
+  | { readonly kind: 'progress'; readonly text: string };
 
 /**
  * 엔진이 실행 중 맥락을 압축했다 (D-058). claude 스트림의 `system`·`compact_boundary` 에서 읽는다
