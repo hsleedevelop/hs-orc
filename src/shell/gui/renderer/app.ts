@@ -46,7 +46,8 @@ type Rec =
   | { kind: 'summary'; turn: number; text: string; next: string }
   | { kind: 'error'; turn: number; text: string };
 interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; progress: string[]; mode: ApprovalMode; ladder: { stage: string; label: string; changes: string[] } | null }
-interface SessionSummary { id: string; dir: string; kind: SessionKind; lastAt: string; preview: string }
+interface SessionUsage { tokens: number; cacheReadTokens: number; cacheReadPartial?: true; billedUsd: number; convertedUsd: number }
+interface SessionSummary { id: string; dir: string; kind: SessionKind; lastAt: string; preview: string; usage?: SessionUsage }
 interface ConversationTree { projects: { project: ProjectInfo; sessions: SessionSummary[] }[]; scratch: SessionSummary[] }
 
 interface Bridge {
@@ -299,6 +300,25 @@ function NewSession(props: { onOpen: (v: SessionView) => void; onError: (m: stri
 const sameSession = (a: { id: string; dir: string } | null, b: { id: string; dir: string }): boolean =>
   a !== null && a.id === b.id && a.dir === b.dir;
 
+const kTokens = (n: number): string => (n < 1000 ? String(n) : n < 1e6 ? `${(n / 1000).toFixed(1)}k` : `${(n / 1e6).toFixed(2)}M`);
+
+/**
+ * 사이드바 세션 행의 사용량 한 줄과 그 풀이(title). 줄에는 `토큰` 라벨을 빼 `환산` 이 잘리지 않게 한다 — 라벨은 title 에 있다. 구독제 환산액을 청구액처럼 보이지 않게 `환산` 을 붙인다 (D-030).
+ * 캐시 읽기 내역을 모르는 보고가 섞였으면 비율은 하한이라 `≥` 를 붙이고, 아는 몫이 0 이면 비율을 뺀다 — 0% 는 거짓이다.
+ */
+function usageLine(u: SessionUsage): { line: string; title: string } {
+  const share = u.tokens > 0 ? Math.round((u.cacheReadTokens / u.tokens) * 100) : 0;
+  const cache = u.tokens === 0 || (u.cacheReadPartial && u.cacheReadTokens === 0) ? '' : ` · 캐시 ${u.cacheReadPartial ? '≥' : ''}${share}%`;
+  const usd =
+    u.billedUsd > 0 && u.convertedUsd > 0 ? `$${u.billedUsd.toFixed(4)} + $${u.convertedUsd.toFixed(4)} 환산`
+    : u.billedUsd > 0 ? `$${u.billedUsd.toFixed(4)}`
+    : `$${u.convertedUsd.toFixed(4)} 환산`;
+  const title =
+    `토큰 ${u.tokens.toLocaleString()} · 캐시 읽기 ${u.cacheReadTokens.toLocaleString()}${u.cacheReadPartial ? ' 이상 (내역 모르는 보고 섞임)' : ''}` +
+    ` · 청구 $${u.billedUsd.toFixed(4)} · API 환산 $${u.convertedUsd.toFixed(4)} (구독제, 청구 안 됨)`;
+  return { line: `${kTokens(u.tokens)}${cache} · ${usd}`, title };
+}
+
 /**
  * 프로젝트/세션 사이드바. 프로젝트 이름을 누르면 그 폴더로 옮기고, 세션을 누르면 그 세션을 연다
  * (project 세션은 서비스가 폴더도 옮긴다 — 화면의 폴더가 세션의 폴더다).
@@ -335,13 +355,16 @@ function Sidebar(props: {
       onOpen,
     );
 
-  const item = (s: SessionSummary): ReactElement =>
-    h('button', {
+  const item = (s: SessionSummary): ReactElement => {
+    const usage = s.usage ? usageLine(s.usage) : null;
+    return h('button', {
       key: `${s.dir}::${s.id}`, className: 'sb-item', disabled: busy, title: s.dir,
       'aria-current': sameSession(open, s), onClick: () => openSession(s),
     },
     h('span', { className: 'p' }, s.preview || '(빈 세션)'),
-    h('span', { className: 't' }, s.lastAt ? s.lastAt.slice(0, 16).replace('T', ' ') : '—'));
+    h('span', { className: 't' }, s.lastAt ? s.lastAt.slice(0, 16).replace('T', ' ') : '—'),
+    usage ? h('span', { className: 'u', title: usage.title }, usage.line) : null);
+  };
 
   // 첫 메시지 전의 세션은 기록 파일이 없어 목록에 안 잡힌다 — 열려 있는 동안은 자리를 보여 준다.
   const withOpen = (dir: string | null, sessions: SessionSummary[]): SessionSummary[] =>
