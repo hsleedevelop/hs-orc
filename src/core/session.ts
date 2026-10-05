@@ -107,8 +107,8 @@ export interface SessionDeps {
    * 같은 세션의 다음 쓰기 행이 H6 없이 쓰기로 선다(D-073 사실 9 의 해소). 조립이 `repoRoot` 로 넘긴다.
    */
   readonly gitProbe?: () => boolean;
-  /** 스캐폴딩 허용 목록 (D-088). 없으면 `data/scaffolders.json`. */
-  readonly scaffolders?: Scaffolders;
+  /** 스캐폴딩 허용 목록 (D-088). 부를 때마다 읽는다 — 실행 직전 재검사가 지금 파일과 대조되게 한다(PR #118 리뷰). 없으면 `data/scaffolders.json`. */
+  readonly scaffolders?: () => Scaffolders;
   /** 스캐폴더·git init 실행기 (D-088). 없으면 셸 없는 spawn(`runArgv`). 테스트가 가짜를 넣는다 — 네트워크를 부르지 않는다. */
   readonly runCommand?: CommandRunner;
 }
@@ -249,10 +249,15 @@ export class ConversationSession {
     return this.pendingScaffold !== null;
   }
 
-  /** 지금 `git init` + 첫 커밋을 제안하나 (D-088) — 마지막 기록이 git 없이 끝난 스캐폴딩 성공이고 폴더가 아직 git 이 아니다. */
+  /**
+   * 지금 `git init` + 첫 커밋을 제안하나 (D-088) — 마지막 기록이 git 없이 끝난 스캐폴딩 성공이고 폴더가 아직 git 이 아니거나,
+   * 직전 git init 이 끝나지 못했다(커밋 실패·취소 — `git init` 은 이미 됐을 수 있다). 다시 돌려도 `git init` 은 같은 저장소를 다시 잡을 뿐이다.
+   */
   get gitInitOffered(): boolean {
     const last = this.lastEvent();
-    return this.stateValue === 'waiting_input' && this.deps.kind === 'project' && last?.kind === 'scaffold-run' && last.step === 'scaffold' && last.git === 'offer' && !this.inGit;
+    if (this.stateValue !== 'waiting_input' || this.deps.kind !== 'project' || last?.kind !== 'scaffold-run') return false;
+    if (last.step === 'git-init') return last.outcome !== 'ok';
+    return last.git === 'offer' && !this.inGit;
   }
 
   /** 폴더가 git 인가 — 다시 볼 수 있으면 지금 본다(D-088), 아니면 조립 때 값, 모르면 git 으로 본다(D-074). */
@@ -260,8 +265,9 @@ export class ConversationSession {
     return this.deps.gitProbe?.() ?? this.deps.inGit ?? true;
   }
 
+  /** 허용 목록 — 부를 때마다 파일을 다시 읽는다. */
   private get scaffolders(): Scaffolders {
-    return this.deps.scaffolders ?? loadScaffolders();
+    return this.deps.scaffolders?.() ?? loadScaffolders();
   }
 
   get orchestrator(): OrchestratorChoice {
@@ -503,9 +509,9 @@ export class ConversationSession {
     try {
       // 새 프로젝트 생성 요청은 분류(Jev·규칙)보다 먼저 본다 (D-088) — 위임 엔진은 스캐폴더를 못 돌린다(D-073). 결정론이고 엔진·Jev 를 부르지 않는다.
       // 행을 사람이 지정한 경로(`planAs`)는 그 지정을 따른다.
-      const scaffold = taskId ? null : detectScaffold(text, this.scaffolders);
-      const scaffoldWhy = scaffold ? this.scaffoldBlocker(scaffold) : null;
-      if (scaffold?.scaffolder && scaffoldWhy === null) return [this.stageScaffold(scaffold.scaffolder)];
+      const scaffold = taskId ? null : this.scaffoldRoute(text);
+      if (scaffold?.card) return [this.stageScaffold(scaffold.card)];
+      const scaffoldWhy = scaffold?.why ?? null;
       // D-033: 지휘자가 대화 맥락으로 직접 답하고 SUGGEST 로 행을 제안한다 — 맥락 없는
       // 폴백의 선택이 대화성 후속을 잘못 위임하는 일이 없다. 규칙이 놓친 메시지는 항상 직접 답으로 간다.
       const { classifier } = this.deps;
@@ -696,21 +702,35 @@ export class ConversationSession {
    * 스캐폴딩 카드를 세울 수 없는 이유 (D-088). null 이면 세운다. 규칙: project 세션 · 허용 목록에서 정확히 하나 · 폴더가 비어 있다
    * (`ignore` 의 이름만 있으면 빈 것). 비어 있지 않으면 세우지 않는다 — 스캐폴더가 덮을 수 있고, 대개 스스로 거절한다.
    */
-  private scaffoldBlocker(request: ScaffoldRequest): string | null {
-    const catalog = this.scaffolders;
+  private scaffoldBlocker(request: ScaffoldRequest, catalog: Scaffolders, entries: readonly string[] | null): string | null {
     if (this.deps.kind !== 'project') return '스크래치 세션이다 — 스캐폴딩은 비어 있는 project 폴더를 열고 한다';
     if (!request.scaffolder) {
       return request.candidates.length > 1
         ? `여러 스캐폴더가 맞는다 (${request.candidates.map((c) => c.id).join('·')}) — 하나만 넣어 다시 보낸다`
         : `어느 스캐폴더인지 모른다 — 허용 목록(${catalog.scaffolders.map((c) => c.id).join('·')}) 중 하나를 넣어 다시 보낸다`;
     }
-    const entries = folderEntries(this.deps.dir, catalog.ignore);
     if (entries === null) return '폴더를 읽지 못했다';
     if (entries.length > 0) {
       const shown = entries.slice(0, 3).join(', ');
       return `폴더가 비어 있지 않다 (${entries.length}개: ${shown}${entries.length > 3 ? ' …' : ''}) — 스캐폴더가 덮을 수 있어 빈 폴더에서만 실행한다`;
     }
     return null;
+  }
+
+  /**
+   * 메시지가 스캐폴딩 경로를 타는가 (D-088). `card` 면 카드를 세운다(빈 project 폴더 · 허용 목록에서 하나). `why` 면 카드는 못 세우지만
+   * 분류 줄·지휘자 안내를 스캐폴딩으로 바꾼다 — **새 프로젝트 뜻이 분명하고(`strong`) 프레임워크를 짚었거나 폴더가 빌 때만**이다.
+   * 그 밖(기존 프로젝트·스크래치의 "앱을 시작하면…"·"앱 초기화 로직 설명" 같은 일상 문장)은 null — 종전 경로 그대로다 (PR #118 리뷰).
+   */
+  private scaffoldRoute(text: string): { readonly card?: Scaffolder; readonly why?: string } | null {
+    const catalog = this.scaffolders;
+    const request = detectScaffold(text, catalog);
+    if (!request) return null;
+    const entries = this.deps.kind === 'project' ? folderEntries(this.deps.dir, catalog.ignore) : null;
+    const why = this.scaffoldBlocker(request, catalog, entries);
+    if (why === null && request.scaffolder) return { card: request.scaffolder };
+    const empty = entries !== null && entries.length === 0;
+    return why !== null && request.strong && (request.candidates.length > 0 || empty) ? { why } : null;
   }
 
   /** 카드를 못 세운 스캐폴딩 요청에 지휘자가 안내할 재료 (D-088) — 카드가 서는 길, 못 선 이유, 사람이 직접 돌릴 명령. */
@@ -741,7 +761,6 @@ export class ConversationSession {
     if (!pending) throw new SessionStateError('승인할 스캐폴딩 카드가 없다.');
     this.pendingScaffold = null;
     const { dir } = this.deps;
-    const catalog = this.scaffolders;
     const argv = pending.scaffolder.argv;
     const out = [this.append({ kind: 'approval', approved: true, write: true, by: 'user', mode: this.modeValue, asked: ['H7'] })];
     const refused = (reason: string): TranscriptRecord =>
@@ -751,7 +770,10 @@ export class ConversationSession {
     const controller = new AbortController();
     this.delegation = controller;
     try {
+      // 허용 목록을 지금 다시 읽어 대조한다 — 카드가 선 뒤 파일에서 빠졌거나 파일이 깨졌으면 돌리지 않는다.
+      let catalog: Scaffolders;
       try {
+        catalog = this.scaffolders;
         allowedArgv(argv, catalog);
       } catch (error) {
         out.push(refused(why(error)));
@@ -795,11 +817,14 @@ export class ConversationSession {
    */
   async initGit(): Promise<TranscriptRecord[]> {
     this.require('waiting_input', 'git init');
-    if (!this.gitInitOffered) throw new SessionStateError('git init 은 스캐폴딩이 git 없이 끝난 직후, 폴더가 아직 git 이 아닐 때만 한다 (D-088).');
+    if (!this.gitInitOffered) throw new SessionStateError('git init 은 스캐폴딩이 git 없이 끝난 직후(폴더가 아직 git 이 아닐 때)나 직전 git init 이 끝나지 못했을 때만 한다 (D-088).');
     this.stateValue = 'working';
     this.progressLog = [];
+    // 스캐폴딩처럼 취소할 수 있다 (D-066 통로) — 커밋 훅·서명 프롬프트가 멈춰도 사람이 끊는다.
+    const controller = new AbortController();
+    this.delegation = controller;
     try {
-      const seq = await runSequence(this.deps.runCommand ?? runArgv, GIT_INIT_COMMANDS, { cwd: this.deps.dir, timeoutMs: 60_000, onLine: (line) => this.pushProgress(line) });
+      const seq = await runSequence(this.deps.runCommand ?? runArgv, GIT_INIT_COMMANDS, { cwd: this.deps.dir, timeoutMs: 60_000, signal: controller.signal, onLine: (line) => this.pushProgress(line) });
       return [this.append({
         kind: 'scaffold-run',
         step: 'git-init',
@@ -812,6 +837,7 @@ export class ConversationSession {
     } catch (error) {
       return [this.append({ kind: 'error', text: `git init 이 끝나지 못했다: ${why(error)}` })];
     } finally {
+      this.delegation = null;
       this.stateValue = 'waiting_input';
     }
   }

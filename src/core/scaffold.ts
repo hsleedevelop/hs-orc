@@ -12,21 +12,15 @@ import { outsideGroupDescendants } from '../adapters/run.ts';
 import { ScaffoldError, checkScaffoldArgv, type Scaffolder, type Scaffolders } from '../data/scaffolders.ts';
 import { gitEnv } from './git-env.ts';
 
-/**
- * 새 프로젝트를 만드는 말. `git init`·"DB 초기화" 처럼 프로젝트가 아닌 대상은 아래 `SUBJECT` 가 거른다.
- * "프로젝트에 로그인 기능 만들어" 는 앱·프로젝트 뒤에 바로 동사가 오지 않아 맞지 않는다.
- */
-const INTENT = [
-  /(?<!git\s)\binit\b/i,
-  /초기화/,
-  /스캐폴/,
-  /scaffold/i,
-  /bootstrap/i,
-  /\bcreate-[a-z]/i,
-  /새\s*(프로젝트|앱)/,
-  /\bnew\s+(project|app)\b/i,
-  /(앱|app|프로젝트|project)\s*(하나|을|를|one)?\s*(새로\s*)?(만들|생성|시작|셋업|setup|create)/i,
-];
+/** "앱·프로젝트를 새로 만든다" 는 말 — 대상 바로 뒤에 만드는 동사가 온다. "앱을 시작하면"·"app create 버튼" 은 맞지 않는다 (PR #118 리뷰). */
+const CREATE_KO = /(앱|app|프로젝트|project)\s*(하나|을|를|one)?\s*(새로\s*)?(만들|생성|셋업|setup|init|초기화)/i;
+const CREATE_EN = /\b(create|make|init(ialize)?|set\s*up|bootstrap)\s+(an?\s+)?(new\s+)?([\w.-]+\s+)?(app|project)\b/i;
+
+/** 새 프로젝트를 만든다는 뜻이 분명한 말. 카드를 못 세우는 폴더에서 종전 경로를 바꿀지는 이것으로만 정한다. */
+const STRONG = [/스캐폴/, /scaffold/i, /bootstrap/i, /\bcreate-[a-z]/i, /새\s*(프로젝트|앱)/, /\bnew\s+(project|app)\b/i, CREATE_KO, CREATE_EN];
+
+/** 그 밖에 스캐폴딩일 수 있는 말 — 허용 목록 키워드(next·expo·vite)와 함께일 때만 본다. `git init`·"DB 초기화" 는 대상이 없어 거른다. */
+const WEAK = [/(?<!git\s)\binit\b/i, /초기화/];
 const SUBJECT = /(앱|app|프로젝트|project|템플릿|template)/i;
 
 const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -37,15 +31,18 @@ export interface ScaffoldRequest {
   /** 정확히 하나가 맞으면 그것. 없거나 둘 이상이면 null — 카드를 세우지 않고 지휘자가 묻는다. */
   readonly scaffolder: Scaffolder | null;
   readonly candidates: readonly Scaffolder[];
+  /** 새 프로젝트를 만든다는 뜻이 분명하다 (`STRONG`). 아니면 약한 말(init·초기화)과 키워드·대상이 겹친 것뿐이다. */
+  readonly strong: boolean;
 }
 
-/** 새 프로젝트 생성 요청인가. 아니면 null. */
+/** 새 프로젝트 생성 요청일 수 있는가. 아니면 null. 이 판정만으로 경로를 바꾸지 않는다 — 세션이 폴더 상태와 함께 본다. */
 export function detectScaffold(text: string, catalog: Scaffolders): ScaffoldRequest | null {
   const lower = text.toLowerCase();
-  if (!INTENT.some((re) => re.test(text))) return null;
+  const strong = STRONG.some((re) => re.test(text));
+  if (!strong && !WEAK.some((re) => re.test(text))) return null;
   const candidates = catalog.scaffolders.filter((s) => s.keywords.some((k) => mentions(lower, k)));
   if (candidates.length === 0 && !SUBJECT.test(text)) return null;
-  return { scaffolder: candidates.length === 1 ? (candidates[0] ?? null) : null, candidates };
+  return { scaffolder: candidates.length === 1 ? (candidates[0] ?? null) : null, candidates, strong };
 }
 
 /** 빈 폴더 판정 — `ignore` 밖의 이름들. 못 읽으면 null(비어 있다고 보지 않는다). */

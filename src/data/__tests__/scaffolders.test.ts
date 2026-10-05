@@ -21,6 +21,11 @@ describe('scaffolders.json (D-088)', () => {
       ['npx', '--yes', 'create-next-app@latest', '. && rm -rf ~'],
       ['npx', '--yes', 'create-next-app@latest', '/tmp/elsewhere'],
       ['npx', '--yes', 'create-next-app@latest'],
+      // PR #118 리뷰 — 실행 대상을 바꾸는 npx 옵션·폴더 밖 경로
+      ['npx', '--package=evil-pkg', 'create-foo', '.'],
+      ['npx', '--call=id', 'create-foo', '.'],
+      ['npx', '--registry=http://evil.example', 'create-foo', '.'],
+      ['npx', '--yes', 'create-foo', '.', '--dir=/etc'],
     ]) {
       assert.throws(() => checkScaffolders(entry(argv)), ScaffoldError, argv.join(' '));
     }

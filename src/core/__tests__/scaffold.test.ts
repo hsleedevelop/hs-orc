@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { loadMatrix } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
-import { loadScaffolders } from '../../data/scaffolders.ts';
+import { loadScaffolders, type Scaffolders } from '../../data/scaffolders.ts';
 import type { RowClassifier } from '../../adapters/jev.ts';
 import { Budget } from '../budget.ts';
 import { Journal } from '../journal.ts';
@@ -38,10 +38,16 @@ describe('스캐폴딩 감지 — 결정론 (D-088)', () => {
     assert.equal(detectScaffold('npx create-next-app 으로 스캐폴딩해줘', scaffolders)?.scaffolder?.id, 'next');
   });
 
-  it('프로젝트를 만드는 말이 아니면 잡지 않는다', () => {
-    for (const text of ['git init 해줘', '이 프로젝트에 로그인 기능 만들어줘', 'DB 초기화 코드 고쳐줘', 'next 버전 올려줘', '이 타입 에러 고쳐줘']) {
+  it('프로젝트를 만드는 말이 아니면 잡지 않는다 — PR #118 리뷰 재현 문장 포함', () => {
+    for (const text of ['git init 해줘', '이 프로젝트에 로그인 기능 만들어줘', 'DB 초기화 코드 고쳐줘', 'next 버전 올려줘', '이 타입 에러 고쳐줘', '앱을 시작하면 흰 화면이 나와', 'app create 버튼 추가']) {
       assert.equal(detectScaffold(text, scaffolders), null, text);
     }
+  });
+
+  it('일상 문장은 잡혀도 새 프로젝트 뜻(strong)이 아니다 — 세션이 종전 경로로 둔다', () => {
+    for (const text of ['템플릿 초기화 함수 리팩터링', 'next 초기화 로직 고쳐줘']) assert.equal(detectScaffold(text, scaffolders)?.strong, false, text);
+    assert.equal(detectScaffold('next 앱 init 해줘', scaffolders)?.strong, true);
+    assert.equal(detectScaffold('nextjs init 해줘', scaffolders)?.scaffolder?.id, 'next', '약한 말이라도 프레임워크를 짚으면 빈 폴더 카드 후보다');
   });
 
   it('프레임워크를 모르거나 둘 이상이면 항목을 고르지 않는다 — 카드 없이 지휘자가 안내한다', () => {
@@ -123,7 +129,7 @@ const fakeRunner = (git: { value: boolean }, options: { makeGit?: boolean; hang?
   };
 };
 
-const make = (o: { mode?: 'manual' | 'auto-ask' | 'auto'; kind?: 'project' | 'scratch'; dir?: string; git?: { value: boolean }; runner?: Fake; withJev?: boolean } = {}) => {
+const make = (o: { mode?: 'manual' | 'auto-ask' | 'auto'; kind?: 'project' | 'scratch'; dir?: string; git?: { value: boolean }; runner?: Fake; withJev?: boolean; catalog?: () => Scaffolders } = {}) => {
   isolate();
   const dir = o.dir ?? mkdtempSync(path.join(os.tmpdir(), 'hs-scaffold-'));
   const git = o.git ?? { value: false };
@@ -152,7 +158,7 @@ const make = (o: { mode?: 'manual' | 'auto-ask' | 'auto'; kind?: 'project' | 'sc
     inGit: git.value,
     gitProbe: () => git.value,
     dirtyFiles: () => [],
-    scaffolders,
+    scaffolders: o.catalog ?? (() => scaffolders),
     runCommand: runner.run,
   });
   return { session, dir, git, runner, prompts, engines, jev: () => jevCalls };
@@ -281,6 +287,66 @@ describe('스캐폴딩 카드 — 세션 (D-088)', () => {
     const [, run] = await pending;
     assert.ok(run?.kind === 'scaffold-run' && run.outcome === 'cancelled');
     assert.equal(m.session.state, 'waiting_input');
+  });
+
+  it('기존 프로젝트·스크래치의 일상 문장은 종전 경로 그대로다 — 지휘자 제안 카드가 남고 스캐폴딩 안내가 붙지 않는다 (PR #118 리뷰 Medium)', async () => {
+    const occupied = () => {
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-scaffold-existing-'));
+      writeFileSync(path.join(dir, 'package.json'), '{}');
+      return dir;
+    };
+    const sentences = ['앱을 시작하면 흰 화면이 나와', 'app create 버튼 추가', '앱 초기화 로직 설명해줘', '템플릿 초기화 함수 리팩터링', 'next 초기화 로직 고쳐줘'];
+    for (const kind of ['project', 'scratch'] as const) {
+      for (const text of sentences) {
+        const m = make({ kind, mode: 'manual', withJev: false, git: { value: kind === 'project' }, ...(kind === 'project' ? { dir: occupied() } : {}) });
+        const out = await m.session.send(text);
+        const label = `${kind} · ${text}`;
+        assert.ok(!out.some((r) => r.kind === 'scaffold'), label);
+        assert.ok(!out.some((r) => (r.kind === 'direct' || r.kind === 'plan') && r.notes.some((n) => /스캐폴딩/.test(n))), `${label} — 분류 줄에 스캐폴딩 사유가 없다`);
+        assert.ok(!m.prompts.some((p) => /\[스캐폴딩\]/.test(p)), `${label} — 지휘자 프롬프트는 종전 그대로`);
+        const direct = out.find((r) => r.kind === 'direct');
+        if (direct?.kind === 'direct') {
+          assert.equal(direct.suggest, 'R03', `${label} — 지휘자 SUGGEST 가 살아 있다`);
+          assert.ok(out.some((r) => r.kind === 'plan' && r.reason.startsWith('지휘자 제안')), `${label} — 제안 카드가 선다`);
+        }
+      }
+    }
+  });
+
+  it('허용 목록은 실행 직전에 다시 읽는다 — 카드 뒤 목록에서 빠진 명령은 돌지 않는다 (PR #118 리뷰)', async () => {
+    let current: Scaffolders = scaffolders;
+    const m = make({ catalog: () => current });
+    await m.session.send('next 앱 init 해줘');
+    current = { ...scaffolders, scaffolders: scaffolders.scaffolders.filter((s) => s.id !== 'next') };
+    const [, run] = await m.session.approve();
+    assert.ok(run?.kind === 'scaffold-run' && run.outcome === 'refused' && /허용 목록/.test(run.tail), JSON.stringify(run));
+    assert.equal(m.runner.calls.length, 0);
+  });
+
+  it('git init 이 끝나지 못하면(커밋 실패) 다시 제안하고, 다시 하면 끝난다 (PR #118 리뷰)', async () => {
+    const git = { value: false };
+    const base = fakeRunner(git);
+    let commits = 0;
+    const runner: Fake = {
+      calls: base.calls,
+      run: (argv, opts) => {
+        if (argv[1] === 'commit' && ++commits === 1) {
+          base.calls.push({ argv, options: opts });
+          return Promise.resolve({ outcome: 'failed', exitCode: 128, tail: 'gpg failed to sign the data', durationMs: 3 });
+        }
+        return base.run(argv, opts);
+      },
+    };
+    const m = make({ git, runner });
+    await m.session.send('next 앱 init 해줘');
+    await m.session.approve();
+    const [failed] = await m.session.initGit();
+    assert.ok(failed?.kind === 'scaffold-run' && failed.step === 'git-init' && failed.outcome === 'failed');
+    assert.ok(git.value, 'git init 은 이미 됐다');
+    assert.ok(m.session.gitInitOffered, '커밋이 실패했으니 다시 제안한다');
+    const [ok] = await m.session.initGit();
+    assert.ok(ok?.kind === 'scaffold-run' && ok.outcome === 'ok');
+    assert.ok(!m.session.gitInitOffered);
   });
 
   it('지휘자 프롬프트 — 스캐폴딩 안내가 있으면 행을 고르라는 규칙 대신 그 안내를 싣는다', () => {

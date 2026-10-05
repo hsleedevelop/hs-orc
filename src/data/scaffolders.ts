@@ -22,10 +22,15 @@ export interface Scaffolders {
 
 const SCAFFOLDERS_PATH = path.resolve(import.meta.dirname, '..', '..', 'data', 'scaffolders.json');
 
-/** 인자 한 칸 — 셸 메타문자(공백·따옴표·$·`·;·|·&·<·>·괄호·*·?·~·\)를 담을 수 없다. argv 로 넘기니 해석되지는 않지만 수기 실수를 막는다. */
-const SAFE_ARG = /^[A-Za-z0-9@._/=:-]+$/;
+/** 인자 한 칸 — 셸 메타문자(공백·따옴표·$·`·;·|·&·<·>·괄호·*·?·~·\)와 경로 구분자 `/` 를 담을 수 없다. argv 로 넘기니 해석되지는 않지만 수기 실수를 막는다. */
+const SAFE_ARG = /^[A-Za-z0-9@._=:-]+$/;
 /** npx 다음 첫 비옵션 인자 — 공식 스캐폴더 패키지 이름 모양만 받는다. */
 const PACKAGE = /^create-[a-z0-9-]+(@[a-z0-9.^~-]+)?$/;
+/**
+ * 패키지 앞에 올 수 있는 npx 옵션 — 묻지 않고 받는 `--yes` 뿐이다. `--package=`(다른 패키지를 받아 실행)·`--call=`(셸 명령)·
+ * `--registry=` 같은 옵션은 실행 대상을 바꾸므로 받지 않는다 (PR #118 리뷰).
+ */
+const NPX_OPTIONS: readonly string[] = ['--yes'];
 
 export class ScaffoldError extends Error {
   override name = 'ScaffoldError';
@@ -36,11 +41,14 @@ export function checkScaffoldArgv(argv: readonly string[]): string {
   if (argv[0] !== 'npx') throw new ScaffoldError(`스캐폴더는 npx 로만 실행한다: ${argv.join(' ')}`);
   const bad = argv.find((a: unknown) => typeof a !== 'string' || !SAFE_ARG.test(a));
   if (bad !== undefined) throw new ScaffoldError(`허용하지 않는 인자다: ${JSON.stringify(bad)}`);
-  const pkg = argv.slice(1).find((a) => !a.startsWith('-'));
+  const at = argv.findIndex((a, i) => i > 0 && !a.startsWith('-'));
+  const pkg = at < 0 ? undefined : argv[at];
   if (pkg === undefined || !PACKAGE.test(pkg)) throw new ScaffoldError(`create-* 패키지가 아니다: ${pkg ?? '(없음)'}`);
-  const rest = argv.slice(argv.indexOf(pkg) + 1).filter((a) => !a.startsWith('-'));
-  // 위치 인자는 대상 폴더 '.' 하나와 옵션 값뿐이다 — 상위·절대 경로로 세션 폴더 밖에 만들지 않는다.
-  if (!rest.includes('.') || rest.some((a) => a.startsWith('/') || a.includes('..'))) {
+  const npxOption = argv.slice(1, at).find((a) => !NPX_OPTIONS.includes(a));
+  if (npxOption !== undefined) throw new ScaffoldError(`npx 옵션은 ${NPX_OPTIONS.join('·')} 만 받는다: ${npxOption}`);
+  const rest = argv.slice(at + 1);
+  // 위치 인자에 대상 폴더 '.' 이 있어야 하고, 상위 경로로 세션 폴더 밖에 만들지 않는다 ('/' 는 위에서 막았다).
+  if (!rest.includes('.') || rest.some((a) => a.includes('..'))) {
     throw new ScaffoldError(`대상 폴더는 '.'(세션 폴더) 이어야 한다: ${argv.join(' ')}`);
   }
   return pkg;
@@ -66,9 +74,7 @@ export function checkScaffolders(raw: Scaffolders): Scaffolders {
   return raw;
 }
 
-let cached: Scaffolders | undefined;
-
+/** 부를 때마다 파일을 읽는다 — 캐시하지 않는다. 실행 직전 재검사가 지금 파일과 대조돼야 해서다 (PR #118 리뷰). 파일이 작고 카드·실행 때만 읽는다. */
 export function loadScaffolders(): Scaffolders {
-  cached ??= checkScaffolders(JSON.parse(readFileSync(SCAFFOLDERS_PATH, 'utf8')) as Scaffolders);
-  return cached;
+  return checkScaffolders(JSON.parse(readFileSync(SCAFFOLDERS_PATH, 'utf8')) as Scaffolders);
 }
