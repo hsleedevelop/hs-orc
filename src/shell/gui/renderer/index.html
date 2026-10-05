@@ -286,6 +286,9 @@
       }
       .head-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
       main:has(> div:not([hidden]) .session-head) { padding-top: 0; }
+      /* 머리 줄 한 줄에는 ~1000px 가 든다. 900px 칼럼에선 넓은 창에서도 두 줄로 접힌다.
+         1400px 창(사이드바 260 · 여백 32 를 빼면 1108)부터 세션 칼럼만 넓혀 한 줄에 둔다. */
+      @media (min-width: 1400px) { .stack:has(> .session-head) { max-width: 1100px; } }
     </style>
   </head>
   <body>
