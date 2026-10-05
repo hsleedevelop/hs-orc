@@ -11,7 +11,8 @@ import type { SlotExecutor } from '../../../core/executor.ts';
 import { readDecisions } from '../../../core/decision-log.ts';
 import { gitEnv } from '../../../core/git-env.ts';
 import { projectStateDir } from '../../../core/project-state.ts';
-import { transcriptPath } from '../../../core/transcript.ts';
+import { appendRecord, transcriptPath } from '../../../core/transcript.ts';
+import { restoreBudget } from '../../conversation.ts';
 import { lockPath } from '../../../core/session-lock.ts';
 import { sendToSession } from '../../session-cmd.ts';
 import { GuiService, skipGitCheck } from '../service.ts';
@@ -658,6 +659,22 @@ describe('GUI — 세션 상태·이름·외부 조작 (D-085)', () => {
     assert.equal(service.conversation().external?.by, 'cli');
     await assert.rejects(service.converse('또'), /다른 곳\(cli/);
     assert.throws(() => service.converseMode('auto'), /다른 곳\(cli/);
+  });
+
+  it('닫았다 다시 연 세션은 그 사이 다른 프로세스의 지출까지 Budget 에 싣는다 (PR #111 리뷰 2)', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    const a = service.startConversation('scratch');
+    await service.converse('넌 누구니');
+    service.startConversation('scratch');
+    // 다른 프로세스(`hs-orc session send`)가 A 에 쓴 지출.
+    appendRecord(transcriptPath(a.dir, a.id), {
+      v: 1, at: new Date().toISOString(), turn: 2, kind: 'spend', tokens: 1000, unreported: 0,
+      charges: [{ label: 'Luna', usd: 0.42, source: 'actual', plan: 'api' }],
+    });
+    const reopened = service.openConversation('scratch', a.dir, a.id);
+    assert.equal(reopened.budget, restoreBudget(a.dir, a.id, 20).summary());
+    assert.match(reopened.budget, /0\.42/);
   });
 
   it('이름은 다른 세션과 겹치면 거절한다', async () => {

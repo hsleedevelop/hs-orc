@@ -547,7 +547,6 @@ export class GuiService {
     if (!s) throw new Error('열린 세션이 없다.');
     const key = `${s.dir}::${s.id}`;
     if (this.live.has(key) || !s.isStale()) return s;
-    this.sessionBudgets.delete(key);
     this.session = this.assemble(s.kind, s.dir, s.id);
     return this.session;
   }
@@ -558,7 +557,12 @@ export class GuiService {
     return this.conversation();
   }
 
+  /**
+   * 디스크에서 세션을 새로 조립한다. Budget 도 기록에서 다시 되살린다 (D-085) — 닫아 둔 사이 다른 프로세스가 쓴 지출이
+   * 캐시에 없다. 우리 지출도 전부 `spend` 기록에 있으므로 다시 되살려도 잃는 것이 없다. 도는 세션(`live`)은 여기 오지 않는다.
+   */
   private assemble(kind: SessionKind, dir: string, id: string): ConversationSession {
+    this.sessionBudgets.delete(`${dir}::${id}`);
     return assembleSession({
       kind,
       dir,

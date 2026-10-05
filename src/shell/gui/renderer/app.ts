@@ -12,7 +12,7 @@
  */
 import { createElement as h, useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { compactLines, cutLine, ladderLines, retryLines, statusLabel } from '../../transcript-lines.ts';
+import { compactLines, cutLine, lastEvent, ladderLines, retryLines, statusLabel } from '../../transcript-lines.ts';
 
 const SCREENS = ['Session', 'Dashboard', 'Agents', 'Reviews', 'Debug'] as const;
 type Screen = (typeof SCREENS)[number];
@@ -485,7 +485,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     act(orc.convSend(t, sendWrite && view.kind !== 'scratch'));
   };
 
-  const last = view.records.at(-1);
+  // 이름 줄은 건너뛴다 — 승인 대기 중 이름을 붙여도 카드·제안 버튼이 남는다 (D-085).
+  const last = lastEvent(view.records);
   // 다른 프로세스가 쥐었으면(D-085) 이 화면의 모든 조작을 막는다 — 눌러도 서비스가 거절한다.
   const locked = busy || !!view.external;
   // 배정 카드가 선 채 보내면 그 배정은 거절로 남는다 (D-064) — 제안 카드가 대화를 막지 않는다.

@@ -109,3 +109,24 @@ describe('session — 이름과 승인 방식', () => {
     assert.equal(reopened.mode, 'auto');
   });
 });
+
+describe('session — 재시도 카드 (PR #111 리뷰 3)', () => {
+  it('auto 세션의 자동 위임이 예외로 끝나 선 재시도 카드는 --run 이 있어도 승인하지 않는다 — primary 는 한 번만 돈다', async () => {
+    const { dir, id } = fixture('retry1');
+    let primary = 0;
+    const boom: SlotExecutor = (slot, prompt, options) => {
+      if (slot.role === 'primary') {
+        primary += 1;
+        if (primary === 1) return Promise.reject(new Error('spawn 실패'));
+      }
+      return fake(slot, prompt, options);
+    };
+    assembleSession({ kind: 'project', dir, id, budget: restoreBudget(dir, id), journal: new Journal(), execute: fake }).setMode('auto');
+    const out = await sendToSession({ cwd: dir, ref: 'retry1', message: '이 타입 에러 고쳐줘', write: false, run: true, verify: [], execute: boom });
+    assert.equal(primary, 1, `기록: ${out.records.map((r) => r.kind).join(',')}`);
+    assert.ok(out.records.some((r) => r.kind === 'plan' && r.retry === true), '재시도 카드가 서야 이 경로다');
+    const closing = out.records.at(-1);
+    assert.ok(closing?.kind === 'approval' && !closing.approved, '카드는 거절로 닫는다');
+    assert.match(out.lines.join('\n'), /재시도 카드는 자동으로 승인하지 않는다/);
+  });
+});

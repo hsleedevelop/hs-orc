@@ -3,6 +3,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -44,6 +45,39 @@ describe('세션 점유 (D-085)', () => {
     assert.equal(sessionHold(dir, 's3'), null);
     claimSession(dir, 's3', 'working', 'cli');
     assert.equal(sessionHold(dir, 's3')?.pid, process.pid);
+  });
+});
+
+/**
+ * 여러 프로세스가 같은 순간 claim 한다 — 시작 시각까지 바쁘게 기다렸다가 동시에 쥔다. 결과를 찍은 뒤 잠시 살아 있는다
+ * (pid 가 살아 있어야 남의 점유다). 'wx' 직후의 빈 파일·죽은 표식을 둘이 함께 넘겨받던 결함의 회귀다 (PR #111 리뷰 1).
+ */
+async function race(dir: string, id: string, n: number): Promise<string[]> {
+  const lock = path.resolve(import.meta.dirname, '../session-lock.ts');
+  const code = `import { claimSession } from ${JSON.stringify(lock)};
+const startAt = Number(process.argv[1]);
+while (Date.now() < startAt) {}
+try { claimSession(${JSON.stringify(dir)}, ${JSON.stringify(id)}, 'working', 'cli'); process.stdout.write('OK'); } catch { process.stdout.write('BUSY'); }
+setTimeout(() => process.exit(0), 600);`;
+  const startAt = String(Date.now() + 700);
+  return Promise.all(
+    Array.from({ length: n }, () => new Promise<string>((resolve) => {
+      const child = spawn(process.execPath, ['--input-type=module', '-e', code, startAt], { env: process.env });
+      let out = '';
+      child.stdout.on('data', (d: Buffer) => { out += d.toString(); });
+      child.on('close', () => resolve(out));
+    })),
+  );
+}
+
+describe('세션 점유 — 동시 claim (D-085)', () => {
+  it('새 자리든 죽은 표식이든 동시에 쥐면 하나만 이긴다', async () => {
+    for (let round = 0; round < 4; round += 1) {
+      const dir = tmp();
+      if (round % 2 === 1) foreign(dir, 'r', 2 ** 22 + 777); // 죽은 pid 의 표식을 넘겨받는 경합
+      const results = await race(dir, 'r', 6);
+      assert.equal(results.filter((r) => r === 'OK').length, 1, `round ${round}: ${results.join(',')}`);
+    }
   });
 });
 

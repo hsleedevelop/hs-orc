@@ -163,11 +163,18 @@ export async function sendToSession(input: SendInput): Promise<SendOutcome> {
     const out: TranscriptRecord[] = [...(await session.send(input.message, { write: input.write }))];
     const notes: string[] = [];
     if (session.state === 'blocked') {
-      if (input.run) out.push(...(await session.approve({ verify: input.verify, write: input.write })));
+      // 자동 승인된 위임이 예외로 끝나 다시 선 카드(D-081)는 사람이 실패를 보고 다시 승인하는 자리다 — 미리 받은 --run 으로 넘기지 않는다.
+      const card = session.records().findLast((r) => r.kind === 'plan');
+      const retry = card?.kind === 'plan' && card.retry === true;
+      if (input.run && !retry) out.push(...(await session.approve({ verify: input.verify, write: input.write })));
       else {
         // 카드를 메모리에만 두고 나가면 기록 끝에 죽은 카드가 남는다 — 거절로 닫는다. 실행은 다시 보내며 --run 이다.
         out.push(...session.reject());
-        notes.push('안내   제시만 했다 — 배정은 거절로 남겼다. 실행하려면 같은 메시지를 --run 을 붙여 다시 보낸다.');
+        notes.push(
+          retry
+            ? '안내   위임이 예외로 끝났다 — 재시도 카드는 자동으로 승인하지 않는다(D-081). 오류를 보고 같은 메시지를 --run 으로 다시 보낸다.'
+            : '안내   제시만 했다 — 배정은 거절로 남겼다. 실행하려면 같은 메시지를 --run 을 붙여 다시 보낸다.',
+        );
       }
     }
     const failed = out.some((r) => r.kind === 'error' || (r.kind === 'result' && r.outcome !== 'ok' && r.outcome !== 'unverified'));
