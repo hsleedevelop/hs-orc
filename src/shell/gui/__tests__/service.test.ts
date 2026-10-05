@@ -69,6 +69,11 @@ describe('GUI — Core 를 그대로 쓴다', () => {
     const result = await service.run({ task: '넌 누구니', verify: [], classifyLlm: false, taskId: 'R01' });
     assert.equal(result.ok, true, 'run 이 다시 분류하면 여기서 미분류로 떨어진다');
   });
+
+  it('고를 업무 행은 매트릭스의 primary · reviewer 모델을 기본 effort 로 싣는다', () => {
+    const r01 = new GuiService(fake).tasks().find((t) => t.id === 'R01');
+    assert.equal(r01?.models, 'Luna·medium · Haiku·low');
+  });
 });
 
 describe('GUI — S5 시나리오', () => {

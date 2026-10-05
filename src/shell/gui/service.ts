@@ -4,7 +4,7 @@
  * Electron 을 import 하지 않는다 — 그래야 S5 시나리오를 창 없이 테스트할 수 있고,
  * `main.ts` 는 IPC 배선만 남는다. Core·adapters·data 는 **손대지 않는다**.
  */
-import { loadMatrix } from '../../data/matrix.ts';
+import { loadMatrix, type Slot } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
 import { loadLimits, type ApprovalMode } from '../../data/limits.ts';
 import { routeWithFallback } from '../../core/pipeline.ts';
@@ -239,9 +239,10 @@ export class GuiService {
     return runView(routed.result, task, { write, ...(routed.fallback ? { notes: [routed.fallback.line] } : {}) });
   }
 
-  /** 분류가 빗나갔을 때 화면에서 고를 업무 행. 매트릭스를 그대로 읽는다 — 목록을 셸에 따로 적지 않는다. */
-  tasks(): { id: string; task: string }[] {
-    return loadMatrix().assignments.map((a) => ({ id: a.id, task: a.task }));
+  /** 분류가 빗나갔을 때 화면에서 고를 업무 행. 매트릭스를 그대로 읽는다 — 목록을 셸에 따로 적지 않는다. `models` 는 기본 effort 기준이라 사다리 상향 전 값이다. */
+  tasks(): { id: string; task: string; models: string }[] {
+    const slot = (s: Slot): string => `${s.label}·${s.efforts[0] ?? ''}`;
+    return loadMatrix().assignments.map((a) => ({ id: a.id, task: a.task, models: `${slot(a.primary)} · ${slot(a.reviewer)}` }));
   }
 
   dashboard() {
