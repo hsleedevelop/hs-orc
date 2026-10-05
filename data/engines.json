@@ -18,7 +18,8 @@
     "isolate": "2026-09-23 실측, 빈 스크래치 폴더·같은 직접 답 프롬프트·Haiku·low: 현행 $0.0493/44,438 tok → --setting-sources project,local --strict-mcp-config --disable-slash-commands 적용 후 $0.0180/34,514 tok, 전역 CLAUDE.md 의 호칭 지시(\"전하\")가 사라졌다. --bare 는 기각 — OAuth·키체인을 안 읽고 API 키만 받아 구독제 사용자에게 못 쓴다 (D-032). 2026-09-25 재실측(claude 2.1.281, project·스크래치 폴더 모두): 위 세 인자로는 ~/.claude/CLAUDE.md·rules 가 다시 실렸다 → --safe-mode 를 더해 NONE, $0.0116/32,385 tok. safe-mode 는 프로젝트 CLAUDE.md 도 끈다 (D-050). 2026-09-26 Q18 실측(claude 2.1.283, D-058 압축 창 출처 실측): 격리 인자가 사용자 settings 의 autoCompactWindow 도 빼 압축 창 출처가 auto 가 되고, 그때 claude 는 임계값 압축 판정을 건너뛴다(A: 디버그 로그 autocompact 0줄). 같은 argv 에 CLAUDE_CODE_AUTO_COMPACT_WINDOW 만 더하면 판정이 돈다(B: thresholdSource=env) → isolateEnv 로 격리 실행에만 싣는다 (D-061). 값 1000000 은 claude 가 받는 최대값이고 min(모델 창, 값) 으로 잘려 창을 줄이지 않는다. 문서화되지 않은 env 다 — 버전을 올리면 D-061 재확인 절차로 다시 본다. 2026-10-03 Q27 실측(claude 2.1.288, D-080): 위 인자로도 내장 도구 25개가 실려 셸 읽기 명령·cwd 안 Read·하위 에이전트가 승인 없이 돌았다 → isolateArgv 끝에 --tools \"\" (내장 도구 전부 제거, allowlist). --safe-mode 바로 뒤 자리에서 파싱 오류 없이 init.tools = [] · 답 유지 · 입력 합 20,042 → 3,595 tok (n=1).",
     "compaction": "2026-09-26 Q17 실측 (D-060, claude 2.1.283 · Haiku low, 캡처 src/adapters/__tests__/fixtures/claude-q17-*.jsonl): 수동 /compact 실행의 result.usage 는 0 이지만 modelUsage 누적 차분(입력 1,436 · 출력 1,038 · 캐시 읽기 20,143 · 캐시 쓰기 399)에 압축 몫이 들고, 캐시 읽기+쓰기 20,542 가 compact_boundary pre_tokens 20,546 과 맞으며 차분 금액 $0.00913905 가 그 토큰 × Haiku 정가와 같다 — 그래서 claude 토큰은 modelUsage 합으로 읽고 resume.cumulative 에 usage 를 더한다. codex 는 압축해도 exec --json 에 신호가 없고 압축 토큰(5,638)이 turn.completed.usage 에 안 잡힌다 (D-058) — compactionUncounted 로 선언해 Budget 이 표시만 한다. cursor 는 미실측이라 선언하지 않는다.",
     "agents": "2026-10-03 Q25 S1 (D-078): codex 의 모든 실행(새 실행·resume·읽기·쓰기)에 alwaysArgv -c agents.enabled=false 를 싣는다. D-067 추가 실측 2 (codex-cli 0.159.2): 하위 에이전트 토큰은 exec --json 의 turn.completed.usage 에 합쳐지지 않고(U1 — 전체 입력의 48.7% 누락) 부모가 spawn_agent 인자로 자식 모델·effort 를 바꾼다. -c features.multi_agent=false 는 효과 없음(M1), -c agents.enabled=false 는 spawn 도구를 없앤다(M2, ultra 에서도). 실엔진 확인은 D-078 참조.",
-    "readOnly": "2026-09-25 S10 재측정: 쓰기 끔으로 승인한 codex 위임이 src/shell/deps.ts 를 실제로 고쳤다(file_change completed). 읽기 전용이 인자 부재에 기대고 있었고, ~/.codex/config.toml 의 [projects.\"/Users/hsonpro\"] trust_level=trusted 아래에서 codex 기본 sandbox 가 쓰기 가능이었다(추론). -s 는 exec resume 이 받지 않으므로 -c sandbox_mode=\"read-only\" 로 exec·resume 모두 막는다 (D-051). 2026-09-25 claude 실측(haiku·low, 인자 없음, n=1): init permissionMode=default, Write 가 permission_denials 로 거절돼 스크래치 무변경 — 단 사용자 defaultMode·allow 규칙에 달린 값이라 --disallowedTools Edit,Write,NotebookEdit 로 명시한다(deny 가 allow·모드보다 우선, --resume 과 독립) (D-052). cursor 는 미선언·미실측 — ~/.cursor/cli-config.json 이 sandbox disabled + MCP 쓰기 도구 allowlist 라 --force 없이도 새는 경로가 있을 수 있다."
+    "readOnly": "2026-09-25 S10 재측정: 쓰기 끔으로 승인한 codex 위임이 src/shell/deps.ts 를 실제로 고쳤다(file_change completed). 읽기 전용이 인자 부재에 기대고 있었고, ~/.codex/config.toml 의 [projects.\"/Users/hsonpro\"] trust_level=trusted 아래에서 codex 기본 sandbox 가 쓰기 가능이었다(추론). -s 는 exec resume 이 받지 않으므로 -c sandbox_mode=\"read-only\" 로 exec·resume 모두 막는다 (D-051). 2026-09-25 claude 실측(haiku·low, 인자 없음, n=1): init permissionMode=default, Write 가 permission_denials 로 거절돼 스크래치 무변경 — 단 사용자 defaultMode·allow 규칙에 달린 값이라 --disallowedTools Edit,Write,NotebookEdit 로 명시한다(deny 가 allow·모드보다 우선, --resume 과 독립) (D-052). cursor 는 미선언·미실측 — ~/.cursor/cli-config.json 이 sandbox disabled + MCP 쓰기 도구 allowlist 라 --force 없이도 새는 경로가 있을 수 있다.",
+    "orchestrator": "2026-10-05 실측 (D-087, claude 2.1.289 · codex-cli 0.160.0, 빈 /tmp). claude: 지휘자 격리 argv 그대로 --model \"claude-opus-5-5[1m]\" --effort low \"Reply with exactly: ok\" → ok, modelUsage 의 claude-opus-5-5[1m] contextWindow 1000000 · $0.0117. codex 지휘자는 막았다(리뷰 #114-1, 전하 결정: 내장 도구를 끄는 방법이 없으면 claude 만) — 근거: exec --ignore-user-config --ignore-rules --ephemeral -c agents.enabled=false -c sandbox_mode=read-only 에 -c features.{shell_tool,unified_exec,view_image,apps,browser_use,computer_use,image_generation,memories,plugins,hooks,goals,sleep_tool,tool_suggest,skill_search,in_app_browser}=false 를 더한 1회: 셸 없음(echo 실행 못 함)이나 functions.exec·wait·request_user_input(_async)·tools.apply_patch·clock__curr_time·web__run 이 남고 입력 15,633 tok. 거기에 -c web_search=\"disabled\" -c features.{code_mode_host,code_mode,current_time_reminder}=false 를 더한 1회: web__run 이 빠지고 exec 는 fail-closed 오류를 내지만 apply_patch·request_user_input·wait·clock 이 남고 입력 13,177 tok(claude 지휘자 약 3.8k 의 3.5배). 두 실행 모두 전역 ~/.codex/AGENTS.md 가 실렸다(답이 \"전하\" 로 시작, -c project_doc_max_bytes=0 으로도 같다). D-080(내장 도구 0개)을 만족하는 인자를 찾지 못해 codex 의 isolateArgv·longContext 선언을 두지 않는다 — 격리를 요청하면 argv 생성이 던진다."
   },
   "efforts": [
     "low",
@@ -78,6 +79,10 @@
       ],
       "isolateEnv": {
         "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000"
+      },
+      "longContext": {
+        "kind": "modelSuffix",
+        "suffix": "[1m]"
       }
     },
     "codex": {
@@ -323,7 +328,8 @@
             "high",
             "xhigh",
             "max"
-          ]
+          ],
+          "longContext": true
         },
         "cursor": {
           "idTemplate": "claude-opus-5-5-{effort}",

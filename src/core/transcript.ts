@@ -15,7 +15,7 @@ import type { Budget, Spend } from './budget.ts';
 import type { ContextCut } from './context.ts';
 import type { SettledOutcome } from './evidence.ts';
 import type { EngineReport } from './executor.ts';
-import type { ApprovalMode } from '../data/limits.ts';
+import type { ApprovalMode, OrchestratorChoice } from '../data/limits.ts';
 import type { AskReason } from './approval.ts';
 import type { LadderApplied } from './ladder.ts';
 import type { CacheWrite, EngineCompaction } from '../adapters/types.ts';
@@ -66,6 +66,8 @@ export type TranscriptEntry =
       readonly cut?: ContextCut;
       /** 이 답 실행의 캐시 쓰기 TTL 내역 (D-062). 관측 전용 — 엔진이 안 줬으면 없다. 직접 답은 원시 로그가 없어 여기에 남긴다. */
       readonly cacheWrite?: CacheWrite;
+      /** 답한 지휘자 슬롯 한 줄 (D-087) — 지휘자 모델을 세션마다 고르므로 기록이 말한다. 옛 기록·읽기 답에는 없다(옛 지휘자는 Haiku·low). */
+      readonly by?: string;
     }
   | {
       readonly kind: 'plan';
@@ -103,6 +105,40 @@ export type TranscriptEntry =
     }
   /** 승인 방식 변경 (D-064 결정 8). 세션을 열면 마지막 것을 재생한다 — 화면에 한 줄로 보인다(감사용). */
   | { readonly kind: 'mode'; readonly mode: ApprovalMode }
+  /** 지휘자 모델·effort 변경 (D-087). 세션을 열면 마지막 것을 재생한다 — 없으면 옛 세션이라 옛 지휘자(Haiku·low)다. */
+  | ({ readonly kind: 'orchestrator' } & OrchestratorChoice)
+  /**
+   * 지휘자가 낸 단계 계획 (D-087). 단계마다 배정은 매트릭스가 했다 — `primary`·`reviewer` 는 `plan` 기록과 같은 모양이다.
+   * 승인하면 단계마다 위임이 돌고 `result` 가 `step` 을 달고 붙는다. 자동 승인하지 않는다(모델이 고른 행 — H1).
+   */
+  | {
+      readonly kind: 'steps';
+      /** 나눈 요청 — 사용자가 쓴 그대로. */
+      readonly title: string;
+      readonly steps: readonly {
+        readonly id: string;
+        readonly taskId: string;
+        readonly task: string;
+        readonly prompt: string;
+        readonly dependsOn: readonly string[];
+        readonly primary: string;
+        readonly reviewer: string;
+        readonly estimateUsd: number;
+        /** 쓰기 행 · git project 폴더라 승인 때 쓰기를 받는 단계 (D-086). 옛 기록에는 없다. */
+        readonly write?: true;
+      }[];
+      readonly estimateUsd: number;
+      /** 쓰기로 돌 단계가 있다 — 카드의 쓰기 스위치가 켜진 채 선다 (D-086). */
+      readonly write?: true;
+      /** 승인 전에 보이는 조건 — 늘 H1, 그리고 H5(미커밋)·H6(git 밖 쓰기 행). 옛 기록에는 없다. */
+      readonly asked?: readonly AskReason[];
+      /** 다음 행동 안내 — git 아닌 폴더의 쓰기 행 스캐폴더 (D-074·D-086). */
+      readonly guide?: readonly string[];
+      /** 계획한 지휘자 슬롯 한 줄과 그 실행 비용. */
+      readonly by: string;
+      readonly cost: string;
+      readonly cut?: ContextCut;
+    }
   /** 세션 이름 (D-085). 마지막 것이 이긴다 — 빈 문자열은 이름을 지운다. id 와 함께 `hs-orc session` 이 세션을 찾는 열쇠다. */
   | { readonly kind: 'name'; readonly name: string }
   | {
@@ -119,8 +155,10 @@ export type TranscriptEntry =
       readonly compacted?: readonly EngineCompaction[];
       /** 위임 프롬프트의 맥락을 잘랐으면 버린 양 (D-053). */
       readonly cut?: ContextCut;
+      /** 단계 계획(D-087)의 어느 단계인가. 단계 결과는 엔진 세션을 남기지 않는다 — 다음 위임이 단계 하나에 잇지 않는다. */
+      readonly step?: string;
     }
-  | { readonly kind: 'summary'; readonly text: string; readonly next: string }
+  | { readonly kind: 'summary'; readonly text: string; readonly next: string; /** 요약한 지휘자 슬롯 한 줄 (D-087). 옛 기록에는 없다. */ readonly by?: string }
   | { readonly kind: 'error'; readonly text: string }
   /**
    * 유료 호출로 쌓인 과금·토큰 (D-054). 앱을 다시 켜고 세션을 열면 이것을 재생해 세션 Budget 을

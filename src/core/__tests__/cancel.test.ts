@@ -60,7 +60,7 @@ const make = (execute: SlotExecutor, conduct: SlotExecutor = () => Promise.resol
   return { session, budget, dir };
 };
 
-const kinds = (session: ConversationSession) => session.records().filter((r) => r.kind !== 'mode').map((r) => r.kind);
+const kinds = (session: ConversationSession) => session.records().filter((r) => r.kind !== 'mode' && r.kind !== 'orchestrator').map((r) => r.kind);
 const lastDecision = () => readDecisions().at(-1);
 
 describe('위임 취소 — primary 실행 중 (D-066)', () => {

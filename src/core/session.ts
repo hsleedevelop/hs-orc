@@ -4,15 +4,30 @@
  *
  * 메시지 1건: 기록 → 라우팅(결정론 파이프라인 그대로) → 배정이면 승인 대기(`blocked`),
  * 아니면 지휘자 직접 답. 다음 위임을 **스스로 시작하지 않는다** (D-015).
+ * 사람이 부르면 지휘자가 요청을 단계로 나눈 계획을 세우고, 승인하면 단계마다 위임이 차례로 돈다 (D-087).
  */
 import type { RowClassifier } from '../adapters/jev.ts';
 import type { Engines } from '../data/engines.ts';
 import type { Matrix } from '../data/matrix.ts';
-import { isApprovalMode, loadLimits, type ApprovalMode } from '../data/limits.ts';
+import { isApprovalMode, loadLimits, type ApprovalMode, type OrchestratorChoice } from '../data/limits.ts';
 import type { AssignmentPlan } from './assign.ts';
-import { dirtyWriteRisk, evaluateApproval, evaluateRead, nonGitWriteRefusal, readOnlyWriteRow, type ApprovalCheck } from './approval.ts';
+import { dirtyWriteRisk, evaluateApproval, evaluateRead, nonGitWriteRefusal, readOnlyWriteRow, type ApprovalCheck, type AskReason } from './approval.ts';
 import type { Budget, BudgetMark } from './budget.ts';
-import { buildSummaryPrompt, conductorSlot, directAnswer, nextSuggestion } from './conductor.ts';
+import {
+  LEGACY_ORCHESTRATOR,
+  StepsError,
+  buildStepPrompt,
+  buildStepsPrompt,
+  buildStepsSummaryPrompt,
+  buildSummaryPrompt,
+  conductorSlot,
+  defaultOrchestrator,
+  directAnswer,
+  nextSuggestion,
+  parseSteps,
+} from './conductor.ts';
+import type { ResolvedSlot } from './assign.ts';
+import { topoSort, type GraphNode } from './modes/graph.ts';
 import { buildContext, type ContextLimits } from './context.ts';
 import { appendDecision } from './decision-log.ts';
 import { firstLine, unexecutedLine } from './decide.ts';
@@ -76,6 +91,8 @@ export interface SessionDeps {
   readonly autoStart?: boolean;
   /** project 폴더가 git 작업 트리인가 (D-074). 없으면 git 으로 본다 — 조립(`assembleSession`)이 `repoRoot` 로 정해 넘긴다. */
   readonly inGit?: boolean;
+  /** 기록이 빈 새 세션의 지휘자 (D-087). 없으면 `limits.json` 의 기본. 기록에 지휘자가 있으면 그것이 이긴다. */
+  readonly orchestrator?: OrchestratorChoice;
   /** 쓰기가 본질인 행 (D-086). 없으면 `limits.json` 의 `writeRows`. */
   readonly writeRows?: readonly string[];
   /**
@@ -112,6 +129,16 @@ interface Pending {
   readonly retry?: boolean;
 }
 
+/** 승인 대기 중인 단계 계획 (D-087). 배정 카드(`Pending`)와 따로 둔다 — 자동 승인·행 바꾸기·사다리가 타지 않는다. */
+interface StepsPending {
+  readonly title: string;
+  readonly nodes: readonly GraphNode[];
+  /** 쓰기 행 · git project 폴더라 쓰기로 돌 단계 (D-086). 카드의 쓰기 스위치를 켜면 이 단계들만 쓴다 — 읽기 행 단계는 끝까지 읽기 전용이다. */
+  readonly writeSteps: ReadonlySet<string>;
+  /** 카드가 물은 조건 — 승인 기록에 코드로 남는다. */
+  readonly asked: readonly AskReason[];
+}
+
 /** 사다리가 다음에 올릴 단계 (D-068). 화면의 버튼과 chat `/ladder` 가 이것을 본다. */
 export interface LadderOffer {
   readonly stage: EscalationStage;
@@ -130,6 +157,7 @@ export class ConversationSession {
   private turn: number;
   private stateValue: SessionState = 'waiting_input';
   private pending: Pending | null = null;
+  private pendingSteps: StepsPending | null = null;
   /** 도는 위임의 취소 신호 (D-066). primary·reviewer·읽기 답(D-083) 실행 동안만 있다 — 지휘자의 요약·직접 답은 취소 대상이 아니다. */
   private delegation: AbortController | null = null;
   /** 도는(또는 마지막으로 돈) 엔진 실행의 진행 줄 (D-084). 기록에 남기지 않는다 — 화면이 "실행 중…" 아래에 보여줄 뿐이다. */
@@ -138,6 +166,10 @@ export class ConversationSession {
   private readonly log: TranscriptRecord[];
   /** 지금 승인 방식 (D-064). 마지막 `mode` 기록을 재생한다 — 없으면 새 세션은 `limits.json` 기본값, 옛 세션은 `manual`. */
   private modeValue: ApprovalMode;
+  /** 지금 지휘자 (D-087). 마지막 `orchestrator` 기록을 재생한다 — 없으면 새 세션은 기본값, 옛 세션은 옛 지휘자(Haiku·low). */
+  private orchestratorValue: OrchestratorChoice;
+  /** 기록된 지휘자를 지금 카탈로그로 띄울 수 없어 기본 지휘자로 연 사유 (D-087). 셸이 세션을 열 때 알린다. */
+  private orchestratorFallback: string | null = null;
   private originMarked = false;
 
   constructor(deps: SessionDeps) {
@@ -155,6 +187,52 @@ export class ConversationSession {
         : this.log.every((r) => r.kind === 'name') // 첫 메시지 전에 이름만 붙인 세션도 새 세션이다 (D-085).
           ? (deps.approvalMode ?? loadLimits().approvalMode)
           : 'manual';
+    const orchestrator = this.log.findLast((r) => r.kind === 'orchestrator');
+    this.orchestratorValue =
+      orchestrator?.kind === 'orchestrator'
+        ? { model: orchestrator.model, effort: orchestrator.effort }
+        : this.log.length === 0
+          ? (deps.orchestrator ?? defaultOrchestrator())
+          : LEGACY_ORCHESTRATOR;
+    // 기록의 모델이 카탈로그에서 빠졌으면(이름 변경·삭제) 세션을 못 여는 대신 기본 지휘자로 열고 그 사실을 남긴다.
+    try {
+      conductorSlot(deps.catalog, this.orchestratorValue);
+    } catch (error) {
+      const recorded = `${this.orchestratorValue.model}·${this.orchestratorValue.effort}`;
+      this.orchestratorValue = defaultOrchestrator();
+      this.orchestratorFallback = `기록된 지휘자 ${recorded} 를 띄울 수 없어 기본 지휘자 ${this.orchestratorValue.model}·${this.orchestratorValue.effort} 로 연다 — ${why(error)}`;
+    }
+  }
+
+  /** 기록된 지휘자를 쓸 수 없어 기본으로 열었으면 그 안내 한 줄 (D-087). */
+  get orchestratorNotice(): string | null {
+    return this.orchestratorFallback;
+  }
+
+  /** 승인 대기 중인 것이 단계 계획인가 (D-087) — 셸이 묻는 답(y·w·n)을 고른다. */
+  get stepsPending(): boolean {
+    return this.pendingSteps !== null;
+  }
+
+  get orchestrator(): OrchestratorChoice {
+    return this.orchestratorValue;
+  }
+
+  /** 지금 지휘자 슬롯 — 직접 답·요약·단계 계획이 이것으로 돈다. 카탈로그에서 사라진 모델이면 던진다. */
+  conductor(): ResolvedSlot {
+    return conductorSlot(this.deps.catalog, this.orchestratorValue);
+  }
+
+  /**
+   * 지휘자 모델·effort 를 바꾼다 (D-087) — `orchestrator` 기록을 남긴다. 도는 호출은 시작한 지휘자로 끝나고 다음 호출부터 적용된다.
+   * 엔진·모델·effort 가 지휘자로 쓸 수 없는 조합이면 기록하지 않고 던진다. 같은 값이고 이미 기록돼 있으면 아무것도 하지 않는다.
+   */
+  setOrchestrator(choice: OrchestratorChoice): TranscriptRecord[] {
+    conductorSlot(this.deps.catalog, choice);
+    const same = choice.model === this.orchestratorValue.model && choice.effort === this.orchestratorValue.effort;
+    if (same && this.log.some((r) => r.kind === 'orchestrator')) return [];
+    this.orchestratorValue = { model: choice.model, effort: choice.effort };
+    return [this.append({ kind: 'orchestrator', ...this.orchestratorValue })];
   }
 
   get mode(): ApprovalMode {
@@ -181,9 +259,10 @@ export class ConversationSession {
     return this.log.some((r) => r.kind === 'mode');
   }
 
-  /** 첫 메시지 전에 지금 방식을 기록으로 굳힌다 — 나중에 기본값이 바뀌어도 이 세션의 방식은 변하지 않는다. */
+  /** 첫 메시지 전에 지금 방식·지휘자를 기록으로 굳힌다 — 나중에 기본값이 바뀌어도 이 세션의 방식·지휘자는 변하지 않는다. */
   private recordModeOnce(): void {
     if (!this.modeRecorded()) this.append({ kind: 'mode', mode: this.modeValue });
+    if (!this.log.some((r) => r.kind === 'orchestrator')) this.append({ kind: 'orchestrator', ...this.orchestratorValue });
   }
 
   get state(): SessionState {
@@ -311,9 +390,12 @@ export class ConversationSession {
     return [...rejected, ...(await this.planAs(taskId, { write }))];
   }
 
-  /** 마지막 기록 — 이름 줄(D-085)은 대화의 흐름이 아니라 건너뛴다. 끊김·제안 판정이 이름을 붙였다고 바뀌면 안 된다. */
+  /**
+   * 마지막 기록 — 설정 줄(이름 D-085 · 승인 방식 · 지휘자 D-087)은 대화의 흐름이 아니라 건너뛴다. 끊김·지휘자 제안 판정이 설정을 바꿨다고
+   * 바뀌면 안 된다(옛 기록에서 지휘자를 바꾼 뒤 제안 행을 누르면 H1 이 빠지던 것). 셸의 `lastEvent`(transcript-lines.ts)와 같은 규칙이다.
+   */
   private lastEvent(): TranscriptRecord | undefined {
-    return this.log.findLast((r) => r.kind !== 'name');
+    return this.log.findLast((r) => r.kind !== 'name' && r.kind !== 'mode' && r.kind !== 'orchestrator');
   }
 
   /**
@@ -555,7 +637,7 @@ export class ConversationSession {
   }
 
   private async answer(text: string, notes: readonly string[], ignoreSuggest = false, write = false, general = false): Promise<TranscriptRecord[]> {
-    const { matrix, catalog, budget, conduct } = this.deps;
+    const { matrix, budget, conduct } = this.deps;
     // route() 가 이미 working 으로 바꿔 놓았을 수 있다 — 여기서도 다시 대입해 answer() 를 단독으로
     // 불러도(테스트 등) 같은 보장이 서게 하고, 모든 탈출 경로를 finally 하나로 묶는다 (final-review #2).
     this.stateValue = 'working';
@@ -564,7 +646,7 @@ export class ConversationSession {
       if (budget.limitReached()) {
         return [this.append({ kind: 'error', text: `누적 상한에 닿아 직접 답도 시작하지 않는다 (${budget.summary()}).` })];
       }
-      const slot = conductorSlot(catalog);
+      const slot = this.conductor();
       const context = buildContext(this.records(), this.contextLimits, { before: this.turn });
       const answer = await directAnswer(conduct, slot, matrix, context.text, text, { unrouted: ignoreSuggest });
       const charge = budget.charge(`${slot.label}·${slot.effort}`, answer.run.actualUsd, estimateUsd(matrix, slot), answer.run.meteredUsd, slot.plan);
@@ -584,6 +666,7 @@ export class ConversationSession {
         ...(general ? { general: true as const } : {}),
         ...(context.cut ? { cut: context.cut } : {}),
         ...(answer.run.cacheWrite ? { cacheWrite: answer.run.cacheWrite } : {}),
+        by: slotLine(slot),
       });
       return [direct, ...this.suggestedPlan(text, suggest)];
     } catch (error) {
@@ -612,7 +695,7 @@ export class ConversationSession {
   }
 
   async approve(options: { readonly verify?: readonly string[]; readonly write?: boolean } = {}): Promise<TranscriptRecord[]> {
-    return this.start(options, 'user');
+    return this.pendingSteps ? this.runSteps(options) : this.start(options, 'user');
   }
 
   private async start(options: { readonly verify?: readonly string[]; readonly write?: boolean }, by: ApprovedBy): Promise<TranscriptRecord[]> {
@@ -759,7 +842,7 @@ export class ConversationSession {
   }
 
   /** 결정 로그 `note` 끝 — 세션 id·승인자, 사다리 배정이면 어느 결정에서 올랐나 (D-068 결정 11). */
-  private noteOf(pending: Pending, by?: ApprovedBy): string {
+  private noteOf(pending: Pick<Pending, 'ladder'>, by?: ApprovedBy): string {
     return `session ${this.deps.id}${by ? ` · 승인 ${by}` : ''}${pending.ladder ? ` · 사다리 이전 결정 ${pending.ladder.from}` : ''}`;
   }
 
@@ -783,7 +866,8 @@ export class ConversationSession {
   private ladderBase(): { readonly from: string; readonly plan: Extract<TranscriptRecord, { kind: 'plan' }>; readonly title: string; readonly done: readonly EscalationStage[] } | null {
     const i = this.log.findLastIndex((r) => r.kind === 'result' && r.outcome !== 'cancelled');
     const result = this.log[i];
-    if (result?.kind !== 'result' || nextSuggestion(result.outcome, result.verdict) === '') return null;
+    // 단계 결과(D-087)는 사다리를 세우지 않는다 — 앞 기록의 배정 카드가 그 단계의 배정이 아니다.
+    if (result?.kind !== 'result' || result.step !== undefined || nextSuggestion(result.outcome, result.verdict) === '') return null;
     if (this.log.slice(i + 1).some((r) => r.kind === 'user')) return null;
     const before = this.log.slice(0, i);
     const plan = before.findLast((r) => r.kind === 'plan');
@@ -830,10 +914,13 @@ export class ConversationSession {
   reject(): TranscriptRecord[] {
     this.require('blocked', '거절');
     const pending = this.pending;
+    const steps = this.pendingSteps;
     this.pending = null;
+    this.pendingSteps = null;
     this.stateValue = 'waiting_input';
     const out = [this.append({ kind: 'approval', approved: false, write: false })];
     if (pending) this.logUnexecuted(pending, 'declined');
+    if (steps) this.logUnexecutedSteps(steps, 'declined');
     return out;
   }
 
@@ -841,9 +928,9 @@ export class ConversationSession {
    * 제안했지만 실행되지 않은 배정도 결정 로그에 남긴다 (SPEC §8) — 1차 decided 와 2차 declined/blocked 를
    * 같은 id 로. 1차 줄 모양은 위임과 같다 (`firstLine` + 세션 id).
    */
-  private logUnexecuted(pending: Pending, status: 'declined' | 'blocked', approvedBy?: ApprovedBy): void {
+  private logUnexecuted(pending: Pick<Pending, 'title' | 'plan' | 'reason' | 'ladder'>, status: 'declined' | 'blocked', approvedBy?: ApprovedBy, notStarted?: string): void {
     const first = firstLine(this.deps.matrix, pending.plan, pending.title, pending.reason);
-    const decision = { ...first, note: `${first.note ?? ''} · ${this.noteOf(pending, approvedBy)}` };
+    const decision = { ...first, note: `${first.note ?? ''} · ${this.noteOf(pending, approvedBy)}${notStarted ? ` · 미실행 ${notStarted}` : ''}` };
     appendDecision(decision);
     appendDecision(unexecutedLine(decision, status));
   }
@@ -860,20 +947,235 @@ export class ConversationSession {
     return [...rejected, ...(await this.answer(pending.title, []))];
   }
 
+  /**
+   * **마지막 메시지**를 지휘자가 위임 단계로 나눈 계획으로 세운다 (D-087) — GUI "단계로 나눠 계획" · chat `/steps`. 새 메시지를 만들지 않는다.
+   * 지휘자는 행과 순서만 정하고, 단계마다 배정은 매트릭스가 한다(G1). 카드만 세우고 시작하지 않는다 — 어느 방식에서도 사람이 승인한다(H1).
+   * 배정 카드가 선 채 부르면 그 배정은 거절로 남기고 같은 메시지로 계획한다.
+   */
+  async planSteps(): Promise<TranscriptRecord[]> {
+    if (this.pendingSteps) throw new SessionStateError('이미 선 단계 계획이 있다 — 먼저 승인하거나 거절한다.');
+    const declined = this.stateValue === 'blocked' ? this.reject() : [];
+    this.require('waiting_input', '단계 계획');
+    const last = this.records().findLast((r) => r.kind === 'user');
+    if (last?.kind !== 'user') throw new SessionStateError('나눌 메시지가 없다.');
+    const { matrix, catalog, budget, conduct } = this.deps;
+    // send() 와 같은 이유로 첫 await 전에 바로 바꾼다 (final-review #2).
+    this.stateValue = 'working';
+    const mark = budget.mark();
+    const out = [...declined];
+    try {
+      this.recordModeOnce();
+      if (budget.limitReached()) {
+        out.push(this.append({ kind: 'error', text: `누적 상한에 닿아 단계 계획을 시작하지 않는다 (${budget.summary()}).` }));
+        return out;
+      }
+      const slot = this.conductor();
+      const maxSteps = loadLimits().maxNodes;
+      const context = buildContext(this.records(), this.contextLimits, { before: this.turn });
+      const run = await conduct(slot, buildStepsPrompt(matrix, context.text, last.text, maxSteps));
+      const charge = budget.charge(`${slot.label}·${slot.effort}`, run.actualUsd, estimateUsd(matrix, slot), run.meteredUsd, slot.plan);
+      budget.countTokens(run.usage, run.compactionUncounted);
+      if (!run.ok) {
+        out.push(this.append({ kind: 'error', text: `단계 계획을 받지 못했다: ${run.text || '엔진이 실패했다'}` }));
+        return out;
+      }
+      let nodes: GraphNode[];
+      try {
+        nodes = parseSteps(matrix, catalog, run.text, maxSteps);
+      } catch (error) {
+        if (!(error instanceof StepsError)) throw error;
+        // 계획을 추측해 고치지 않는다 — 무엇이 틀렸는지와 받은 답 앞부분을 보이고 끝낸다.
+        out.push(this.append({ kind: 'error', text: `지휘자 계획을 쓸 수 없다: ${error.message} — 받은 답: ${run.text.trim().slice(0, 300)}` }));
+        return out;
+      }
+      // 쓰기 행 규칙은 배정 카드(`stage`)와 같다 (D-086) — git project 폴더의 쓰기 행 단계는 쓰기를 켠 채 선다.
+      // 단계 카드는 늘 사람이 승인하므로(H1) H2 는 묻지 않고, H5(미커밋)·H6(git 밖 쓰기 행)은 승인 전에 보인다.
+      const inGit = this.deps.inGit ?? true;
+      const rows = this.deps.kind === 'project' ? (this.deps.writeRows ?? loadLimits().writeRows) : [];
+      const rowWrite = (n: GraphNode): boolean => rows.includes(n.plan.assignment.id);
+      const writeSteps = new Set(nodes.filter((n) => rowWrite(n) && inGit).map((n) => n.id));
+      const write = writeSteps.size > 0;
+      const dirty = write ? this.uncommitted() : [];
+      const asked = [
+        { code: 'H1' as const, text: '단계의 행을 지휘자(모델)가 골랐다' },
+        dirtyWriteRisk(write, dirty),
+        readOnlyWriteRow(nodes.some(rowWrite), false, inGit),
+      ].filter((a): a is AskReason => a !== null);
+      const guide = this.scaffoldGuide(nodes.some(rowWrite));
+      const steps = nodes.map((n) => ({
+        id: n.id,
+        taskId: n.plan.assignment.id,
+        task: n.plan.assignment.task,
+        prompt: n.prompt,
+        dependsOn: [...n.dependsOn],
+        primary: slotLine(n.plan.slots.primary),
+        reviewer: slotLine(n.plan.slots.reviewer),
+        estimateUsd: n.plan.cost.totalUsd,
+        ...(writeSteps.has(n.id) ? { write: true as const } : {}),
+      }));
+      this.pendingSteps = { title: last.text, nodes, writeSteps, asked };
+      out.push(this.append({
+        kind: 'steps',
+        title: last.text,
+        steps,
+        estimateUsd: Number(steps.reduce((sum, st) => sum + st.estimateUsd, 0).toFixed(4)),
+        by: slotLine(slot),
+        cost: `$${charge.usd.toFixed(4)} ${charge.source}`,
+        asked,
+        ...(write ? { write: true as const } : {}),
+        ...(guide.length > 0 ? { guide } : {}),
+        ...(context.cut ? { cut: context.cut } : {}),
+      }));
+      return out;
+    } catch (error) {
+      out.push(this.append({ kind: 'error', text: `단계 계획을 받지 못했다: ${why(error)}` }));
+      return out;
+    } finally {
+      this.stateValue = this.pendingSteps ? 'blocked' : 'waiting_input';
+      this.recordSpend(mark);
+    }
+  }
+
+  /**
+   * 승인한 단계 계획을 의존 순서대로 **하나씩** 위임한다 (D-087). 단계마다 두 슬롯·증거·결정 로그 2회는 위임 1건과 같다(`delegate`).
+   * 앞 단계가 실패(실행 실패 `wrong`·나쁜 결과 `rework`·취소·reviewer FAIL)하면 그 단계에 의존한 단계는 건너뛴다. `unverified`(검증 명령 없음)는
+   * 실패가 아니다 — 읽기 전용 계획은 대개 검증 명령이 없어 이것까지 막으면 둘째 단계가 영영 돌지 않는다. 상한에 닿거나 취소하면 남은 단계를 시작하지 않는다.
+   * 병렬로 돌리지 않는다 — 단계의 쓰기 대상을 지휘자가 선언하지 않으므로 `/graph` 규칙대로 순차다.
+   */
+  private async runSteps(options: { readonly verify?: readonly string[]; readonly write?: boolean }): Promise<TranscriptRecord[]> {
+    this.require('blocked', '승인');
+    const pending = this.pendingSteps;
+    if (!pending) throw new SessionStateError('승인할 단계 계획이 없다.');
+    // 카드의 쓰기 스위치는 "쓰기 행 단계에 쓰기를 준다" 다 (D-086) — 읽기 행 단계는 켜도 읽기 전용이다.
+    const write = options.write === true && pending.writeSteps.size > 0;
+    if (write && this.deps.kind === 'scratch') throw new SessionStateError('스크래치 세션은 쓰기를 켤 수 없다 (SPEC §6.4.1).');
+    const { matrix, dir, budget, journal } = this.deps;
+    const out = [this.append({ kind: 'approval', approved: true, write, by: 'user', mode: this.modeValue, asked: pending.asked.map((a) => a.code) })];
+    this.pendingSteps = null;
+    if (budget.limitReached()) {
+      this.stateValue = 'waiting_input';
+      out.push(this.append({ kind: 'error', text: `누적 상한에 닿아 단계 계획을 시작하지 않는다 (${budget.summary()}).` }));
+      this.logUnexecutedSteps(pending, 'blocked', '누적 상한');
+      return out;
+    }
+    this.stateValue = 'working';
+    const mark = budget.mark();
+    const controller = new AbortController();
+    this.delegation = controller;
+    const results: { id: string; outcome: string; verdict: string; evidence: string; text: string }[] = [];
+    const outputs = new Map<string, string>();
+    const failed = new Set<string>();
+    const skipped: string[] = [];
+    // 시작한 단계와 시작하지 않은 사유 — 승인했지만 돌지 않은 단계도 결정 로그에 남긴다 (SPEC §8).
+    const started = new Set<string>();
+    const notStarted = new Map<string, string>();
+    const skipRest = (rest: readonly GraphNode[], why: string): void => {
+      for (const n of rest) if (!notStarted.has(n.id)) notStarted.set(n.id, why);
+      skipped.push(...rest.map((n) => n.id));
+    };
+    try {
+      const order = topoSort(pending.nodes).flat();
+      const context = buildContext(this.records(), this.contextLimits, { before: this.turn });
+      for (const [i, node] of order.entries()) {
+        if (controller.signal.aborted) {
+          skipRest(order.slice(i), '사용자가 취소했다');
+          break;
+        }
+        const blockers = node.dependsOn.filter((d) => failed.has(d) || skipped.includes(d));
+        if (blockers.length > 0) {
+          skipRest([node], `선행 단계 ${blockers.join(', ')} 가 실패하거나 건너뛰었다`);
+          continue;
+        }
+        if (budget.limitReached()) {
+          out.push(this.append({ kind: 'error', text: `누적 상한에 닿아 단계 ${node.id} 부터 시작하지 않는다 (${budget.summary()}).` }));
+          skipRest(order.slice(i), '누적 상한');
+          break;
+        }
+        started.add(node.id);
+        const before = node.dependsOn.map((d) => ({ id: d, text: outputs.get(d) ?? '' }));
+        const d = await delegate({
+          matrix,
+          plan: node.plan,
+          reason: `단계 ${node.id} · 지휘자 계획 ${node.plan.assignment.id}`,
+          title: `${pending.title} — 단계 ${node.id}`,
+          prompt: buildStepPrompt(pending.title, node, before, context.text),
+          verify: options.verify ?? [],
+          cwd: dir,
+          execute: this.tapProgress(this.deps.executorFor(write && pending.writeSteps.has(node.id)), true),
+          budget,
+          journal,
+          note: `session ${this.deps.id} · 승인 user · 단계 계획 ${node.id}`,
+          signal: controller.signal,
+        });
+        const evidence = d.outcome === 'cancelled'
+          ? `취소됨 — ${d.cancelledAt === 'reviewer' ? 'reviewer 실행 중 — primary 는 끝났고 검증은 하지 않았다' : 'primary 실행 중 — reviewer 는 시작하지 않았다'}.${write ? ' 쓰기가 켜져 있었다 — 파일이 일부 바뀌었을 수 있다(git status).' : ''}`
+          : d.report.summary;
+        out.push(this.append({
+          kind: 'result',
+          outcome: d.outcome,
+          verdict: d.outcome === 'cancelled' ? 'unknown' : d.verdict,
+          text: d.text.slice(0, 4000),
+          review: d.outcome === 'cancelled' ? '' : (d.review ?? ''),
+          evidence,
+          decisionId: d.decisionId,
+          step: node.id,
+          ...(d.compactions ? { compacted: d.compactions } : {}),
+        }));
+        results.push({ id: node.id, outcome: d.outcome, verdict: d.verdict, evidence, text: d.text });
+        outputs.set(node.id, d.text);
+        if (d.outcome === 'wrong' || d.outcome === 'rework' || d.outcome === 'cancelled' || d.verdict === 'fail') failed.add(node.id);
+      }
+      this.delegation = null; // 이후(요약)는 취소할 위임이 아니다.
+      // 사용자가 멈췄으면 요약을 부르지 않는다 — 돈을 더 쓰지 않는다 (D-066).
+      if (results.length > 0 && !controller.signal.aborted) {
+        const next = failed.size === 0 && skipped.length === 0
+          ? ''
+          : `단계 ${order.length} 중 실패 ${failed.size}${skipped.length > 0 ? ` · 건너뜀 ${skipped.join(', ')}` : ''} — 실패한 단계는 그 내용으로 다시 보내 위임하거나 계획을 다시 세운다`;
+        out.push(...(await this.summarizeWith(buildStepsSummaryPrompt(pending.title, results, skipped), next)));
+      }
+    } catch (error) {
+      out.push(this.append({ kind: 'error', text: `단계 계획 실행이 끝나지 못했다: ${why(error)}` }));
+    } finally {
+      this.delegation = null;
+      this.stateValue = 'waiting_input';
+      this.recordSpend(mark);
+    }
+    // 시작하지 않은 단계 — 건너뜀·상한·취소, 그리고 앞 단계가 예외로 끝나 남은 단계. 시작한 단계는 delegate 가 이미 두 줄을 남겼다.
+    for (const node of pending.nodes) {
+      if (!started.has(node.id)) this.logUnexecutedStep(pending, node, 'blocked', notStarted.get(node.id) ?? '앞 단계가 예외로 끝났다');
+    }
+    return out;
+  }
+
+  /** 승인하지 않은 단계 계획도 단계마다 결정 로그에 남긴다 (SPEC §8) — 배정 카드의 거절과 같은 모양이다. */
+  private logUnexecutedSteps(steps: StepsPending, status: 'declined' | 'blocked', why?: string): void {
+    for (const node of steps.nodes) this.logUnexecutedStep(steps, node, status, why);
+  }
+
+  /** 단계 하나의 미실행 1·2차 줄. `why` 는 승인했지만 시작하지 않은 사유다 — note 끝에 붙는다. */
+  private logUnexecutedStep(steps: StepsPending, node: GraphNode, status: 'declined' | 'blocked', why?: string): void {
+    this.logUnexecuted({ title: `${steps.title} — 단계 ${node.id}`, plan: node.plan, reason: `단계 ${node.id} · 지휘자 계획 ${node.plan.assignment.id}` }, status, why ? 'user' : undefined, why);
+  }
+
   /** 모델은 요약만 한다. 다음 제안은 코드가 계산한다 (SPEC §6.4.4). 요약이 실패해도 제안은 남긴다. */
   private async summarize(title: string, d: Delegated): Promise<TranscriptRecord[]> {
     // 결과가 이미 기록에 붙은 뒤다 — 사다리 상태(다음에 올릴 수 있는 단계)가 이 결과를 본다.
     const next = nextSuggestion(d.outcome, d.verdict, this.ladderOffer());
-    const { matrix, catalog, budget, conduct } = this.deps;
+    return this.summarizeWith(buildSummaryPrompt(title, d), next);
+  }
+
+  /** 지휘자 요약 한 건 — 위임 1건과 단계 계획(D-087)이 같이 쓴다. 요약이 실패해도 `next` 는 남긴다. */
+  private async summarizeWith(prompt: string, next: string): Promise<TranscriptRecord[]> {
+    const { matrix, budget, conduct } = this.deps;
     if (budget.limitReached()) {
       return [
         this.append({ kind: 'error', text: `누적 상한에 닿아 요약을 시작하지 않는다 (${budget.summary()}) — 결과 카드를 본다.` }),
         this.append({ kind: 'summary', text: '', next }),
       ];
     }
-    const slot = conductorSlot(catalog);
     try {
-      const run = await conduct(slot, buildSummaryPrompt(title, d));
+      const slot = this.conductor();
+      const run = await conduct(slot, prompt);
       budget.charge(`${slot.label}·${slot.effort}`, run.actualUsd, estimateUsd(matrix, slot), run.meteredUsd, slot.plan);
       budget.countTokens(run.usage);
       if (!run.ok) {
@@ -882,7 +1184,7 @@ export class ConversationSession {
           this.append({ kind: 'summary', text: '', next }),
         ];
       }
-      return [this.append({ kind: 'summary', text: run.text.trim(), next })];
+      return [this.append({ kind: 'summary', text: run.text.trim(), next, by: slotLine(slot) })];
     } catch (error) {
       return [
         this.append({ kind: 'error', text: `요약을 받지 못했다 — 결과 카드를 본다: ${why(error)}` }),

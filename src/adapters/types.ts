@@ -16,6 +16,8 @@ export interface RunRequest {
   readonly resume?: string;
   /** 사용자 전역 hook·설정·MCP·skills 를 싣지 않는다 (D-032 B1). 지휘자 역할에만 켠다. */
   readonly isolate?: boolean;
+  /** 1M 컨텍스트 창 (D-087). 지휘자 자리에만 켠다 — 선언이 없는 엔진·모델이면 argv 생성이 던진다. */
+  readonly longContext?: boolean;
 }
 
 export interface Usage {

@@ -18,7 +18,7 @@ export function readerSlot(catalog: Engines): ResolvedSlot {
 }
 
 /** 카드·기록에 찍는 슬롯 한 줄 — `plan.primary` 와 같은 모양이다. */
-export const slotLine = (slot: ResolvedSlot): string => `${slot.label}·${slot.effort} → ${slot.engine}/${slot.modelId}`;
+export const slotLine = (slot: ResolvedSlot): string => `${slot.label}·${slot.effort} → ${slot.engine}/${slot.modelId}${slot.longContext ? '[1m]' : ''}`;
 
 /** 운영 기준은 Jev `GENERAL` 문구의 뒷절 그대로다 (D-082) — 읽은 근거를 경로:줄로 인용하고 추측과 구분한다. */
 export function buildReadPrompt(context: string, message: string): string {

@@ -1,15 +1,35 @@
 /** 상한 (SPEC §9, D-017). 상한 없는 자율 방식은 만들지 않는다. */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { EFFORTS, type Effort, type ModelKey } from './matrix.ts';
 
 /** 대화 세션 승인 방식 (D-064). */
 export type ApprovalMode = 'manual' | 'auto-ask' | 'auto';
 export const APPROVAL_MODES: readonly ApprovalMode[] = ['manual', 'auto-ask', 'auto'];
 export const isApprovalMode = (value: unknown): value is ApprovalMode => APPROVAL_MODES.includes(value as ApprovalMode);
 
+/**
+ * 지휘자를 띄울 수 있는 엔진 (D-087). 내장 도구를 전부 끄는 격리(D-080)가 실측된 claude 뿐이다 —
+ * codex 는 도구 일부(apply_patch·request_user_input 등)와 전역 AGENTS.md 를 끄는 인자가 없어 막았다(2026-10-05 실측), cursor 는 선언이 없다.
+ */
+export type OrchestratorEngine = 'claude';
+export const ORCHESTRATOR_ENGINES: readonly OrchestratorEngine[] = ['claude'];
+export const isOrchestratorEngine = (value: unknown): value is OrchestratorEngine => ORCHESTRATOR_ENGINES.includes(value as OrchestratorEngine);
+
+/** 세션의 지휘자 선택 (D-087). 엔진은 모델의 `defaultEngine` 이 정한다. */
+export interface OrchestratorChoice {
+  readonly model: ModelKey;
+  readonly effort: Effort;
+}
+
 export interface Limits {
   /** 새 대화 세션의 승인 방식 (D-064 결정 8). 기록에 방식이 없는 옛 세션은 이 값이 아니라 `manual` 이다. */
   readonly approvalMode: ApprovalMode;
+  /** 새 대화 세션의 지휘자 (D-087). `defaults` 는 지휘자 엔진마다 그 CLI 의 기본 모델이다 — 지금은 claude 뿐이다. */
+  readonly orchestrator: {
+    readonly engine: OrchestratorEngine;
+    readonly defaults: Readonly<Record<OrchestratorEngine, OrchestratorChoice>>;
+  };
   readonly budgetUsd: number;
   /** 구독제에서 금액 대신 막는 것 (D-030). 돈이 아니라 사용량 한도가 희소 자원이다. */
   readonly tokenBudget: number;
@@ -45,6 +65,14 @@ export function checkLimits(limits: Limits): Limits {
     throw new Error(`limits.json 의 contextChars 는 2 이상의 정수여야 한다: ${limits.contextChars}`);
   }
   if (!isApprovalMode(limits.approvalMode)) throw new Error(`limits.json 의 approvalMode 는 ${APPROVAL_MODES.join('·')} 중 하나여야 한다: ${String(limits.approvalMode)}`);
+  // 모델이 그 엔진에 있는지는 카탈로그를 아는 Core 가 쓸 때 본다 (`conductorSlot`).
+  if (!isOrchestratorEngine(limits.orchestrator?.engine)) throw new Error(`limits.json 의 orchestrator.engine 은 ${ORCHESTRATOR_ENGINES.join('·')} 중 하나여야 한다: ${String(limits.orchestrator?.engine)}`);
+  for (const engine of ORCHESTRATOR_ENGINES) {
+    const choice = limits.orchestrator.defaults?.[engine];
+    if (typeof choice?.model !== 'string' || !(EFFORTS as readonly string[]).includes(choice.effort)) {
+      throw new Error(`limits.json 의 orchestrator.defaults.${engine} 는 model·effort(${EFFORTS.join('|')}) 가 있어야 한다: ${JSON.stringify(choice)}`);
+    }
+  }
   if (limits.jevConfidenceMin > 1) throw new Error(`limits.json 의 jevConfidenceMin 은 1 이하여야 한다: ${limits.jevConfidenceMin}`);
   for (const key of ['jevContextTurns', 'jevContextChars'] as const) {
     if (!Number.isInteger(limits[key]) || limits[key] < 2) throw new Error(`limits.json 의 ${key} 는 2 이상의 정수여야 한다: ${limits[key]}`);

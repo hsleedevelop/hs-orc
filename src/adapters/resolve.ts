@@ -81,6 +81,11 @@ export interface InvocationOptions {
    * 선언(`isolateArgv`)이 없는 엔진에 요청하면 던진다 — 격리 없이 조용히 돌리지 않는다.
    */
   readonly isolate?: boolean;
+  /**
+   * 1M 컨텍스트 창 (D-087). 엔진의 `longContext` 선언과 모델의 `availability.longContext` 가 **둘 다** 있어야 한다 —
+   * 없으면 기본 창으로 조용히 떨어뜨리지 않고 던진다.
+   */
+  readonly longContext?: boolean;
 }
 
 export function buildInvocation(
@@ -123,7 +128,11 @@ export function buildInvocation(
   const baseId = availability.idTemplate
     ? availability.idTemplate.replace('{effort}', effort)
     : (availability.id ?? '');
-  const modelId = options.fast === true ? `${baseId}-fast` : baseId;
+  if (options.longContext === true && (!spec.longContext || availability.longContext !== true)) {
+    throw new EngineError(`${target}/${model} 에 1M 창 선언이 없다 (engines.json). 기본 창으로 조용히 바꾸지 않는다 (D-087).`);
+  }
+  const suffix = options.longContext === true && spec.longContext?.kind === 'modelSuffix' ? spec.longContext.suffix : '';
+  const modelId = `${options.fast === true ? `${baseId}-fast` : baseId}${suffix}`;
   if (!modelId) throw new EngineError(`${target}/${model} 의 모델 id 가 비어 있다 — engines.json 이 깨졌다.`);
 
   const resume = options.resume;
@@ -152,6 +161,7 @@ export function buildInvocation(
   }
   // 실행 종류와 무관하게 싣는다 (D-078) — codex 하위 에이전트 끄기처럼 셈·통제 밖 경로를 닫는 인자다.
   if (spec.alwaysArgv) argv.push(...spec.alwaysArgv);
+  if (options.longContext === true && spec.longContext?.kind === 'config') argv.push(...spec.longContext.argv);
 
   // 쓰기 권한은 **선언이 있는 엔진만** 받는다. 없으면 읽기 전용으로 떨어뜨리지 않고 던진다 —
   // 조용히 못 쓰면 "고쳤다"는 산출물이 실제로는 아무것도 안 바꾼 채 통과한다 (D-025).

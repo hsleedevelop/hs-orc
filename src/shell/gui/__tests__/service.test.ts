@@ -251,7 +251,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     const service = new GuiService(fake, 20, process.cwd());
     service.startConversation('scratch');
     const view = await service.converse('넌 누구니');
-    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'direct']);
+    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode' && r.kind !== 'orchestrator').map((r) => r.kind), ['user', 'direct']);
     assert.equal(view.state, 'waiting_input');
   });
 
@@ -261,7 +261,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     service.startConversation('scratch');
     await service.converse('방금 리팩터링한 부분 설명해');
     const view = await service.converseAsk();
-    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'plan', 'approval', 'direct']);
+    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode' && r.kind !== 'orchestrator').map((r) => r.kind), ['user', 'plan', 'approval', 'direct']);
     assert.equal(view.state, 'waiting_input');
   });
 
@@ -274,10 +274,10 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     const service = new GuiService(suggesting, 20, process.cwd());
     service.startConversation('scratch');
     const shown = await service.converse('넌 누구니');
-    assert.deepEqual(shown.records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'direct', 'plan']);
+    assert.deepEqual(shown.records.filter((r) => r.kind !== 'mode' && r.kind !== 'orchestrator').map((r) => r.kind), ['user', 'direct', 'plan']);
     assert.equal(shown.state, 'blocked');
     const next = await service.converse('아니 그냥 얘기하자');
-    assert.deepEqual(next.records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'direct', 'plan', 'approval', 'user', 'direct', 'plan']);
+    assert.deepEqual(next.records.filter((r) => r.kind !== 'mode' && r.kind !== 'orchestrator').map((r) => r.kind), ['user', 'direct', 'plan', 'approval', 'user', 'direct', 'plan']);
   });
 
   it('카드의 행을 바꾸면 그 카드를 거절하고 고른 행으로 다시 선다 — 거절 뒤에 값을 다시 읽지 않는다', async () => {
@@ -287,7 +287,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     const shown = await service.converse('이 타입 에러 고쳐줘');
     assert.equal(shown.records.at(-1)?.kind, 'plan');
     const view = await service.converseReplan('R04');
-    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode').slice(-3).map((r) => r.kind), ['plan', 'approval', 'plan']);
+    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode' && r.kind !== 'orchestrator').slice(-3).map((r) => r.kind), ['plan', 'approval', 'plan']);
     const plan = view.records.at(-1);
     assert.ok(plan?.kind === 'plan' && plan.taskId === 'R04', `R04 카드가 서야 한다: ${plan?.kind === 'plan' ? plan.taskId : plan?.kind}`);
     assert.equal(view.state, 'blocked');
@@ -398,7 +398,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
   };
   const fileKinds = (view: { dir: string; id: string }) =>
     readFileSync(transcriptPath(view.dir, view.id), 'utf8')
-      .trim().split('\n').map((l) => (JSON.parse(l) as { kind: string }).kind).filter((k) => k !== 'mode');
+      .trim().split('\n').map((l) => (JSON.parse(l) as { kind: string }).kind).filter((k) => k !== 'mode' && k !== 'orchestrator');
 
   it('위임이 도는 중에 세션 목록으로 나갔다 같은 세션을 다시 열면 같은 실행에 붙는다 — 끊김 배너 없음', async () => {
     isolated();
@@ -419,7 +419,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     g.open();
     await running;
     const view = service.conversation();
-    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'plan', 'approval', 'result', 'summary']);
+    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode' && r.kind !== 'orchestrator').map((r) => r.kind), ['user', 'plan', 'approval', 'result', 'summary']);
     assert.equal(view.state, 'waiting_input');
     assert.equal(view.interrupted, false);
     assert.deepEqual(fileKinds(a), ['user', 'plan', 'approval', 'result', 'summary', 'spend'], '기록이 겹치거나 섞이면 안 된다');
@@ -444,7 +444,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     g.open();
     await running.catch(() => {});
     const after = service.openConversation('scratch', a.dir, a.id);
-    assert.deepEqual(after.records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'plan', 'approval', 'result', 'summary']);
+    assert.deepEqual(after.records.filter((r) => r.kind !== 'mode' && r.kind !== 'orchestrator').map((r) => r.kind), ['user', 'plan', 'approval', 'result', 'summary']);
     assert.equal(after.interrupted, false);
     assert.equal(after.state, 'waiting_input');
   });
@@ -463,7 +463,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
 
     g.open();
     await running;
-    assert.deepEqual(service.conversation().records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'direct']);
+    assert.deepEqual(service.conversation().records.filter((r) => r.kind !== 'mode' && r.kind !== 'orchestrator').map((r) => r.kind), ['user', 'direct']);
     assert.deepEqual(fileKinds(a), ['user', 'direct', 'spend']);
   });
 
@@ -496,7 +496,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     assert.equal(view.state, 'waiting_input');
     assert.equal(view.cancellable, false);
     assert.equal(view.interrupted, false);
-    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'plan', 'approval', 'result']);
+    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode' && r.kind !== 'orchestrator').map((r) => r.kind), ['user', 'plan', 'approval', 'result']);
     const result = view.records.at(-1);
     assert.ok(result?.kind === 'result' && result.outcome === 'cancelled');
     assert.deepEqual(h.roles, ['primary'], 'primary 중 취소면 reviewer 를 띄우지 않는다');
@@ -578,7 +578,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     assert.equal(reopened.cancellable, true);
     const view = await service.converseCancel();
     assert.equal(view.state, 'waiting_input');
-    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'plan', 'approval', 'result']);
+    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode' && r.kind !== 'orchestrator').map((r) => r.kind), ['user', 'plan', 'approval', 'result']);
     const approval = view.records.find((r) => r.kind === 'approval');
     assert.ok(approval?.kind === 'approval' && approval.by === 'auto');
     assert.ok(view.records.at(-1)?.kind === 'result');

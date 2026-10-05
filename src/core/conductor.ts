@@ -1,31 +1,71 @@
 /**
- * 지휘자 (SPEC §6.4.2·§6.4.4, D-031).
+ * 지휘자 (SPEC §6.4.2·§6.4.4, D-031·D-087).
  *
  * **라우팅을 하지 않는다.** 배정은 결정론 코드(pipeline)가 한다 — G1 을 모델 판단에 넘기지 않는다.
- * 지휘자가 하는 일은 둘뿐이다: 하한선·미분류 메시지에 **직접 답**하고, 위임 결과를 **요약**한다.
- * 모델은 Haiku·low 고정이다 (Q11 — 분류 폴백과 같은 계층).
+ * 지휘자가 하는 일은 셋이다: 하한선·미분류 메시지에 **직접 답**하고, 위임 결과를 **요약**하고,
+ * 사람이 부르면 요청을 **위임 단계로 나눈 계획**을 낸다 (D-087). 단계마다 배정은 여전히 매트릭스가 하고 시작은 사람이 승인한다.
+ * 모델·effort 는 세션마다 사람이 고른다 (D-087) — 기본은 `limits.json` 의 벤더 기본 모델이다.
  */
-import type { Engines } from '../data/engines.ts';
-import type { Matrix } from '../data/matrix.ts';
-import { resolveSlot, type ResolvedSlot } from './assign.ts';
+import type { EngineName, Engines } from '../data/engines.ts';
+import { ORCHESTRATOR_ENGINES, isOrchestratorEngine, loadLimits, type OrchestratorChoice, type OrchestratorEngine } from '../data/limits.ts';
+import type { Effort, Matrix, ModelKey } from '../data/matrix.ts';
+import { AssignError, resolveSlot, type ResolvedSlot } from './assign.ts';
 import type { Delegated } from './delegate.ts';
 import type { SettledOutcome } from './evidence.ts';
 import type { Verdict } from './duo.ts';
 import type { SlotExecutor, SlotRun } from './executor.ts';
 import { STAGE_LABEL, nextStage } from './ladder.ts';
+import { GraphError, parseGraphSpec, topoSort, type GraphNode, type GraphSpec } from './modes/graph.ts';
+
+/** codex 지휘자를 막은 이유 (D-087, 리뷰 #114-1) — 셸이 선택을 거절할 때 같은 문구를 쓴다. */
+export const CODEX_BLOCKED = 'codex 는 지휘자로 쓰지 않는다 — 내장 도구(apply_patch·request_user_input 등)와 전역 AGENTS.md 를 끄는 인자가 없어 D-080(지휘자 도구 0개)을 지킬 수 없다 (D-087).';
+
+/** D-087 이전 세션의 지휘자 — 기록에 지휘자 선택이 없는 세션은 이것으로 연다. 조용히 비싼 모델로 바뀌지 않게 한다. */
+export const LEGACY_ORCHESTRATOR: OrchestratorChoice = { model: 'haiku', effort: 'low' };
+
+/** 엔진을 주면 그 벤더의 기본, 안 주면 `limits.json` 의 시작 엔진의 기본이다. */
+export function defaultOrchestrator(engine?: OrchestratorEngine): OrchestratorChoice {
+  const { orchestrator } = loadLimits();
+  return orchestrator.defaults[engine ?? orchestrator.engine];
+}
+
+const modelLabel = (model: ModelKey): string => `${model.charAt(0).toUpperCase()}${model.slice(1)}`;
 
 /**
  * role 을 `reviewer` 로 둔다 — `createExecutor` 가 **쓰기를 절대 주지 않는 자리**다.
- * 직접 답은 세션의 쓰기 스위치와 무관하게 읽기 전용이어야 하고(SPEC §6.4.2),
- * 그 강제를 호출자의 주의에 맡기지 않는다.
+ * 직접 답·계획은 세션의 쓰기 스위치와 무관하게 읽기 전용이어야 하고(SPEC §6.4.2),
+ * 그 강제를 호출자의 주의에 맡기지 않는다. 1M 창은 그 모델에 실측 선언이 있을 때만 연다 (D-087).
  */
-export function conductorSlot(catalog: Engines): ResolvedSlot {
-  return resolveSlot(
-    catalog,
-    { model: 'haiku', vendor: 'anthropic', efforts: ['low'], label: '지휘자·Haiku' },
-    'low',
-    'reviewer',
-  );
+export function conductorSlot(catalog: Engines, choice: OrchestratorChoice): ResolvedSlot {
+  const spec = catalog.models[choice.model];
+  if (!spec) throw new AssignError(`모르는 지휘자 모델이다: ${String(choice.model)}`);
+  if (!isOrchestratorEngine(spec.defaultEngine)) {
+    throw new AssignError(`${choice.model} 는 ${spec.defaultEngine} 모델이다 — 지휘자는 ${ORCHESTRATOR_ENGINES.join('·')} 에서만 띄운다. ${CODEX_BLOCKED}`);
+  }
+  const slot = resolveSlot(catalog, { model: choice.model, vendor: spec.defaultEngine === 'claude' ? 'anthropic' : 'openai', efforts: [choice.effort], label: `지휘자·${modelLabel(choice.model)}` }, choice.effort, 'reviewer');
+  return spec.availability[spec.defaultEngine]?.longContext === true ? { ...slot, longContext: true } : slot;
+}
+
+export interface OrchestratorOption {
+  readonly engine: OrchestratorEngine;
+  readonly models: readonly { readonly model: ModelKey; readonly label: string; readonly efforts: readonly Effort[]; readonly longContext: boolean }[];
+  readonly defaults: OrchestratorChoice;
+}
+
+/** 화면의 선택지 — 엔진마다 그 엔진이 기본 엔진인 모델들. 카탈로그를 그대로 읽는다. */
+export function orchestratorOptions(catalog: Engines): OrchestratorOption[] {
+  return ORCHESTRATOR_ENGINES.map((engine) => ({
+    engine,
+    defaults: defaultOrchestrator(engine),
+    models: (Object.entries(catalog.models) as [ModelKey, Engines['models'][ModelKey]][])
+      .filter(([, m]) => m.defaultEngine === (engine as EngineName) && m.availability[engine] !== null)
+      .map(([model, m]) => ({
+        model,
+        label: modelLabel(model),
+        efforts: m.availability[engine]?.efforts ?? [],
+        longContext: m.availability[engine]?.longContext === true,
+      })),
+  }));
 }
 
 /**
@@ -112,4 +152,93 @@ export function nextSuggestion(outcome: SettledOutcome | 'cancelled', verdict: V
   const first = nextStage([]);
   const label = offer?.label ?? (first ? STAGE_LABEL[first] : null);
   return label ? `사다리 다음 단계: ${label} — 다시 위임하면 그 단계를 올린 배정 카드가 선다 (승인은 카드에서)` : '';
+}
+
+/**
+ * 단계 계획 프롬프트 (D-087). 지휘자는 **행과 순서만** 정한다 — 모델·effort 는 행이 정하므로 묻지 않는다(G1).
+ * 형식은 `examples/graph-nodes.json` 의 `nodes` 와 같은 모양이라 `parseGraphSpec` 이 그대로 검사한다.
+ */
+export function buildStepsPrompt(matrix: Matrix, context: string, request: string, maxSteps: number): string {
+  const rows = matrix.assignments.map((a) => `${a.id}\t${a.task}`).join('\n');
+  return [
+    '너는 hs-orc 의 지휘자다. 사용자의 요청을 순서 있는 위임 단계로 나눈 계획을 낸다.',
+    '규칙:',
+    '- 계획만 낸다. 파일을 고치거나 명령을 실행하지 않는다 — 실행은 사람이 계획을 승인한 뒤 단계마다 hs-orc 가 띄운다.',
+    `- 단계는 1~${maxSteps}개다. 한 단계는 아래 업무 목록의 행 하나에 맞는 작은 작업이다. 나눌 필요가 없으면 1단계로 낸다.`,
+    '- 각 단계의 prompt 는 그 단계를 맡은 엔진이 그것만 읽고 수행할 수 있게 쓴다. 앞 단계의 결과는 hs-orc 가 붙인다.',
+    '- dependsOn 에는 그 단계가 결과를 써야 하는 앞 단계 id 만 넣는다. 순환을 만들지 않는다.',
+    '- 답은 JSON 객체 하나뿐이다. 설명·코드 펜스 없이 다음 모양으로 낸다:',
+    '{"steps":[{"id":"s1","task":"R03","prompt":"…","dependsOn":[]},{"id":"s2","task":"R01","prompt":"…","dependsOn":["s1"]}]}',
+    '',
+    '[업무 목록]',
+    rows,
+    ...(context ? ['', '[최근 대화]', context] : []),
+    '',
+    '[요청]',
+    request,
+  ].join('\n');
+}
+
+export class StepsError extends Error {
+  override name = 'StepsError';
+}
+
+/**
+ * 지휘자 답 → 배정이 끝난 단계들. 첫 `{` 부터 마지막 `}` 까지를 JSON 으로 읽는다(펜스를 둘렀어도 읽힌다).
+ * 행·의존·순환·상한 검사는 `/graph` 와 같은 코드다 — 지휘자가 낸 계획이라고 덜 검사하지 않는다. 못 읽으면 던진다.
+ */
+export function parseSteps(matrix: Matrix, catalog: Engines, text: string, maxSteps: number): GraphNode[] {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new StepsError('계획 JSON 이 없다.');
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text.slice(start, end + 1));
+  } catch (error) {
+    throw new StepsError(`계획 JSON 을 읽지 못했다: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const steps = (raw as { steps?: unknown } | null)?.steps;
+  if (!Array.isArray(steps) || steps.length === 0) throw new StepsError('계획에 steps 배열이 없다.');
+  if (steps.length > maxSteps) throw new StepsError(`단계가 상한을 넘는다: ${steps.length} > ${maxSteps}`);
+  // 모델이 낸 JSON 이라 모양을 믿지 않는다 — dependsOn 이 문자열이면 위상 정렬이 글자 단위로 돈다.
+  for (const step of steps as unknown[]) {
+    const s = step as Record<string, unknown> | null;
+    const deps = s?.['dependsOn'];
+    if (typeof s?.['id'] !== 'string' || typeof s['task'] !== 'string' || typeof s['prompt'] !== 'string' || (deps !== undefined && !(Array.isArray(deps) && deps.every((d) => typeof d === 'string')))) {
+      throw new StepsError(`단계 모양이 틀렸다 (id·task·prompt 는 문자열, dependsOn 은 문자열 배열): ${JSON.stringify(step).slice(0, 200)}`);
+    }
+  }
+  try {
+    const nodes = parseGraphSpec(matrix, catalog, { nodes: steps as GraphSpec['nodes'] });
+    topoSort(nodes);
+    // 단계는 실패해도 뒤를 막는 것이 기본이다 — 지휘자가 전파 방식을 정하지 않는다.
+    return nodes.map((n) => ({ ...n, onFailure: 'skip-dependents' as const }));
+  } catch (error) {
+    if (error instanceof GraphError) throw new StepsError(error.message);
+    throw error;
+  }
+}
+
+/** 단계 하나가 엔진에 보내는 프롬프트 — 전체 요청과 의존한 앞 단계의 결과를 싣는다. */
+export function buildStepPrompt(request: string, step: { readonly id: string; readonly prompt: string }, before: readonly { readonly id: string; readonly text: string }[], context: string): string {
+  return [
+    ...(context ? ['[최근 대화]', context, ''] : []),
+    '[전체 요청]',
+    request,
+    ...before.flatMap((b) => ['', `[앞 단계 ${b.id} 결과]`, b.text.slice(0, 3000)]),
+    '',
+    `[이번 단계 ${step.id}]`,
+    step.prompt,
+  ].join('\n');
+}
+
+export function buildStepsSummaryPrompt(request: string, results: readonly { readonly id: string; readonly outcome: string; readonly verdict: string; readonly evidence: string; readonly text: string }[], skipped: readonly string[]): string {
+  return [
+    '아래 단계별 위임 결과를 사용자에게 5줄 이내로 요약하라.',
+    '새 사실을 지어내지 않는다. 단계마다 reviewer 판정과 증거 상태를 그대로 전한다.',
+    '',
+    `[요청] ${request}`,
+    ...results.flatMap((r) => ['', `[단계 ${r.id}] outcome ${r.outcome} · reviewer ${r.verdict} · 증거 ${r.evidence}`, r.text.slice(0, 1200)]),
+    ...(skipped.length > 0 ? ['', `[건너뛴 단계] ${skipped.join(', ')}`] : []),
+  ].join('\n');
 }

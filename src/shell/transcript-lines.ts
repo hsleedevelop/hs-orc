@@ -36,8 +36,8 @@ export function statusLabel(status: Status | undefined): string {
 }
 
 /**
- * 대화 흐름의 마지막 기록 — 이름 줄(D-085)은 건너뛴다. 화면이 "지금 살아 있는 카드·제안" 을 이것으로 가린다:
- * 승인 대기 중 이름을 붙였다고 카드 버튼이 사라지면 안 된다. Core `ConversationSession.lastEvent` 와 같은 규칙이다.
+ * 대화 흐름의 마지막 기록 — 설정 줄(이름 D-085 · 승인 방식 · 지휘자 D-087)은 건너뛴다. 화면이 "지금 살아 있는 카드·제안" 을 이것으로 가린다:
+ * 승인 대기 중 이름을 붙이거나 지휘자를 바꿨다고 카드 버튼이 사라지면 안 된다. Core `ConversationSession.lastEvent` 와 같은 규칙이다.
  */
 export const lastEvent = <T extends { readonly kind: string }>(records: readonly T[]): T | undefined =>
-  records.findLast((r) => r.kind !== 'name');
+  records.findLast((r) => r.kind !== 'name' && r.kind !== 'mode' && r.kind !== 'orchestrator');

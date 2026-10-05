@@ -14,7 +14,7 @@ import { claudeSessions, codexSessions, reviews } from '../integrations.ts';
 import { defaultJev } from '../jev.ts';
 import { GuiService } from './service.ts';
 import type { SessionKind } from '../../core/transcript.ts';
-import type { ApprovalMode } from '../../data/limits.ts';
+import type { ApprovalMode, OrchestratorChoice } from '../../data/limits.ts';
 
 const service = new GuiService(undefined, undefined, undefined, defaultJev());
 
@@ -71,6 +71,9 @@ ipcMain.handle('conv-open', (_e, p: { kind: SessionKind; dir: string; id: string
 ipcMain.handle('conv-view', () => service.conversation());
 ipcMain.handle('conv-send', (_e, text: string, write?: boolean) => service.converse(text, write === true));
 ipcMain.handle('conv-mode', (_e, mode: ApprovalMode) => service.converseMode(mode));
+ipcMain.handle('conv-orchestrator', (_e, choice: OrchestratorChoice) => service.converseOrchestrator(choice));
+ipcMain.handle('conv-steps', () => service.converseSteps());
+ipcMain.handle('orchestrators', () => service.orchestrators());
 ipcMain.handle('conv-plan-as', (_e, taskId: string) => service.conversePlanAs(taskId));
 ipcMain.handle('conv-replan', (_e, taskId: string) => service.converseReplan(taskId));
 ipcMain.handle('conv-read', () => service.converseRead());

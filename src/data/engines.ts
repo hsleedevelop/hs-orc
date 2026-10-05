@@ -95,6 +95,13 @@ export interface EngineSpec {
    * 지휘자는 사용자 전역 설정을 싣지 않는다(D-032 B1). 격리하지 않는 실행(primary·reviewer)에는 싣지 않는다.
    */
   readonly isolateEnv?: Readonly<Record<string, string>>;
+  /**
+   * 1M 컨텍스트 창을 여는 방법 (D-087). 지휘자 자리에만 쓴다. claude 는 모델 id 끝에 `[1m]` 을 붙이고,
+   * codex 는 `-c model_context_window=…` 를 싣는다. 선언이 없는 엔진·모델(`Availability.longContext`)에 요청하면 던진다.
+   */
+  readonly longContext?:
+    | { readonly kind: 'modelSuffix'; readonly suffix: string }
+    | { readonly kind: 'config'; readonly argv: readonly string[] };
 }
 
 /** 해당 엔진이 그 모델을 아예 제공하지 않으면 `null` 이다 — 말없는 치환의 자리가 아니다 (D-004). */
@@ -105,6 +112,8 @@ export type Availability = {
   readonly thinking?: boolean;
   /** `-fast` 변형이 이 모델에 **존재하는가** (D-023 실측). 없으면 fast 요청은 던진다. */
   readonly fast?: boolean;
+  /** 이 엔진에서 1M 창(`EngineSpec.longContext`)이 실측으로 열렸는가 (D-087). 없으면 요청 시 던진다. */
+  readonly longContext?: boolean;
 } | null;
 
 export interface ModelSpec {
