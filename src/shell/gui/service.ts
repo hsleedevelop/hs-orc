@@ -395,7 +395,7 @@ export class GuiService {
     };
   }
 
-  /** `write` — 쓰기 위임으로 보낸다 (H2). 자동 승인은 읽기 전용만 시작하므로 쓰기는 늘 카드가 선다. */
+  /** `write` — 쓰기 위임으로 보낸다 (H2). 클릭 없이 쓰기로 시작하는 것은 auto 의 쓰기 행 · git 폴더 · 미커밋 없음뿐이다 (D-086). */
   async converse(text: string, write = false): Promise<SessionView> {
     await this.running((s) => s.send(text, { write }));
     return this.conversation();

@@ -645,7 +645,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
         },
       }),
       h('div', { className: 'row', style: { marginTop: 10 } },
-        h('label', { className: 'hint', title: '자동 승인은 읽기 전용만 시작한다 — 쓰기 위임은 늘 카드가 서고 쓰기가 켜진 채다' },
+        h('label', { className: 'hint', title: '쓰기 행(구현·수정)은 git 폴더에서 이미 쓰기가 켜진다 — 이 체크는 그 밖의 메시지를 쓰기로 보낼 때 쓴다. auto 가 아니면 카드가 선다 (D-086)' },
           h('input', {
             type: 'checkbox', checked: sendWrite && view.kind !== 'scratch', disabled: view.kind === 'scratch',
             onChange: (e: { target: { checked: boolean } }) => setSendWrite(e.target.checked),

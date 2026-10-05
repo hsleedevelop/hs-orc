@@ -10,7 +10,7 @@ import type { Engines } from '../data/engines.ts';
 import type { Matrix } from '../data/matrix.ts';
 import { isApprovalMode, loadLimits, type ApprovalMode } from '../data/limits.ts';
 import type { AssignmentPlan } from './assign.ts';
-import { evaluateApproval, evaluateRead, nonGitWriteRefusal, type ApprovalCheck } from './approval.ts';
+import { dirtyWriteRisk, evaluateApproval, evaluateRead, nonGitWriteRefusal, readOnlyWriteRow, type ApprovalCheck } from './approval.ts';
 import type { Budget, BudgetMark } from './budget.ts';
 import { buildSummaryPrompt, conductorSlot, directAnswer, nextSuggestion } from './conductor.ts';
 import { buildContext, type ContextLimits } from './context.ts';
@@ -63,6 +63,13 @@ export interface SessionDeps {
   readonly approvalMode?: ApprovalMode;
   /** project 폴더가 git 작업 트리인가 (D-074). 없으면 git 으로 본다 — 조립(`assembleSession`)이 `repoRoot` 로 정해 넘긴다. */
   readonly inGit?: boolean;
+  /** 쓰기가 본질인 행 (D-086). 없으면 `limits.json` 의 `writeRows`. */
+  readonly writeRows?: readonly string[];
+  /**
+   * 폴더의 미커밋 파일 (D-086 H5) — 조립이 `git status --porcelain` 으로 넘긴다. `null`·예외는 확인 실패라 H5 로 묻는다(fail-closed).
+   * 주지 않으면(테스트) 깨끗한 것으로 본다.
+   */
+  readonly dirtyFiles?: () => readonly string[] | null;
 }
 
 /** `plan.reason` 에 남는 출처 — 행을 고른 것이 지휘자다. `수동 지정` 이면 사람이 고른 것으로 적힌다 (`pipeline.ts` reasonLabel). */
@@ -82,7 +89,7 @@ interface Pending {
   readonly title: string;
   readonly plan: AssignmentPlan;
   readonly reason: string;
-  /** 사용자가 쓰기 위임으로 보냈다 (H2). 승인 클릭 때 켜는 쓰기와 다르다. */
+  /** 카드가 쓰기 켠 채 섰다 — 쓰기 위임으로 보냈거나 쓰기 행이다 (H2·D-086). 자동 승인은 이 값으로 시작한다. */
   readonly write: boolean;
   /** 이 배정이 설 때 방식·기록·Budget 으로 계산한 승인 판정 (D-064). 이후 방식을 바꿔도 이 카드는 다시 판정하지 않는다 (결정 9). */
   readonly check: ApprovalCheck;
@@ -228,8 +235,8 @@ export class ConversationSession {
   }
 
   /**
-   * `write` — 이 메시지를 쓰기 위임으로 보낸다 (H2). 방식과 무관하게 카드가 서고 쓰기 스위치가 켜진 채다 —
-   * 자동 승인은 읽기 전용 위임만 시작한다 (D-064 결정 5).
+   * `write` — 이 메시지를 쓰기 위임으로 보낸다 (H2). 카드가 쓰기 스위치를 켠 채 선다. 자동 승인이 쓰기로 시작하는 것은
+   * `auto` 의 쓰기 행 · git 폴더 · 미커밋 변경 없음뿐이다 (D-086) — 나머지 쓰기는 카드에서 묻는다.
    */
   async send(message: string, options: { readonly write?: boolean } = {}): Promise<TranscriptRecord[]> {
     if (this.stateValue !== 'blocked') this.require('waiting_input', '메시지 전송');
@@ -348,15 +355,24 @@ export class ConversationSession {
     }
   }
 
-  /** 배정을 승인 대기로 세우고 `plan` 을 남긴다. 상태를 `blocked` 로 바꾼다. */
-  private stage(title: string, plan: AssignmentPlan, reason: string, notes: readonly string[], write = false, ladder?: LadderRecord, retry = false): TranscriptRecord {
+  /**
+   * 배정을 승인 대기로 세우고 `plan` 을 남긴다. 상태를 `blocked` 로 바꾼다.
+   * 쓰기 행이면 git project 폴더에서 쓰기를 켠 채 선다 (D-086). 예외 재시도(`retry`)는 그 실행에 켠 값을 그대로 쓴다 —
+   * 사람이 승인 때 끈 쓰기를 다시 켜지 않는다.
+   */
+  private stage(title: string, plan: AssignmentPlan, reason: string, notes: readonly string[], sentWrite = false, ladder?: LadderRecord, retry = false): TranscriptRecord {
     const { primary, reviewer, secondReviewer } = plan.slots;
     const { catalog, budget } = this.deps;
     const inGit = this.deps.inGit ?? true;
-    const check = evaluateApproval({ mode: this.modeValue, plan, reason, write, catalog, budget, records: this.log, inGit, ...(ladder ? { ladder: true } : {}), ...(retry ? { retry: true } : {}) });
-    // manual 은 묻는 이유(`asked`)가 비므로 H4 를 안내 줄로 싣는다 — 어느 방식이든 카드가 같은 줄을 보인다 (D-074).
-    const refusal = check.mode === 'manual' ? nonGitWriteRefusal(catalog, plan, write, inGit) : null;
-    const guide = [...(refusal ? [refusal.text] : []), ...this.scaffoldGuide(write)];
+    const rowWrite = this.deps.kind === 'project' && (this.deps.writeRows ?? loadLimits().writeRows).includes(plan.assignment.id);
+    const write = sentWrite || (!retry && rowWrite && inGit);
+    const dirty = write && inGit ? this.uncommitted() : [];
+    const check = evaluateApproval({ mode: this.modeValue, plan, reason, write, catalog, budget, records: this.log, inGit, rowWrite, dirty, ...(ladder ? { ladder: true } : {}), ...(retry ? { retry: true } : {}) });
+    // manual 은 묻는 이유(`asked`)가 비므로 H4·H5·H6 을 안내 줄로 싣는다 — 어느 방식이든 카드가 같은 줄을 보인다 (D-074·D-086).
+    const warnings = check.mode === 'manual'
+      ? [nonGitWriteRefusal(catalog, plan, write, inGit), dirtyWriteRisk(write, dirty), readOnlyWriteRow(rowWrite, write, inGit)].flatMap((w) => (w ? [w.text] : []))
+      : [];
+    const guide = [...warnings, ...this.scaffoldGuide(write || rowWrite)];
     this.pending = { title, plan, reason, write, check, ...(ladder ? { ladder } : {}), ...(retry ? { retry } : {}) };
     this.stateValue = 'blocked';
     return this.append({
@@ -384,7 +400,8 @@ export class ConversationSession {
    */
   private async autoApprove(): Promise<TranscriptRecord[]> {
     if (!this.pending?.check.auto) return [];
-    return this.start({}, 'auto');
+    // 판정이 쓰기를 허락했으면(D-086) 그 쓰기로 시작한다 — 빼면 쓰기 행이 읽기 전용으로 헛돈다.
+    return this.start({ write: this.pending.write }, 'auto');
   }
 
   /**
@@ -398,6 +415,17 @@ export class ConversationSession {
       return suggestRows(readUnclassifiedWithLegacy(dir)).map((s) => s.message);
     } catch (error) {
       return [`미분류 로그를 남기지 못했다: ${why(error)}`];
+    }
+  }
+
+  /** 미커밋 파일. 확인하지 못했으면 `null` 이다 — 깨끗함으로 읽지 않는다 (D-086 H5 fail-closed). */
+  private uncommitted(): readonly string[] | null {
+    const probe = this.deps.dirtyFiles;
+    if (!probe) return [];
+    try {
+      return probe();
+    } catch {
+      return null;
     }
   }
 

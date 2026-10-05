@@ -71,6 +71,7 @@ const make = (conduct: SlotExecutor, dir = mkdtempSync(path.join(os.tmpdir(), 'h
   const session = new ConversationSession({ approvalMode: 'manual',
     matrix, catalog, kind: 'project', dir, id: '0923-1200-aaa',
     budget, journal: new Journal(), conduct, executorFor: () => execute,
+    writeRows: [], // 쓰기 행 기본값(D-086)은 approval-modes 가 본다 — 여기는 배정·재시도 흐름만 본다
   });
   return { session, budget, dir };
 };
