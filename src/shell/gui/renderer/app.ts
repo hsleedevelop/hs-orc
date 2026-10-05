@@ -766,12 +766,6 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       }, ...TERMINALS.map((t) => h('option', { key: t.id, value: t.id }, t.label))),
       h('button', { className: 'btn', title: `${view.dir} 에서 터미널 열기`, onClick: () => { orc.convTerminal(terminal).catch((e: unknown) => setError(why(e))); } }, '터미널'),
       h('button', { className: 'btn', onClick: props.onClose }, '세션 닫기')),
-    // 지휘자 (D-087) — 머리 줄과 따로 둔다: 한 줄에 넣으면 좁은 창에서 Budget 글이 접히고 터미널 선택이 밀려난다.
-    // 엔진을 바꾸면 그 벤더의 기본 모델·effort 로 시작한다. 도는 호출은 시작한 지휘자로 끝난다.
-    h('div', { className: 'row' },
-      ...orchestratorSelects(orcOptions, view.orchestrator, locked, (choice) => act(orc.convOrchestrator(choice))),
-      h('span', { className: 'hint', title: 'codex 는 내장 도구(apply_patch·request_user_input 등)와 전역 AGENTS.md 를 끄는 인자가 없어 지휘자(도구 0개, D-080)로 쓰지 않는다' },
-        '지휘자 — 직접 답·요약·단계 계획을 맡는다. 위임 슬롯은 매트릭스가 배정한다 · claude 만 (codex 는 도구를 끌 수 없어 막았다, D-087)')),
     view.broken > 0 ? h('div', { className: 'banner error' }, `기록에 깨진 줄 ${view.broken}개 — 건너뛰고 보여준다`) : null,
     view.interrupted ? h('div', { className: 'banner error' }, '승인한 위임의 결과가 기록되지 않았다 — 실행 중 앱이 끊겼다. 결정 로그 1차 줄만 남아 있을 수 있다.') : null,
     ...view.records.map(record),
@@ -823,6 +817,12 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
             onChange: (e: { target: { checked: boolean } }) => setSendWrite(e.target.checked),
           }), ' 쓰기 위임으로 보내기'),
         h('div', { className: 'spacer' }),
+        // 지휘자 (D-087) — Claude 입력창처럼 전송 옆에 둔다. 머리 줄에 넣으면 좁은 창에서 Budget 글이 접히고 터미널 선택이 밀려난다.
+        // 엔진을 바꾸면 그 벤더의 기본 모델·effort 로 시작한다. 도는 호출은 시작한 지휘자로 끝난다.
+        h('div', {
+          className: 'orc-picks',
+          title: '지휘자 — 직접 답·요약·단계 계획을 맡는다. 위임 슬롯은 매트릭스가 배정한다 · claude 만 (codex 는 내장 도구와 전역 AGENTS.md 를 끌 수 없어 막았다, D-080·D-087)',
+        }, ...orchestratorSelects(orcOptions, view.orchestrator, locked, (choice) => act(orc.convOrchestrator(choice)))),
         h('button', { className: 'btn accent', disabled: !canType || !draft.trim(), onClick: send }, '전송'))),
     // 끝 표식은 떠 있는 입력창 뒤에 둔다 — 앞에 두면 그 자리로 가도 입력창이 최신 기록을 덮는다.
     h('div', { ref: endRef }));
