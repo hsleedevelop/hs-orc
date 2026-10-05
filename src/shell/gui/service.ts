@@ -98,6 +98,12 @@ export interface ProjectState {
   readonly recent: readonly ProjectInfo[];
 }
 
+/** 사이드바의 프로젝트/세션 묶음. 프로젝트는 현재 폴더가 먼저, 나머지는 최근 목록 순서다. */
+export interface ConversationTree {
+  readonly projects: readonly { readonly project: ProjectInfo; readonly sessions: readonly SessionSummary[] }[];
+  readonly scratch: readonly SessionSummary[];
+}
+
 export interface SessionView {
   readonly id: string;
   readonly kind: SessionKind;
@@ -339,8 +345,15 @@ export class GuiService {
     };
   }
 
-  conversations(): SessionSummary[] {
-    return [...listSessions(this.workdir, 'project'), ...listScratchSessions()].sort((a, b) => b.lastAt.localeCompare(a.lastAt));
+  /** 현재 폴더와 최근 폴더마다 세션을 묶는다. 같은 폴더가 두 번 나오면 세션이 두 묶음에 겹쳐 보인다 — 실제 경로로 합친다. */
+  conversations(): ConversationTree {
+    const { current, recent } = this.projects();
+    const projects: ProjectInfo[] = [];
+    for (const p of [current, ...recent]) if (!projects.some((q) => samePath(q.dir, p.dir))) projects.push(p);
+    return {
+      projects: projects.map((project) => ({ project, sessions: listSessions(project.dir, 'project') })),
+      scratch: listScratchSessions().sort((a, b) => b.lastAt.localeCompare(a.lastAt)),
+    };
   }
 
   startConversation(kind: SessionKind): SessionView {

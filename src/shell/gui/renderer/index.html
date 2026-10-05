@@ -43,6 +43,47 @@
       }
       #root { height: 100%; }
       .shell { display: flex; flex-direction: column; height: 100%; }
+      .workspace { display: flex; flex: 1 1 auto; min-height: 0; }
+      .content { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+
+      /* ── 사이드바 (프로젝트 / 세션) ───────────────────────── */
+      .sidebar {
+        flex: 0 0 260px; width: 260px; overflow-y: auto;
+        padding: 10px 8px 24px;
+        background: var(--bg-elev);
+        border-right: 1px solid var(--border);
+      }
+      .sb-title { padding: 0 6px 6px; font-size: 11px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; color: var(--dim); }
+      .sb-group { margin-bottom: 6px; }
+      .sb-head { display: flex; align-items: center; gap: 4px; padding: 3px 4px; border-radius: 6px; }
+      .sb-head:hover { background: var(--panel); }
+      .sb-caret, .sb-add, .sb-name {
+        font: inherit; background: none; border: none; padding: 0 4px; cursor: pointer; color: var(--dim-2);
+      }
+      .sb-caret { flex: 0 0 auto; font-size: 10px; }
+      .sb-add { flex: 0 0 auto; font-size: 13px; }
+      .sb-caret:hover, .sb-add:hover { color: var(--blue); }
+      .sb-name {
+        flex: 1 1 auto; min-width: 0; text-align: left;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-weight: 600; color: var(--fg-strong);
+      }
+      .sb-name.static { cursor: default; }
+      .sb-head.current .sb-name { color: var(--blue); }
+      .sb-head.missing .sb-name { color: var(--dim); text-decoration: line-through; }
+      .sb-count { flex: 0 0 auto; font-family: var(--mono); font-size: 10px; color: var(--dim); }
+      .sb-item {
+        display: block; width: 100%; text-align: left;
+        font: inherit; font-size: 12px; color: var(--fg);
+        background: none; border: none; border-radius: 6px;
+        padding: 4px 8px 4px 24px; cursor: pointer;
+      }
+      .sb-item:hover { background: var(--panel); color: var(--fg-strong); }
+      .sb-item[aria-current='true'] { background: color-mix(in srgb, var(--blue) 15%, transparent); color: var(--fg-strong); }
+      .sb-item .p { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .sb-item .t { display: block; font-family: var(--mono); font-size: 10px; color: var(--dim); }
+      .sb-empty { padding: 2px 8px 4px 24px; font-size: 11px; color: var(--dim); }
+      .sidebar button[disabled] { cursor: default; opacity: .6; }
 
       /* ── 타이틀바 ─────────────────────────────────────────── */
       .titlebar {
@@ -191,8 +232,6 @@
       ::-webkit-scrollbar-track { background: transparent; }
 
       /* ── 세션 채팅 ────────────────────────────────────────── */
-      .clickable { cursor: pointer; }
-      .clickable:hover td { color: var(--fg-strong); }
       .bubble { max-width: 80%; padding: 10px 12px; border-radius: 10px; white-space: pre-wrap; line-height: 1.5; }
       .bubble.user { align-self: flex-end; background: color-mix(in srgb, var(--blue) 15%, transparent); }
       .bubble.orc { align-self: flex-start; background: var(--panel-2); }

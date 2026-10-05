@@ -223,7 +223,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     assert.equal(view.kind, 'scratch');
     assert.ok(view.dir.startsWith(process.env['HS_ORC_SCRATCH'] ?? '~'));
     await service.converse('넌 누구니');
-    assert.ok(service.conversations().some((s) => s.id === view.id && s.preview === '넌 누구니'));
+    assert.ok(service.conversations().scratch.some((s) => s.id === view.id && s.preview === '넌 누구니'));
   });
 
   it('분류되지 않는 메시지에 직접 답한다', async () => {
@@ -266,6 +266,22 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     service.startConversation('scratch');
     await service.converse('이 타입 에러 고쳐줘');
     await assert.rejects(service.converseApprove({ verify: [], write: true }), /쓰기를 켤 수 없다/);
+  });
+
+  it('세션 목록은 프로젝트별로 묶인다 — 현재 폴더가 먼저, 떠난 폴더의 세션은 그 폴더 아래 남는다', async () => {
+    isolated();
+    const a = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'hs-tree-a-')));
+    const b = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'hs-tree-b-')));
+    const service = new GuiService(fake, 20, a);
+    service.useProject(a);
+    const view = service.startConversation('project');
+    await service.converse('넌 누구니');
+    service.useProject(b);
+
+    const tree = service.conversations();
+    assert.deepEqual(tree.projects.map((g) => g.project.dir), [b, a]);
+    assert.deepEqual(tree.projects[0]?.sessions, []);
+    assert.ok(tree.projects[1]?.sessions.some((s) => s.id === view.id && s.preview === '넌 누구니'));
   });
 
   it('다른 폴더로 옮기면 그 폴더의 것이 아닌 project 세션을 닫는다', () => {

@@ -47,9 +47,10 @@ type Rec =
   | { kind: 'error'; turn: number; text: string };
 interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; mode: ApprovalMode; ladder: { stage: string; label: string; changes: string[] } | null }
 interface SessionSummary { id: string; dir: string; kind: SessionKind; lastAt: string; preview: string }
+interface ConversationTree { projects: { project: ProjectInfo; sessions: SessionSummary[] }[]; scratch: SessionSummary[] }
 
 interface Bridge {
-  convList(): Promise<SessionSummary[]>;
+  convList(): Promise<ConversationTree>;
   convStart(kind: SessionKind): Promise<SessionView>;
   convOpen(payload: { kind: SessionKind; dir: string; id: string }): Promise<SessionView>;
   convView(): Promise<SessionView>;
@@ -260,33 +261,101 @@ function ProjectBar(props: { state: ProjectState | null; onChange: (s: ProjectSt
 // ── 세션 ───────────────────────────────────────────────────
 const lines = (s: string): string[] => s.split('\n').map((v) => v.trim()).filter(Boolean);
 
-function SessionList(props: { onOpen: (v: SessionView) => void; onError: (m: string) => void }): ReactElement {
-  const list = useAsync(() => orc.convList());
+/** 세션이 없을 때 본문. 목록은 사이드바에 있다. */
+function NewSession(props: { onOpen: (v: SessionView) => void; onError: (m: string) => void }): ReactElement {
   const [busy, setBusy] = useState(false);
   const start = (kind: SessionKind) => {
     setBusy(true);
     orc.convStart(kind).then(props.onOpen, (e: unknown) => props.onError(why(e))).finally(() => setBusy(false));
-  };
-  const open = (s: SessionSummary) => {
-    orc.convOpen({ kind: s.kind, dir: s.dir, id: s.id }).then(props.onOpen, (e: unknown) => props.onError(why(e)));
   };
   return h('div', { className: 'stack' },
     card('새 세션',
       h('div', { className: 'row' },
         h('button', { className: 'btn accent', disabled: busy, onClick: () => start('project') }, '이 폴더에서 시작'),
         h('button', { className: 'btn', disabled: busy, onClick: () => start('scratch') }, '스크래치'),
-        h('span', { className: 'hint' }, '스크래치는 폴더 없이 시작한다 — 쓰기를 켤 수 없다'))),
-    card('최근 세션',
-      !list ? text('불러오는 중…', 'dim')
-      : list.length === 0 ? text('아직 없다', 'dim')
-      : h('table', null, h('tbody', null, ...list.map((s) =>
-          h('tr', {
-            key: `${s.dir}/${s.id}`, className: 'clickable', tabIndex: 0, role: 'button', onClick: () => open(s),
-            onKeyDown: (e: { key: string; preventDefault: () => void }) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(s); } },
-          },
-            h('td', { className: 'mono dim' }, s.kind === 'scratch' ? '스크래치' : elide(s.dir, 30)),
-            h('td', null, s.preview || '(빈 세션)'),
-            h('td', { className: 'mono dim' }, s.lastAt.slice(0, 16).replace('T', ' '))))))));
+        h('span', { className: 'hint' }, '스크래치는 폴더 없이 시작한다 — 쓰기를 켤 수 없다')),
+      h('div', { className: 'hint', style: { marginTop: 8 } }, '지난 세션은 왼쪽 목록에서 연다')));
+}
+
+const sameSession = (a: { id: string; dir: string } | null, b: { id: string; dir: string }): boolean =>
+  a !== null && a.id === b.id && a.dir === b.dir;
+
+/**
+ * 프로젝트/세션 사이드바. 프로젝트 이름을 누르면 그 폴더로 옮기고, 세션을 누르면 그 세션을 연다
+ * (project 세션은 서비스가 폴더도 옮긴다 — 화면의 폴더가 세션의 폴더다).
+ */
+function Sidebar(props: {
+  current: string | undefined;
+  open: SessionView | null;
+  refresh: string;
+  onOpen: (v: SessionView) => void;
+  onProject: (s: ProjectState) => void;
+  onError: (m: string) => void;
+}): ReactElement {
+  const { current, open, onOpen, onProject, onError } = props;
+  const tree = useAsync(() => orc.convList(), [props.refresh]);
+  const [busy, setBusy] = useState(false);
+  // 접힌 묶음 키. 기본은 펼침 — 처음 보는 사람이 세션이 없다고 오해하지 않게.
+  const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (key: string) => setFolded((f) => { const n = new Set(f); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+
+  const run = <T>(p: Promise<T>, done: (v: T) => void) => {
+    setBusy(true);
+    p.then(done, (e: unknown) => onError(why(e))).finally(() => setBusy(false));
+  };
+  const openSession = (s: SessionSummary) => {
+    if (sameSession(open, s)) return;
+    run(orc.convOpen({ kind: s.kind, dir: s.dir, id: s.id }), onOpen);
+  };
+  const useDir = (dir: string) => { if (dir !== current) run(orc.useProject(dir), onProject); };
+  // 다른 폴더의 + 는 그 폴더로 옮긴 뒤 시작한다. 옮기기만 하고 실패하면 폴더는 바뀐 채 남는다 — 오류 배너로 드러난다.
+  const startIn = (dir: string | null) =>
+    run(
+      (dir === null || dir === current ? Promise.resolve(null) : orc.useProject(dir).then((s) => { onProject(s); return s; }))
+        .then(() => orc.convStart(dir === null ? 'scratch' : 'project')),
+      onOpen,
+    );
+
+  const item = (s: SessionSummary): ReactElement =>
+    h('button', {
+      key: `${s.dir}::${s.id}`, className: 'sb-item', disabled: busy, title: s.dir,
+      'aria-current': sameSession(open, s), onClick: () => openSession(s),
+    },
+    h('span', { className: 'p' }, s.preview || '(빈 세션)'),
+    h('span', { className: 't' }, s.lastAt ? s.lastAt.slice(0, 16).replace('T', ' ') : '—'));
+
+  // 첫 메시지 전의 세션은 기록 파일이 없어 목록에 안 잡힌다 — 열려 있는 동안은 자리를 보여 준다.
+  const withOpen = (dir: string | null, sessions: SessionSummary[]): SessionSummary[] =>
+    open && (dir === null ? open.kind === 'scratch' : open.kind === 'project' && open.dir === dir) && !sessions.some((s) => sameSession(open, s))
+      ? [{ id: open.id, dir: open.dir, kind: open.kind, lastAt: '', preview: '(새 세션)' }, ...sessions]
+      : sessions;
+
+  const group = (key: string, head: ReactNode, addTitle: string, addDir: string | null, sessions: SessionSummary[], extra = ''): ReactElement => {
+    const shown = folded.has(key) ? [] : sessions;
+    return h('div', { key, className: 'sb-group' },
+      h('div', { className: `sb-head${extra}` },
+        h('button', { className: 'sb-caret', 'aria-label': folded.has(key) ? '펼치기' : '접기', onClick: () => toggle(key) }, folded.has(key) ? '▸' : '▾'),
+        head,
+        h('span', { className: 'sb-count' }, String(sessions.length)),
+        h('button', { className: 'sb-add', disabled: busy, title: addTitle, onClick: () => startIn(addDir) }, '＋')),
+      ...shown.map(item),
+      !folded.has(key) && sessions.length === 0 ? h('div', { className: 'sb-empty' }, '세션 없음') : null);
+  };
+
+  return h('aside', { className: 'sidebar' },
+    h('div', { className: 'sb-title' }, '프로젝트'),
+    !tree ? text('불러오는 중…', 'dim')
+    : [
+        ...tree.projects.map(({ project, sessions }) =>
+          group(project.dir,
+            h('button', {
+              className: 'sb-name', disabled: busy || !project.exists, title: project.exists ? project.short : `${project.short} (없음)`,
+              onClick: () => useDir(project.dir),
+            }, project.name),
+            '이 폴더에서 새 세션', project.dir, withOpen(project.dir, sessions),
+            `${project.dir === current ? ' current' : ''}${project.exists ? '' : ' missing'}`)),
+        group('::scratch', h('span', { className: 'sb-name static' }, '스크래치'), '새 스크래치 세션', null, withOpen(null, tree.scratch)),
+      ]);
 }
 
 function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v: SessionView) => void; onClose: () => void }): ReactElement {
@@ -473,7 +542,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       }, ...MODES.map((m) => h('option', { key: m.id, value: m.id, title: m.hint }, `승인 · ${m.label}`))),
       h('span', { className: 'dim mono' }, view.budget),
       h('span', { className: 'dim mono' }, view.appBudget),
-      h('button', { className: 'btn', onClick: props.onClose }, '세션 목록')),
+      h('button', { className: 'btn', onClick: props.onClose }, '세션 닫기')),
     view.broken > 0 ? h('div', { className: 'banner error' }, `기록에 깨진 줄 ${view.broken}개 — 건너뛰고 보여준다`) : null,
     view.interrupted ? h('div', { className: 'banner error' }, '승인한 위임의 결과가 기록되지 않았다 — 실행 중 앱이 끊겼다. 결정 로그 1차 줄만 남아 있을 수 있다.') : null,
     ...view.records.map(record),
@@ -597,21 +666,32 @@ function App(): ReactElement {
 
   // Session 은 **숨기기만 한다.** 언마운트하면 입력·배정·진행 중인 실행 결과가 탭 이동 한 번에 사라진다.
   // 나머지 화면은 읽기 전용 조회라 들어올 때마다 다시 불러오는 편이 맞다(실행 뒤 대시보드가 낡지 않게).
+  // 세션을 바꾼 뒤 늦게 돌아온 앞 세션의 응답이 새 세션 화면을 덮지 않게 같은 세션의 뷰만 받는다.
+  const accept = useCallback((v: SessionView) => setConv((c) => (sameSession(c, v) ? v : c)), []);
+  // project 세션을 열면 서비스가 그 폴더로 옮긴다 (Task 8) — 프로젝트 바도 따라가야 폴더가 거짓말하지 않는다.
+  const opened = useCallback((v: SessionView) => {
+    setConv(v);
+    setScreen('Session');
+    orc.projects().then(setProjects, (e: unknown) => setError(why(e)));
+  }, []);
+  const moved = useCallback((s: ProjectState) => {
+    setProjects(s);
+    setConv((c) => (c && c.kind === 'project' && c.dir !== s.current.dir ? null : c));
+  }, []);
+
+  // Session 은 **숨기기만 한다.** 언마운트하면 입력·배정·진행 중인 실행 결과가 탭 이동 한 번에 사라진다.
+  // 나머지 화면은 읽기 전용 조회라 들어올 때마다 다시 불러오는 편이 맞다(실행 뒤 대시보드가 낡지 않게).
   const session = h('div', { key: 'session', hidden: screen !== 'Session' },
     conv
       ? h(SessionScreen, {
+          // 세션마다 화면 상태(입력·진행 표시)가 따로다 — 사이드바로 바꾸면 새로 만든다.
+          key: `${conv.dir}::${conv.id}`,
           view: conv,
           rows,
-          onChange: setConv,
+          onChange: accept,
           onClose: () => { orc.convClose().then(() => setConv(null), (e: unknown) => setError(why(e))); },
         })
-      : h(SessionList, {
-          // 폴더가 바뀌면 목록을 새로 만든다 — 옛 폴더의 세션을 열면 폴더가 되돌아간다.
-          key: projects?.current.dir ?? '',
-          // project 세션을 열면 서비스가 그 폴더로 옮긴다 (Task 8) — 프로젝트 바도 따라가야 폴더가 거짓말하지 않는다.
-          onOpen: (v: SessionView) => { setConv(v); orc.projects().then(setProjects, (e: unknown) => setError(why(e))); },
-          onError: setError,
-        }));
+      : h(NewSession, { onOpen: opened, onError: setError }));
   const body =
     screen === 'Session' ? null
     : screen === 'Dashboard' ? h(DashboardScreen, null)
@@ -623,20 +703,23 @@ function App(): ReactElement {
     h('header', { className: 'titlebar' },
       h('span', { className: 'name' }, title),
       h('span', { className: 'meta' }, meta)),
-    h(ProjectBar, {
-      state: projects,
-      onChange: (s: ProjectState) => {
-        setProjects(s);
-        setConv((c) => (c && c.kind === 'project' && c.dir !== s.current.dir ? null : c));
-      },
-      onError: setError,
-    }),
-    h('nav', { className: 'tabs' }, ...SCREENS.map((s) =>
-      h('button', { key: s, 'aria-current': s === screen, onClick: () => setScreen(s) }, s))),
-    h('main', null,
-      error ? h('div', { className: 'stack' }, h('div', { className: 'banner error' }, error)) : null,
-      session,
-      body));
+    h('div', { className: 'workspace' },
+      h(Sidebar, {
+        current: projects?.current.dir,
+        open: conv,
+        refresh: `${projects?.current.dir ?? ''}|${conv ? `${conv.dir}::${conv.id}::${conv.records.length}` : ''}`,
+        onOpen: opened,
+        onProject: moved,
+        onError: setError,
+      }),
+      h('div', { className: 'content' },
+        h(ProjectBar, { state: projects, onChange: moved, onError: setError }),
+        h('nav', { className: 'tabs' }, ...SCREENS.map((s) =>
+          h('button', { key: s, 'aria-current': s === screen, onClick: () => setScreen(s) }, s))),
+        h('main', null,
+          error ? h('div', { className: 'stack' }, h('div', { className: 'banner error' }, error)) : null,
+          session,
+          body))));
 }
 
 createRoot(document.getElementById('root') as HTMLElement).render(h(App, null));
