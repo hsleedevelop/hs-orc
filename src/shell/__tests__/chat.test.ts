@@ -75,12 +75,13 @@ describe('chat — 기록 렌더', () => {
     assert.equal(result[0], '결과   단계 s2 · ok · reviewer PASS · 결정 d');
   });
 
-  it('/orc 인자: 벤더 이름은 그 벤더 기본, 모델·effort 는 그 칸만 바꾸고, 모르는 낱말은 던진다 (D-087)', () => {
+  it('/orc 인자: claude 는 기본, 모델·effort 는 그 칸만 바꾸고, codex·모르는 낱말은 던진다 (D-087)', () => {
     const now = { model: 'opus', effort: 'high' } as const;
-    assert.deepEqual(parseOrchestratorArgs(now, ['codex']), { model: 'sol', effort: 'high' });
     assert.deepEqual(parseOrchestratorArgs(now, ['sonnet']), { model: 'sonnet', effort: 'high' });
     assert.deepEqual(parseOrchestratorArgs(now, ['max']), { model: 'opus', effort: 'max' });
-    assert.deepEqual(parseOrchestratorArgs(now, ['codex', 'xhigh']), { model: 'sol', effort: 'xhigh' });
+    assert.deepEqual(parseOrchestratorArgs({ model: 'sonnet', effort: 'low' }, ['claude', 'xhigh']), { model: 'opus', effort: 'xhigh' });
+    // codex 엔진·모델은 이유와 함께 거절한다 (D-087, 리뷰 #114-1)
+    for (const w of ['codex', 'sol']) assert.throws(() => parseOrchestratorArgs(now, [w]), /codex 는 지휘자로 쓰지 않는다/);
     assert.throws(() => parseOrchestratorArgs(now, ['gpt']), /모르는 지휘자 인자/);
   });
 

@@ -770,7 +770,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     // 엔진을 바꾸면 그 벤더의 기본 모델·effort 로 시작한다. 도는 호출은 시작한 지휘자로 끝난다.
     h('div', { className: 'row' },
       ...orchestratorSelects(orcOptions, view.orchestrator, locked, (choice) => act(orc.convOrchestrator(choice))),
-      h('span', { className: 'hint' }, '지휘자 — 직접 답·요약·단계 계획을 맡는다. 위임 슬롯은 매트릭스가 배정한다')),
+      h('span', { className: 'hint', title: 'codex 는 내장 도구(apply_patch·request_user_input 등)와 전역 AGENTS.md 를 끄는 인자가 없어 지휘자(도구 0개, D-080)로 쓰지 않는다' },
+        '지휘자 — 직접 답·요약·단계 계획을 맡는다. 위임 슬롯은 매트릭스가 배정한다 · claude 만 (codex 는 도구를 끌 수 없어 막았다, D-087)')),
     view.broken > 0 ? h('div', { className: 'banner error' }, `기록에 깨진 줄 ${view.broken}개 — 건너뛰고 보여준다`) : null,
     view.interrupted ? h('div', { className: 'banner error' }, '승인한 위임의 결과가 기록되지 않았다 — 실행 중 앱이 끊겼다. 결정 로그 1차 줄만 남아 있을 수 있다.') : null,
     ...view.records.map(record),

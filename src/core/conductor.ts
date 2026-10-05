@@ -17,6 +17,9 @@ import type { SlotExecutor, SlotRun } from './executor.ts';
 import { STAGE_LABEL, nextStage } from './ladder.ts';
 import { GraphError, parseGraphSpec, topoSort, type GraphNode, type GraphSpec } from './modes/graph.ts';
 
+/** codex 지휘자를 막은 이유 (D-087, 리뷰 #114-1) — 셸이 선택을 거절할 때 같은 문구를 쓴다. */
+export const CODEX_BLOCKED = 'codex 는 지휘자로 쓰지 않는다 — 내장 도구(apply_patch·request_user_input 등)와 전역 AGENTS.md 를 끄는 인자가 없어 D-080(지휘자 도구 0개)을 지킬 수 없다 (D-087).';
+
 /** D-087 이전 세션의 지휘자 — 기록에 지휘자 선택이 없는 세션은 이것으로 연다. 조용히 비싼 모델로 바뀌지 않게 한다. */
 export const LEGACY_ORCHESTRATOR: OrchestratorChoice = { model: 'haiku', effort: 'low' };
 
@@ -37,7 +40,7 @@ export function conductorSlot(catalog: Engines, choice: OrchestratorChoice): Res
   const spec = catalog.models[choice.model];
   if (!spec) throw new AssignError(`모르는 지휘자 모델이다: ${String(choice.model)}`);
   if (!isOrchestratorEngine(spec.defaultEngine)) {
-    throw new AssignError(`${choice.model} 는 ${spec.defaultEngine} 모델이다 — 지휘자는 ${ORCHESTRATOR_ENGINES.join('·')} 에서만 띄운다 (격리 선언, D-032·D-087).`);
+    throw new AssignError(`${choice.model} 는 ${spec.defaultEngine} 모델이다 — 지휘자는 ${ORCHESTRATOR_ENGINES.join('·')} 에서만 띄운다. ${CODEX_BLOCKED}`);
   }
   const slot = resolveSlot(catalog, { model: choice.model, vendor: spec.defaultEngine === 'claude' ? 'anthropic' : 'openai', efforts: [choice.effort], label: `지휘자·${modelLabel(choice.model)}` }, choice.effort, 'reviewer');
   return spec.availability[spec.defaultEngine]?.longContext === true ? { ...slot, longContext: true } : slot;

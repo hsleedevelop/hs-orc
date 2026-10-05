@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline';
 import { loadEngines } from '../data/engines.ts';
 import { EFFORTS, type Effort } from '../data/matrix.ts';
 import { APPROVAL_MODES, isApprovalMode, isOrchestratorEngine, type ApprovalMode, type OrchestratorChoice } from '../data/limits.ts';
-import { defaultOrchestrator, orchestratorOptions } from '../core/conductor.ts';
+import { CODEX_BLOCKED, defaultOrchestrator, orchestratorOptions } from '../core/conductor.ts';
 import { slotLine } from '../core/reader.ts';
 import type { Budget } from '../core/budget.ts';
 import type { ConversationSession } from '../core/session.ts';
@@ -92,7 +92,7 @@ export function renderRecord(r: TranscriptRecord): string[] {
 }
 
 export const CHAT_HELP = [
-  '명령   메시지를 그냥 쓰면 보낸다 · /write <문장> 쓰기 위임으로 보낸다 · /task Rxx 마지막 메시지를 그 행으로 배정 · /read 마지막 메시지를 읽기 전용 1슬롯이 코드를 읽고 답한다(카드 없이 바로) · /ladder 실패·미검증 뒤 사다리 다음 단계로 다시 위임(카드만 선다) · /steps 마지막 메시지를 지휘자가 위임 단계로 나눈 계획으로 세운다(승인하면 단계마다 차례로 위임) · /mode [방식] · /orc [claude|codex|모델] [effort] 지휘자 바꾸기 · /help · /quit (Ctrl-D)',
+  '명령   메시지를 그냥 쓰면 보낸다 · /write <문장> 쓰기 위임으로 보낸다 · /task Rxx 마지막 메시지를 그 행으로 배정 · /read 마지막 메시지를 읽기 전용 1슬롯이 코드를 읽고 답한다(카드 없이 바로) · /ladder 실패·미검증 뒤 사다리 다음 단계로 다시 위임(카드만 선다) · /steps 마지막 메시지를 지휘자가 위임 단계로 나눈 계획으로 세운다(승인하면 단계마다 차례로 위임) · /mode [방식] · /orc [claude|모델] [effort] 지휘자 바꾸기(claude 만 — codex 는 막았다) · /help · /quit (Ctrl-D)',
   '방식   /mode manual 매번 묻는다 · auto-ask 쓰기·모델이 고른 행·비싼 조합·상한 근접·첫 위임만 묻는다 · auto 쓰기·모델이 고른 행만 묻는다 — 자동은 이 메시지의 배정 1건만 시작한다',
   '승인   배정이 뜨면 y 읽기 전용 · w 쓰기 · n 거절 · a 지휘자에게 묻기 · 문장을 쓰면 거절하고 그 메시지를 보낸다',
   '취소   위임이 도는 중 Ctrl-C 한 번 — 그 위임만 멈추고 세션은 남는다 · 한 번 더 누르면 나간다',
@@ -103,13 +103,16 @@ export const CHAT_HELP = [
  * 모르는 낱말은 던진다 — 조용히 무시하면 바꾼 줄 안다.
  */
 export function parseOrchestratorArgs(current: OrchestratorChoice, words: readonly string[]): OrchestratorChoice {
-  const models = orchestratorOptions(loadEngines()).flatMap((o) => o.models.map((m) => m.model as string));
+  const catalog = loadEngines();
+  const models = orchestratorOptions(catalog).flatMap((o) => o.models.map((m) => m.model as string));
   let choice = current;
   for (const word of words) {
+    // codex 엔진·모델은 지휘자로 막았다 (D-087) — 모르는 낱말과 섞지 않고 이유를 말한다.
+    if (word === 'codex' || catalog.models[word as OrchestratorChoice['model']]?.defaultEngine === 'codex') throw new Error(CODEX_BLOCKED);
     if (isOrchestratorEngine(word)) choice = defaultOrchestrator(word);
     else if (models.includes(word)) choice = { ...choice, model: word as OrchestratorChoice['model'] };
     else if ((EFFORTS as readonly string[]).includes(word)) choice = { ...choice, effort: word as Effort };
-    else throw new Error(`모르는 지휘자 인자다: ${word} — claude·codex · 모델(${models.join('·')}) · effort(${EFFORTS.join('·')})`);
+    else throw new Error(`모르는 지휘자 인자다: ${word} — claude · 모델(${models.join('·')}) · effort(${EFFORTS.join('·')})`);
   }
   return choice;
 }
@@ -191,7 +194,7 @@ export async function runChat(
           } else say(`모르는 방식이다: ${arg} — ${APPROVAL_MODES.join(' · ')}`);
         } else if (line === '/orc' || line.startsWith('/orc ')) {
           const words = line.slice('/orc'.length).trim().split(/\s+/).filter(Boolean);
-          if (words.length === 0) say(`지휘   ${slotLine(session.conductor())} — /orc claude·codex 는 그 벤더 기본, /orc <모델> [effort]`);
+          if (words.length === 0) say(`지휘   ${slotLine(session.conductor())} — /orc claude 는 기본, /orc <모델> [effort] · codex 지휘자는 막았다 (D-087)`);
           else {
             const out = session.setOrchestrator(parseOrchestratorArgs(session.orchestrator, words));
             if (out.length === 0) say(`지휘   이미 ${slotLine(session.conductor())}`);

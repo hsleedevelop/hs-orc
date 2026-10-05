@@ -69,16 +69,15 @@ describe('지휘자 — 직접 답 (SPEC §6.4.2)', () => {
 });
 
 describe('지휘자 모델 선택 (D-087)', () => {
-  it('기본은 벤더마다 그 CLI 의 기본 모델·high 이고 1M 창으로 뜬다 — claude 는 모델 id 끝, codex 는 설정 인자', () => {
-    const claude = conductorSlot(catalog, defaultOrchestrator('claude'));
+  it('기본은 claude CLI 의 기본 모델 Opus·high 이고 1M 창(모델 id 끝 [1m])으로 뜬다', () => {
+    const claude = conductorSlot(catalog, defaultOrchestrator());
     assert.deepEqual([claude.engine, claude.modelId, claude.effort, claude.role, claude.longContext], ['claude', 'claude-opus-5-5', 'high', 'reviewer', true]);
     assert.equal(buildInvocation(catalog, claude.model, claude.effort, 'X', { isolate: true, longContext: true }).modelId, 'claude-opus-5-5[1m]');
-    const codex = conductorSlot(catalog, defaultOrchestrator('codex'));
-    assert.deepEqual([codex.engine, codex.modelId, codex.effort, codex.role, codex.longContext], ['codex', 'gpt-6.1-sol', 'high', 'reviewer', true]);
-    const argv = buildInvocation(catalog, codex.model, codex.effort, 'X', { isolate: true, longContext: true }).argv;
-    assert.ok(argv.join(' ').includes('-c model_context_window=1000000'));
-    assert.ok(argv.includes('--ignore-user-config'), 'codex 지휘자도 사용자 설정을 싣지 않는다 (D-032 B1)');
-    assert.equal(defaultOrchestrator().model, 'opus', '시작 엔진은 claude 다');
+  });
+
+  it('codex 는 지휘자로 받지 않는다 — 내장 도구를 끌 수 없어 D-080 을 지킬 수 없다 (리뷰 #114-1)', () => {
+    assert.throws(() => conductorSlot(catalog, { model: 'sol', effort: 'high' }), /codex 는 지휘자로 쓰지 않는다/);
+    assert.throws(() => buildInvocation(catalog, 'sol', 'high', 'X', { isolate: true }), /격리 인자 선언이 없다/, '격리를 요청하면 조용히 격리 없이 돌지 않는다');
   });
 
   it('1M 선언이 없는 모델에 1M 을 요청하면 기본 창으로 바꾸지 않고 던진다', () => {
@@ -87,9 +86,8 @@ describe('지휘자 모델 선택 (D-087)', () => {
 
   it('선택지는 엔진마다 그 엔진이 기본인 모델이고, 모르는 모델은 지휘자로 받지 않는다', () => {
     const options = orchestratorOptions(catalog);
-    assert.deepEqual(options.map((o) => o.engine), ['claude', 'codex']);
+    assert.deepEqual(options.map((o) => o.engine), ['claude']);
     assert.ok(options[0]?.models.some((m) => m.model === 'opus' && m.longContext));
-    assert.ok(options[1]?.models.every((m) => catalog.models[m.model].defaultEngine === 'codex'));
     assert.throws(() => conductorSlot(catalog, { model: 'nope' as 'opus', effort: 'high' }), /모르는 지휘자 모델/);
   });
 });

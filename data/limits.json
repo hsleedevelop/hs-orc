@@ -15,14 +15,10 @@
       "claude": {
         "model": "opus",
         "effort": "high"
-      },
-      "codex": {
-        "model": "sol",
-        "effort": "high"
       }
     }
   },
-  "orchestratorRationale": "새 대화 세션의 지휘자 (D-087). 지휘자는 직접 답·결과 요약·단계 계획을 맡고 1M 창으로 띄운다. 벤더마다 그 CLI 의 기본 모델(claude Opus 5.5 · codex gpt-6.1-sol)을 high 로 둔다 — 세션에서 엔진을 바꾸면 그 벤더 값으로 시작하고, 모델·effort 는 세션마다 바꿔 기록에 남긴다. 기록에 지휘자가 없는 옛 세션은 이 값이 아니라 옛 지휘자(Haiku·low)로 연다.",
+  "orchestratorRationale": "새 대화 세션의 지휘자 (D-087). 지휘자는 직접 답·결과 요약·단계 계획을 맡고 1M 창으로 띄운다. 기본은 claude CLI 의 기본 모델 Opus 5.5 · high 이고 모델·effort 는 세션마다 바꿔 기록에 남긴다. 지휘자 엔진은 claude 뿐이다 — codex 는 내장 도구를 전부 끄는 인자가 없어(D-080, 2026-10-05 실측) 막았다. 기록에 지휘자가 없는 옛 세션은 옛 지휘자(Haiku·low)로, 쓸 수 없는 지휘자(codex 등)가 기록된 세션은 이 기본으로 연다.",
   "contextTurns": 6,
   "contextChars": 6000,
   "jevConfidenceMin": 0.6,

@@ -1014,18 +1014,30 @@ describe('지휘자 선택·단계 계획 (D-087)', () => {
     assert.deepEqual([c.slots[0]?.model, c.slots[0]?.effort, c.slots[0]?.longContext], ['opus', 'high', true]);
     assert.ok(direct?.kind === 'direct');
     assert.equal(direct.by, '지휘자·Opus·high → claude/claude-opus-5-5[1m]');
-    assert.deepEqual(session.setOrchestrator({ model: 'sol', effort: 'xhigh' }).map((r) => r.kind), ['orchestrator']);
-    assert.deepEqual(session.setOrchestrator({ model: 'sol', effort: 'xhigh' }), [], '같은 값은 다시 기록하지 않는다');
+    assert.deepEqual(session.setOrchestrator({ model: 'sonnet', effort: 'xhigh' }).map((r) => r.kind), ['orchestrator']);
+    assert.deepEqual(session.setOrchestrator({ model: 'sonnet', effort: 'xhigh' }), [], '같은 값은 다시 기록하지 않는다');
     await session.send('또 물어본다');
-    assert.deepEqual([c.slots[1]?.engine, c.slots[1]?.modelId, c.slots[1]?.effort], ['codex', 'gpt-6.1-sol', 'xhigh']);
+    assert.deepEqual([c.slots[1]?.engine, c.slots[1]?.modelId, c.slots[1]?.effort], ['claude', 'claude-sonnet-5-5', 'xhigh']);
     const reopened = new ConversationSession({ matrix, catalog, kind: 'project', dir, id: '0923-1200-aaa', budget: new Budget(20, 0), journal: new Journal(), conduct: c.exec, executorFor: () => c.exec });
-    assert.deepEqual(reopened.orchestrator, { model: 'sol', effort: 'xhigh' });
+    assert.deepEqual(reopened.orchestrator, { model: 'sonnet', effort: 'xhigh' });
   });
 
   it('지휘자 기록이 없는 옛 세션은 Haiku·low 로 연다 — 조용히 비싼 모델로 바꾸지 않는다', () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-'));
     appendRecord(transcriptPath(dir, '0923-1200-aaa'), { v: 1, at: '2026-09-28T00:00:00Z', turn: 1, kind: 'user', text: '넌 누구니' });
     assert.deepEqual(make(orcSpy().exec, dir).session.orchestrator, { model: 'haiku', effort: 'low' });
+  });
+
+  it('codex 지휘자가 기록된 옛 세션은 기본 지휘자로 열고 그 사실을 알린다 — 기록된 codex 로 띄우지 않는다 (리뷰 #114-1)', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-'));
+    appendRecord(transcriptPath(dir, '0923-1200-aaa'), { v: 1, at: '2026-10-05T00:00:00Z', turn: 1, kind: 'orchestrator', model: 'sol', effort: 'high' });
+    const c = orcSpy();
+    const { session } = make(c.exec, dir);
+    assert.deepEqual(session.orchestrator, { model: 'opus', effort: 'high' });
+    assert.match(session.orchestratorNotice ?? '', /기록된 지휘자 sol·high 를 띄울 수 없어 기본 지휘자 opus·high 로 연다 — .*codex 는 지휘자로 쓰지 않는다/);
+    await session.send('넌 누구니');
+    assert.equal(c.slots[0]?.engine, 'claude');
+    assert.throws(() => session.setOrchestrator({ model: 'sol', effort: 'high' }), /codex 는 지휘자로 쓰지 않는다/);
   });
 
   it('지휘자로 쓸 수 없는 선택은 기록하지 않고 던진다', () => {
@@ -1149,7 +1161,7 @@ describe('지휘자 선택·단계 계획 (D-087)', () => {
     appendRecord(file, { v: 1, at: '2026-09-28T00:00:01Z', turn: 1, kind: 'direct', text: '답', suggest: 'R01', cost: '$0', notes: [] });
     const { session } = make(orcSpy().exec, dir);
     session.setMode('auto');
-    session.setOrchestrator({ model: 'sol', effort: 'high' });
+    session.setOrchestrator({ model: 'sonnet', effort: 'high' });
     const [plan] = await session.planAs('R01');
     assert.ok(plan?.kind === 'plan');
     assert.match(plan.reason, /^지휘자 제안/);

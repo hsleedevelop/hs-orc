@@ -3318,15 +3318,15 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 ---
 
-## D-087 — 지휘자 모델·effort 를 세션마다 사람이 고르고(기본 = 벤더 기본 모델·high·1M), 지휘자가 요청을 위임 단계로 나눈 계획을 세운다
+## D-087 — 지휘자 모델·effort 를 세션마다 사람이 고르고(기본 = claude Opus·high·1M, codex 지휘자는 막음), 지휘자가 요청을 위임 단계로 나눈 계획을 세운다
 
 **배경** 2026-10-05 전하 지적: "명확하게 오케스트레이터 역할을 해주는 부분이 없다." 사실 확인: 라우팅은 결정론 코드(`pipeline.ts`), 흐름은 `ConversationSession`, "지휘자"(`conductor.ts`)는 Haiku·low 고정으로 직접 답·요약 두 가지뿐이었다(D-031·Q11). 여러 단계를 끌고 가는 유일한 경로인 `/loop`·`/graph` 는 D-031 결정 6 과 달리 CLI 에만 있고 대화 세션에 닿지 않았다. 전하 결정(같은 날 질문 2건): **(1) 세션에서 바꾸는 모델·effort 는 지휘자 자신에 적용한다** — 위임 슬롯 배정은 그대로 매트릭스. **(2) 지휘자는 계획만, 실행은 승인** — 자율 연쇄 위임(PRD 비목표)은 열지 않는다. 기본값 지시: "각 벤더사가 제공하는 기본모델 — claude-opus 5.5[1m] high, codex gpt-6.1-sol[1m] high".
 
 **결정**
-1. **지휘자 선택은 세션 값이다** (`orchestrator` 기록, 마지막 것을 재생 — 승인 방식(D-064 결정 8)과 같은 모양). 선택은 `{ model, effort }` 이고 엔진은 모델의 `defaultEngine` 이 정한다. 지휘자 엔진은 **claude·codex 둘뿐**이다 — 격리 인자가 실측된 엔진만 지휘자가 된다(D-032 B1). cursor 는 선언이 없다.
-2. **기본값은 `limits.json` `orchestrator`** — 시작 엔진 claude, 벤더 기본 claude `opus·high` · codex `sol·high`. 세션에서 엔진을 바꾸면 그 벤더의 기본으로 시작하고, 모델·effort 는 따로 바꾼다(GUI 세션 머리 선택 셋 · chat `/orc [claude|codex|모델] [effort]`).
-3. **1M 창** — `engines.json` 에 엔진별 방법(`longContext`: claude 는 모델 id 끝 `[1m]`, codex 는 `-c model_context_window=1000000`)과 모델별 실측 표시(`availability.longContext`)를 둔다. 지휘자 슬롯은 그 모델에 표시가 있을 때만 1M 으로 뜬다 — 지금은 opus(claude)·sol(codex) 둘. 표시 없는 모델에 1M 을 요청하면 argv 생성이 던진다(기본 창으로 조용히 바꾸지 않는다). **위임 슬롯에는 싣지 않는다.**
-4. **codex 지휘자 격리** — `isolateArgv: --ignore-user-config --ignore-rules --ephemeral`. `~/.codex/config.toml`(사용자 hook·MCP·모델·창 설정)을 싣지 않고 인증은 그대로 쓴다. **전역 `~/.codex/AGENTS.md` 는 막지 못한다**(아래 미검증·위험) — claude 지휘자(D-050·D-080)보다 약한 격리다. 읽기 전용은 기존 `readOnlyArgv`(sandbox read-only)가 붙는다 — 지휘자 슬롯은 reviewer 자리라 쓰기를 받지 못한다.
+1. **지휘자 선택은 세션 값이다** (`orchestrator` 기록, 마지막 것을 재생 — 승인 방식(D-064 결정 8)과 같은 모양). 선택은 `{ model, effort }` 이고 엔진은 모델의 `defaultEngine` 이 정한다. **지휘자 엔진은 claude 뿐이다** — 내장 도구를 전부 끄는 격리(D-080 `--tools ""`)가 실측된 엔진만 지휘자가 된다. codex 는 막았다(결정 4), cursor 는 격리 선언이 없다.
+2. **기본값은 `limits.json` `orchestrator`** — claude CLI 의 기본 모델 `opus·high`. 모델·effort 는 세션에서 바꾼다(GUI 세션 아래 지휘자 줄의 선택 셋 · chat `/orc [claude|모델] [effort]`). 처음 지시는 "벤더마다 기본 — claude Opus 5.5[1m] high · codex gpt-6.1-sol[1m] high" 였고, codex 는 결정 4 로 빠졌다.
+3. **1M 창** — `engines.json` 에 엔진별 방법(`longContext`: claude 는 모델 id 끝 `[1m]`)과 모델별 실측 표시(`availability.longContext`)를 둔다. 지휘자 슬롯은 그 모델에 표시가 있을 때만 1M 으로 뜬다 — 지금은 opus 뿐이다. 표시 없는 모델에 1M 을 요청하면 argv 생성이 던진다(기본 창으로 조용히 바꾸지 않는다). **위임 슬롯에는 싣지 않는다.**
+4. **codex 지휘자는 막는다** (리뷰 #114-1, 전하 결정 2026-10-05: "codex 에서 내장 도구를 끄는 방법을 실측으로 찾고, 없으면 claude 만"). 실측 2회(gpt-6.1-sol·low, 근거 원문 `engines.json` `$evidence.orchestrator`): `--ignore-user-config --ignore-rules --ephemeral` 에 `-c features.*=false` 18개(`shell_tool`·`unified_exec`·`code_mode_host` …)와 `-c web_search="disabled"` 를 더하면 셸·웹 검색은 빠지고 `exec` 는 fail-closed 지만 **`apply_patch`·`request_user_input`·`wait`·`clock` 이 남고**, 입력은 13,177 tok 으로 claude 지휘자(약 3.8k)의 3.5배다. 전역 `~/.codex/AGENTS.md` 도 실린다(답이 "전하"). D-080(지휘자 도구 0개)을 지킬 인자가 없어 codex 의 `isolateArgv`·`longContext` 선언을 두지 않는다. 지휘자 선택지에서 빠지고, chat `/orc codex`·codex 모델은 이유와 함께 거절하며, codex 지휘자가 기록된 세션은 기본 지휘자로 열고 안내한다(결정 14 와 같은 길).
 5. **옛 세션** — 기록에 지휘자가 없고 기록이 비어 있지 않으면 옛 지휘자 **Haiku·low** 로 연다. 다시 연 세션이 조용히 비싼 모델로 바뀌지 않게 한다(D-064 결정 8 과 같은 이유). 첫 메시지·단계 계획 때 지금 지휘자를 기록으로 굳힌다.
 6. **단계 계획** (`planSteps` · GUI "단계로 나눠 계획" · chat `/steps`) — **마지막 메시지**를 지휘자가 `{"steps":[{id, task(행), prompt, dependsOn}]}` 로 나눈다. 지휘자는 **행과 순서만** 정한다 — 단계마다 배정(모델·effort·두 슬롯·INV-1)은 `parseGraphSpec` → `assign()` 이 한다(G1). 행·의존·순환 검사는 `/graph` 와 같은 코드고, 단계 수 상한은 `maxNodes`. 못 읽으면 받은 답 앞부분과 함께 오류로 끝난다 — 계획을 추측해 고치지 않는다. 배정 카드가 선 채 부르면 그 배정은 거절로 남는다.
 7. **카드만 선다 — 어느 승인 방식에서도 사람이 승인한다** (행을 모델이 골랐다, H1). 승인은 쓰기 스위치·검증 명령을 카드 하나로 받는다. **쓰기는 D-086 쓰기 행 규칙을 단계마다 따른다** — git project 폴더의 쓰기 행(`writeRows`) 단계가 있으면 스위치가 켜진 채 서고, 켜면 **그 단계들만** 쓰기로 돈다(읽기 행 단계는 켜도 읽기 전용). 카드는 늘 H1 을 묻고, 쓰기면 H5(미커밋 변경·확인 실패 fail-closed), git 밖 쓰기 행이면 H6 과 스캐폴더 안내를 승인 전에 보인다. H2 는 묻지 않는다 — 단계 카드는 어느 방식에서도 사람이 승인한다. 거절하면 단계마다 결정 로그에 미실행(`declined`)으로 남는다.
@@ -3347,12 +3347,11 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 - *모든 세션을 새 기본(Opus·high)으로* — 옛 세션의 비용이 말없이 바뀐다.
 
 **검증**
-- 실측(2026-10-05, claude 2.1.289 · codex-cli 0.160.0, 빈 /tmp, `Reply with exactly: ok`): claude 지휘자 격리 argv + `--model "claude-opus-5-5[1m]" --effort low` → ok, `modelUsage` 의 `claude-opus-5-5[1m]` `contextWindow` 1000000. codex `exec --ignore-user-config --ignore-rules --ephemeral … -m gpt-6.1-sol -c model_context_window=1000000` → ok. 근거 원문은 `engines.json` `$evidence.orchestrator`.
-- `npm run gate` 657 → 671 (main #113 반영 뒤 677 → 679 — 단계 계획의 쓰기 행 규칙 회귀 2건). 새 테스트: 지휘자 기본·1M argv·선택지·옛 세션·잘못된 선택(conductor·session), 단계 계획 파싱·거부(conductor), 카드→승인→의존 순서 실행·앞 단계 출력 전달·실패 전파·미실행 결정 로그(session), `/orc` 인자·단계 렌더(chat), codex 격리 argv(resolve).
+- 실측(2026-10-05, claude 2.1.289 · codex-cli 0.160.0, 빈 /tmp, `Reply with exactly: ok`): claude 지휘자 격리 argv + `--model "claude-opus-5-5[1m]" --effort low` → ok, `modelUsage` 의 `claude-opus-5-5[1m]` `contextWindow` 1000000. codex 도구 끄기 실측 2회는 결정 4. 근거 원문은 `engines.json` `$evidence.orchestrator`.
+- `npm run gate` 657 → 671 (main #113 반영 뒤 677 → 679 — 단계 계획의 쓰기 행 규칙 회귀 2건 · 리뷰 반영 682 · #111 반영 711 → 712 — codex 지휘자 막기). 새 테스트: 지휘자 기본·1M argv·선택지·옛 세션·잘못된 선택(conductor·session), 단계 계획 파싱·거부(conductor), 카드→승인→의존 순서 실행·앞 단계 출력 전달·실패 전파·미실행 결정 로그(session), `/orc` 인자·단계 렌더(chat), codex 격리 argv(resolve).
 
 **미검증·위험**
-- **codex 지휘자는 전역 `~/.codex/AGENTS.md` 를 싣는다** (실측: 격리 argv 로 "호칭 지시가 있으면 그 호칭만" → `전하`, `-c project_doc_max_bytes=0` 을 더해도 같다). 실사용 스모크에서도 codex 지휘자 요약이 "전하" 로 시작했다. 끄는 인자를 찾지 못했다 — `CODEX_HOME` 교체는 인증 파일을 다뤄야 해서 하지 않았다. 영향: 지휘자 프롬프트에 사용자 전역 규칙이 섞이고 입력 토큰이 는다(약 1.9만). 기본 지휘자(claude)는 해당 없다.
-- codex 1M: 엔진이 창 크기를 보고하지 않는다. `models_cache` 의 gpt-6.1-sol `max_context_window` 는 872000 이라 실효 창이 그 값으로 잘리는지 확인하지 못했다.
+- codex 지휘자가 다시 필요하면: codex CLI 에 내장 도구를 전부 끄는 인자(또는 `CODEX_HOME` 격리)가 생겼는지 실측하고 D-080 기준(도구 0개·입력 토큰)으로 다시 연다.
 - 비용: 새 세션의 직접 답·요약이 Haiku·low → Opus·high 로 오른다(구독제에서는 사용량 한도). 금액·토큰은 기존처럼 비용 줄·Budget 에 찍힌다.
 - 단계 계획의 질(행 선택·나누는 단위)은 지휘자 모델에 달렸다. 행이 틀리면 카드에서 거절하고 다시 보내는 것뿐이다 — 단계별 행 바꾸기는 없다.
 - GUI 화면은 Electron 실창(가짜 claude·엔진 호출 없음)으로 지휘 선택·단계 카드를 확인했다.

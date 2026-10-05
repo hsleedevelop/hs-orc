@@ -8,9 +8,12 @@ export type ApprovalMode = 'manual' | 'auto-ask' | 'auto';
 export const APPROVAL_MODES: readonly ApprovalMode[] = ['manual', 'auto-ask', 'auto'];
 export const isApprovalMode = (value: unknown): value is ApprovalMode => APPROVAL_MODES.includes(value as ApprovalMode);
 
-/** 지휘자를 띄울 수 있는 엔진 (D-087). 격리 인자(`isolateArgv`)가 실측된 둘뿐이다 — cursor 는 선언이 없다. */
-export type OrchestratorEngine = 'claude' | 'codex';
-export const ORCHESTRATOR_ENGINES: readonly OrchestratorEngine[] = ['claude', 'codex'];
+/**
+ * 지휘자를 띄울 수 있는 엔진 (D-087). 내장 도구를 전부 끄는 격리(D-080)가 실측된 claude 뿐이다 —
+ * codex 는 도구 일부(apply_patch·request_user_input 등)와 전역 AGENTS.md 를 끄는 인자가 없어 막았다(2026-10-05 실측), cursor 는 선언이 없다.
+ */
+export type OrchestratorEngine = 'claude';
+export const ORCHESTRATOR_ENGINES: readonly OrchestratorEngine[] = ['claude'];
 export const isOrchestratorEngine = (value: unknown): value is OrchestratorEngine => ORCHESTRATOR_ENGINES.includes(value as OrchestratorEngine);
 
 /** 세션의 지휘자 선택 (D-087). 엔진은 모델의 `defaultEngine` 이 정한다. */
@@ -22,7 +25,7 @@ export interface OrchestratorChoice {
 export interface Limits {
   /** 새 대화 세션의 승인 방식 (D-064 결정 8). 기록에 방식이 없는 옛 세션은 이 값이 아니라 `manual` 이다. */
   readonly approvalMode: ApprovalMode;
-  /** 새 대화 세션의 지휘자 (D-087). `defaults` 는 벤더마다 그 CLI 의 기본 모델이다 — 엔진을 바꾸면 그 값으로 시작한다. */
+  /** 새 대화 세션의 지휘자 (D-087). `defaults` 는 지휘자 엔진마다 그 CLI 의 기본 모델이다 — 지금은 claude 뿐이다. */
   readonly orchestrator: {
     readonly engine: OrchestratorEngine;
     readonly defaults: Readonly<Record<OrchestratorEngine, OrchestratorChoice>>;
