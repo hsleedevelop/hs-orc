@@ -404,6 +404,12 @@ export class GuiService {
     return this.conversation();
   }
 
+  /** 선 카드의 행을 바꾼다 — 거절과 새 배정이 한 호출이다. 쓰기 위임은 원 카드에서 이어받는다. */
+  async converseReplan(taskId: string): Promise<SessionView> {
+    await this.running((s) => s.replan(taskId));
+    return this.conversation();
+  }
+
   /** 마지막 메시지를 읽기 전용 1슬롯이 코드를 읽고 답한다 (D-083). 엔진을 부르므로 `running` 으로 돈다 — 취소(D-066)가 같은 통로로 붙는다. */
   async converseRead(): Promise<SessionView> {
     await this.running((s) => s.readAnswer());

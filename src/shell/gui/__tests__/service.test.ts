@@ -260,6 +260,30 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     assert.deepEqual(next.records.filter((r) => r.kind !== 'mode').map((r) => r.kind), ['user', 'direct', 'plan', 'approval', 'user', 'direct', 'plan']);
   });
 
+  it('카드의 행을 바꾸면 그 카드를 거절하고 고른 행으로 다시 선다 — 거절 뒤에 값을 다시 읽지 않는다', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    service.startConversation('scratch');
+    const shown = await service.converse('이 타입 에러 고쳐줘');
+    assert.equal(shown.records.at(-1)?.kind, 'plan');
+    const view = await service.converseReplan('R04');
+    assert.deepEqual(view.records.filter((r) => r.kind !== 'mode').slice(-3).map((r) => r.kind), ['plan', 'approval', 'plan']);
+    const plan = view.records.at(-1);
+    assert.ok(plan?.kind === 'plan' && plan.taskId === 'R04', `R04 카드가 서야 한다: ${plan?.kind === 'plan' ? plan.taskId : plan?.kind}`);
+    assert.equal(view.state, 'blocked');
+  });
+
+  it('카드의 행을 바꿔도 원 카드의 쓰기 위임을 이어받는다', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    service.startConversation('project');
+    await service.converse('이 타입 에러 고쳐줘', true);
+    const view = await service.converseReplan('R04');
+    const plan = view.records.at(-1);
+    assert.ok(plan?.kind === 'plan' && plan.taskId === 'R04');
+    assert.equal(plan.write, true, '행을 바꿨다고 쓰기 스위치가 꺼지면 안 된다');
+  });
+
   it('스크래치에서는 쓰기 승인을 거절한다', async () => {
     isolated();
     const service = new GuiService(fake, 20, process.cwd());

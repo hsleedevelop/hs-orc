@@ -57,6 +57,7 @@ interface Bridge {
   convSend(text: string, write?: boolean): Promise<SessionView>;
   convMode(mode: ApprovalMode): Promise<SessionView>;
   convPlanAs(taskId: string): Promise<SessionView>;
+  convReplan(taskId: string): Promise<SessionView>;
   convRead(): Promise<SessionView>;
   convApprove(payload: { verify: string[]; write: boolean }): Promise<SessionView>;
   convCancel(): Promise<SessionView>;
@@ -433,10 +434,11 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
         ? h('div', { className: 'stack', style: { padding: 0, width: '100%', marginTop: 10 } },
             h('div', { className: 'row' },
               // 행을 바꾸면 이 배정을 거절하고 새 행으로 다시 받는다 — 승인은 화면에 찍힌 그 배정으로만 간다.
+              // 고른 값은 핸들러 안에서 바로 넘긴다 — controlled select 라 핸들러가 끝나면 React 가 DOM 값을 옛 행으로 되돌린다.
               h('select', {
                 value: r.taskId,
                 disabled: busy,
-                onChange: (e: { target: { value: string } }) => act(orc.convReject().then(() => orc.convPlanAs(e.target.value))),
+                onChange: (e: { target: { value: string } }) => act(orc.convReplan(e.target.value)),
               }, ...props.rows.map((row) => h('option', { key: row.id, value: row.id }, `${row.id} · ${row.task}`))),
               h('span', { className: 'hint' }, '업무 행 직접 지정')),
             h('textarea', {

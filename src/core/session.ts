@@ -274,6 +274,17 @@ export class ConversationSession {
     return this.route(last.text, taskId, suggested ? SUGGESTED_LABEL : undefined, write);
   }
 
+  /**
+   * 선 카드의 행을 바꾼다 — 그 카드를 거절하고 같은 메시지를 고른 행으로 다시 받는다. 원 카드의 쓰기 위임은 이어받는다.
+   * GUI 가 거절과 행 지정을 따로 부르면 거절 뒤에 고른 값을 다시 읽다가 되돌아간 옛 행으로 카드를 세운다.
+   */
+  async replan(taskId: string): Promise<TranscriptRecord[]> {
+    this.require('blocked', '행 바꾸기');
+    const write = this.pending?.write === true;
+    const rejected = this.reject();
+    return [...rejected, ...(await this.planAs(taskId, { write }))];
+  }
+
   private append(entry: TranscriptEntry): TranscriptRecord {
     const record = { ...entry, v: 1, at: (this.deps.now?.() ?? new Date()).toISOString(), turn: this.turn } as TranscriptRecord;
     appendRecord(this.file, record);
