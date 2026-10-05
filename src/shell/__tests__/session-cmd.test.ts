@@ -9,6 +9,8 @@ import { gitEnv } from '../../core/git-env.ts';
 import os from 'node:os';
 import path from 'node:path';
 import type { SlotExecutor } from '../../core/executor.ts';
+import type { RowClassifier } from '../../adapters/jev.ts';
+import type { ApprovalMode } from '../../data/limits.ts';
 import { Journal } from '../../core/journal.ts';
 import { lockPath } from '../../core/session-lock.ts';
 import { prepareSession, readSessionLog } from '../../core/transcript.ts';
@@ -177,5 +179,54 @@ describe('session — --run 게이트와 D-086 쓰기 행 자동 시작', () => 
     const ran = await sendToSession({ cwd: dir, ref: 'gitw', message: '이 타입 에러 고쳐줘', write: false, run: true, verify: [], execute: watch });
     assert.ok(ran.records.some((r) => r.kind === 'approval' && r.approved && r.write && r.by === 'auto'), `기록: ${ran.records.map((r) => r.kind).join(',')}`);
     assert.ok(roles.includes('primary'));
+  });
+});
+
+/** 깨끗한 git 폴더의 이름 붙은 세션 — 방식을 기록으로 굳힌다. */
+function gitFixture(name: string, mode: ApprovalMode) {
+  const f = fixture(name);
+  const git = spawnSync('git', ['init', '-q', f.dir], { env: gitEnv() });
+  assert.equal(git.status, 0, git.stderr.toString());
+  assembleSession({ kind: 'project', dir: f.dir, id: f.id, budget: restoreBudget(f.dir, f.id), journal: new Journal(), execute: fake }).setMode(mode);
+  return f;
+}
+
+describe('session — --run 은 카드의 쓰기 값을 따른다 (D-085 결정 5-a, 재검증 리뷰)', () => {
+  for (const mode of ['manual', 'auto-ask'] as const) {
+    it(`${mode} 세션: 깨끗한 git 폴더의 쓰기 행(R01) 카드를 --run 이 --write 없이도 쓰기로 승인한다`, async () => {
+      const { dir } = gitFixture(`w-${mode}`, mode);
+      const out = await sendToSession({ cwd: dir, ref: `w-${mode}`, message: '이 타입 에러 고쳐줘', write: false, run: true, verify: [], execute: fake });
+      const approval = out.records.find((r) => r.kind === 'approval');
+      assert.ok(approval?.kind === 'approval' && approval.approved && approval.write, `기록: ${JSON.stringify(approval)}`);
+    });
+  }
+
+  it('미커밋 변경이 있으면(H5) --run 은 쓰기를 켜지 않고 그 사실을 알린다', async () => {
+    const { dir } = gitFixture('w-dirty', 'manual');
+    writeFileSync(path.join(dir, 'draft.txt'), '커밋 안 한 변경');
+    const out = await sendToSession({ cwd: dir, ref: 'w-dirty', message: '이 타입 에러 고쳐줘', write: false, run: true, verify: [], execute: fake });
+    const approval = out.records.find((r) => r.kind === 'approval');
+    assert.ok(approval?.kind === 'approval' && approval.approved && !approval.write);
+    assert.match(out.lines.join('\n'), /미커밋 변경 1개가 있어 읽기 전용으로 승인했다 \(H5\)/);
+  });
+});
+
+describe('session — GENERAL 읽기 답도 --run 이 있어야 돈다 (D-085 결정 5)', () => {
+  it('auto 세션 · Jev GENERAL: --run 없으면 읽기 슬롯을 부르지 않고, --run 이면 읽기 답이 돈다', async () => {
+    const { dir, id } = fixture('general1');
+    assembleSession({ kind: 'project', dir, id, budget: restoreBudget(dir, id), journal: new Journal(), execute: fake }).setMode('auto');
+    const general: RowClassifier = () => Promise.resolve({ choice: 'GENERAL', probabilities: { GENERAL: 0.95, NONE: 0.05 }, confidence: 0.95, inputTokens: 1, outputTokens: 1, elapsedMs: 1 });
+    const labels: string[] = [];
+    const watch: SlotExecutor = (slot, prompt, options) => {
+      labels.push(slot.label);
+      return fake(slot, prompt, options);
+    };
+    const ask = '이 프로젝트의 세션 기록은 어디에 저장되나';
+    const shown = await sendToSession({ cwd: dir, ref: 'general1', message: ask, write: false, run: false, verify: [], execute: watch, classifier: general });
+    assert.ok(!labels.some((l) => l.startsWith('읽기')), `불린 슬롯: ${labels.join(',')}`);
+    assert.ok(shown.records.some((r) => r.kind === 'direct' && r.general === true && r.read === undefined));
+
+    const ran = await sendToSession({ cwd: dir, ref: 'general1', message: ask, write: false, run: true, verify: [], execute: watch, classifier: general });
+    assert.ok(ran.records.some((r) => r.kind === 'direct' && r.read?.by === 'auto'), `기록: ${ran.records.map((r) => r.kind).join(',')}`);
   });
 });

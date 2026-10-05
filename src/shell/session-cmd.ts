@@ -12,6 +12,7 @@ import type { RowClassifier } from '../adapters/jev.ts';
 import type { SlotExecutor } from '../core/executor.ts';
 import { Journal } from '../core/journal.ts';
 import type { ConversationSession } from '../core/session.ts';
+import { uncommittedFiles } from '../core/evidence-gather.ts';
 import { claimSession, releaseSession } from '../core/session-lock.ts';
 import { readSessionLog, recordedStatus, sessionStatus, type SessionSummary, type TranscriptRecord } from '../core/transcript.ts';
 import { renderRecord } from './chat.ts';
@@ -28,7 +29,9 @@ export const SESSION_USAGE = [
   '  name <id|이름> <새 이름>                            이름을 붙인다 ("" 은 지운다). 영문자로 시작, 영문·숫자·. _ -',
   '',
   'send 는 --run 이 있어야 위임(읽기 위임·읽기 답 포함)을 시작한다 — 세션 방식이 auto·auto-ask 여도 같다(auto 는 GUI·chat 몫).',
-  '--run 이 없으면 배정 카드는 거절로 남는다 — 제시만 했다. --run 이면 세션 방식대로 승인하고, 선 카드는 --run 이 승인한다(--write 면 쓰기 켬).',
+  '--run 이 없으면 배정 카드는 거절로 남는다 — 제시만 했다. --run 이면 세션 방식대로 승인하고, 선 카드는 --run 이 승인한다.',
+  '--run 은 카드의 쓰기 값을 따른다 — 쓰기 행 카드(D-086)는 --write 없이도 쓰기로 승인하되, 미커밋 변경이 있으면 읽기 전용이다.',
+  '--write 는 읽기 행 카드에도 쓰기를 켠다(미커밋 변경이 있어도 켠다 — 명시한 쓰기다).',
   '예외로 끝난 위임의 재시도 카드는 --run 이 있어도 승인하지 않는다. 다른 곳(GUI·chat)이 그 세션을 쥐고 있으면 거절한다.',
 ].join('\n');
 
@@ -169,8 +172,18 @@ export async function sendToSession(input: SendInput): Promise<SendOutcome> {
       // 자동 승인된 위임이 예외로 끝나 다시 선 카드(D-081)는 사람이 실패를 보고 다시 승인하는 자리다 — 미리 받은 --run 으로 넘기지 않는다.
       const card = session.records().findLast((r) => r.kind === 'plan');
       const retry = card?.kind === 'plan' && card.retry === true;
-      if (input.run && !retry) out.push(...(await session.approve({ verify: input.verify, write: input.write })));
-      else {
+      if (input.run && !retry) {
+        // --run 은 카드의 쓰기 값을 따른다 (D-085 결정 5-a, 전하 결정) — D-086 쓰기 행 카드는 --write 없이도 쓰기로 승인한다.
+        // 읽기 전용으로 승인하면 쓰기 행이 파일을 하나도 못 고치고 헛돈다. 미커밋 변경이 있거나 확인 못 하면(H5) 켜지 않는다 —
+        // 사람이 --write 로 정한다. git 밖 쓰기 행(H6)은 카드가 원래 읽기 전용으로 선다.
+        const cardWrite = card?.kind === 'plan' && card.write === true;
+        const dirty = cardWrite && !input.write ? uncommittedFiles(dir) : [];
+        const inherit = cardWrite && !input.write && dirty !== null && dirty.length === 0;
+        if (cardWrite && !input.write && !inherit) {
+          notes.push(`안내   쓰기 행 카드지만 ${dirty === null ? '미커밋 변경을 확인하지 못해' : `미커밋 변경 ${dirty.length}개가 있어`} 읽기 전용으로 승인했다 (H5) — 쓰려면 커밋하거나 --write 를 붙인다.`);
+        }
+        out.push(...(await session.approve({ verify: input.verify, write: input.write || inherit })));
+      } else {
         // 카드를 메모리에만 두고 나가면 기록 끝에 죽은 카드가 남는다 — 거절로 닫는다. 실행은 다시 보내며 --run 이다.
         out.push(...session.reject());
         notes.push(
