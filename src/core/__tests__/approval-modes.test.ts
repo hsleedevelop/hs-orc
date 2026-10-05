@@ -60,6 +60,9 @@ interface Opts {
   withJev?: boolean;
   conductor?: SlotExecutor;
   inGit?: boolean;
+  /** 없으면 비운다 — 기존 조건(A·H1~H4)은 쓰기 행 기본값(D-086) 없이 본다. */
+  writeRows?: readonly string[];
+  dirty?: readonly string[];
 }
 const make = (o: Opts = {}) => {
   const spy = delegateSpy();
@@ -72,6 +75,8 @@ const make = (o: Opts = {}) => {
     ...(o.withJev === false ? {} : { classifier: jev(row) }),
     ...(o.mode ? { approvalMode: o.mode } : {}),
     ...(o.inGit !== undefined ? { inGit: o.inGit } : {}),
+    writeRows: o.writeRows ?? [],
+    ...(o.dirty ? { dirtyFiles: () => o.dirty ?? [] } : {}),
   });
   return { session, spy, row, dir, budget };
 };
@@ -350,6 +355,70 @@ describe('git 아닌 폴더의 쓰기 위임 — H4 예고·스캐폴더 안내 
     assert.deepEqual(guideOf(out.find((r) => r.kind === 'direct')), [SCAFFOLD_GUIDE]);
     const git = make({ mode: 'auto-ask', inGit: true, withJev: false });
     assert.deepEqual(guideOf((await git.session.send('빈 폴더에 Expo 프로젝트 생성해줘', { write: true })).find((r) => r.kind === 'direct')), []);
+  });
+});
+
+describe('쓰기 행 기본값 — auto 는 git 폴더에서 쓰기로 바로 시작하고 위험 조짐은 미리 묻는다 (D-086)', () => {
+  const WRITE_ROWS = ['R01', 'R03'];
+  const guideOf = (r?: TranscriptRecord) => (r?.kind === 'plan' ? (r.guide ?? []) : []);
+
+  it('auto · git · 쓰기 행 · 깨끗한 폴더면 카드는 쓰기 켠 채 보이고 클릭 없이 쓰기로 시작한다', async () => {
+    isolate();
+    const m = make({ mode: 'auto', row: 'R03', writeRows: WRITE_ROWS, inGit: true });
+    const out = await m.session.send('next 앱 init 해줘');
+    assert.deepEqual(kinds(out), ['user', 'plan', 'approval', 'result', 'summary']);
+    const [, plan, approval] = out;
+    assert.ok(plan?.kind === 'plan' && plan.write === true && plan.asked?.length === 0);
+    assert.ok(approval?.kind === 'approval' && approval.by === 'auto' && approval.write === true);
+  });
+
+  it('auto-ask 는 쓰기 행도 H2 로 묻는다 — 스위치만 켜진 채 선다', async () => {
+    isolate();
+    const m = await pastFirst({ mode: 'auto-ask', row: 'R03', writeRows: WRITE_ROWS, inGit: true });
+    await m.session.send('기능 추가해줘');
+    assert.equal(m.session.state, 'blocked');
+    const plan = lastPlan(m.session);
+    assert.ok(plan?.kind === 'plan' && plan.write === true);
+    assert.deepEqual(codes(m.session), ['H2']);
+  });
+
+  it('H5 — 미커밋 변경이 있으면 auto 에서도 묻고 파일을 보인다, manual 은 안내 줄로 싣는다', async () => {
+    isolate();
+    const dirty = ['a.ts', 'b.ts', 'c.ts', 'd.ts'];
+    const m = make({ mode: 'auto', row: 'R03', writeRows: WRITE_ROWS, inGit: true, dirty });
+    await m.session.send('기능 추가해줘');
+    assert.equal(m.session.state, 'blocked');
+    assert.equal(m.spy.roles.length, 0);
+    assert.deepEqual(codes(m.session), ['H5']);
+    const plan = lastPlan(m.session);
+    assert.match(plan?.kind === 'plan' ? (plan.asked?.[0]?.text ?? '') : '', /미커밋 변경 4개.*a\.ts, b\.ts, c\.ts 외 1개/);
+
+    const manual = make({ mode: 'manual', row: 'R03', writeRows: WRITE_ROWS, inGit: true, dirty });
+    await manual.session.send('기능 추가해줘');
+    assert.match(guideOf(lastPlan(manual.session)).join('\n'), /미커밋 변경 4개/);
+  });
+
+  it('H6 — git 아닌 폴더의 쓰기 행은 읽기 전용으로 헛돌지 않게 묻고 스캐폴더 안내를 붙인다', async () => {
+    isolate();
+    const m = make({ mode: 'auto', row: 'R03', writeRows: WRITE_ROWS, inGit: false });
+    await m.session.send('next 앱 init 해줘');
+    assert.equal(m.session.state, 'blocked');
+    const plan = lastPlan(m.session);
+    assert.ok(plan?.kind === 'plan' && plan.write !== true, 'git 밖에서는 쓰기를 켜지 않는다 — codex 가 거절한다(H4)');
+    assert.deepEqual(codes(m.session), ['H6']);
+    assert.deepEqual(guideOf(plan), [SCAFFOLD_GUIDE]);
+  });
+
+  it('쓰기 행이 아니거나 스크래치면 종전대로 읽기 전용 자동 시작이다', async () => {
+    isolate();
+    const read = make({ mode: 'auto', row: 'R02', writeRows: WRITE_ROWS, inGit: true });
+    const approval = (await read.session.send('비교해줘')).find((r) => r.kind === 'approval');
+    assert.ok(approval?.kind === 'approval' && approval.by === 'auto' && approval.write === false);
+
+    const scratch = make({ mode: 'auto', row: 'R03', writeRows: WRITE_ROWS, kind: 'scratch' });
+    const out = await scratch.session.send('기능 추가해줘');
+    const auto = out.find((r) => r.kind === 'approval');
+    assert.ok(auto?.kind === 'approval' && auto.by === 'auto' && auto.write === false, '스크래치는 쓰기를 켤 수 없다 (SPEC §6.4.1)');
   });
 });
 

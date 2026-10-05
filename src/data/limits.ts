@@ -26,6 +26,8 @@ export interface Limits {
   /** Jev 로 외부 전송하는 맥락의 상한 — 대화 세션이 싣는 것보다 작다. */
   readonly jevContextTurns: number;
   readonly jevContextChars: number;
+  /** 쓰기가 본질인 행 (D-086). git project 폴더에서 이 행의 배정은 쓰기 스위치가 켜진 채 선다. */
+  readonly writeRows: readonly string[];
 }
 
 const LIMITS_PATH = path.resolve(import.meta.dirname, '..', '..', 'data', 'limits.json');
@@ -46,6 +48,9 @@ export function checkLimits(limits: Limits): Limits {
   if (limits.jevConfidenceMin > 1) throw new Error(`limits.json 의 jevConfidenceMin 은 1 이하여야 한다: ${limits.jevConfidenceMin}`);
   for (const key of ['jevContextTurns', 'jevContextChars'] as const) {
     if (!Number.isInteger(limits[key]) || limits[key] < 2) throw new Error(`limits.json 의 ${key} 는 2 이상의 정수여야 한다: ${limits[key]}`);
+  }
+  if (!Array.isArray(limits.writeRows) || !limits.writeRows.every((id) => typeof id === 'string' && /^R\d{2}$/.test(id))) {
+    throw new Error(`limits.json 의 writeRows 는 행 id(R01 꼴) 배열이어야 한다: ${JSON.stringify(limits.writeRows)}`);
   }
   return limits;
 }

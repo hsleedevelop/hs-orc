@@ -3,6 +3,7 @@
  * 판정은 Core 한 곳에만 두고 셸은 표시만 한다 (D-001·D-056).
  *
  * H — 어느 방식에서도 묻는다(`manual` 은 전부 묻는다). A — `auto-ask` 만 더 묻는다. `auto` 는 H 만 묻는다.
+ * **예외: `auto` 의 쓰기 행 · git 폴더는 H2 를 묻지 않는다 (D-086)** — 대신 미커밋 변경(H5)이 있으면 묻는다.
  * **예외: 사다리 상향 배정(D-068)의 A3 는 `auto` 에서도 묻는다** — 같은 요청을 더 무겁게 다시 돌리는 재위임이다.
  * 예외로 끝난 배정을 다시 세운 카드(D-081)도 같다.
  * 예상 비용(AA)은 모델 단위라 ③모델·④reviewer 에서만 바뀌고 ②effort 상향은 반영되지 않는다 — 문구가 그렇게 말하지 않는다.
@@ -21,7 +22,7 @@ export const A2_REMAINING_FACTOR = 2;
 /** A2 토큰 (D-064 U4): 남은 토큰이 `tokenBudget` 의 이 비율 미만이다. 배정별 예상 토큰이 없어 비율로 둔다. */
 export const A2_TOKEN_REMAINING_RATIO = 0.2;
 
-export type AskCode = 'H1' | 'H2' | 'H3' | 'H4' | 'A1' | 'A2' | 'A3' | 'A4';
+export type AskCode = 'H1' | 'H2' | 'H3' | 'H4' | 'H5' | 'H6' | 'A1' | 'A2' | 'A3' | 'A4';
 
 /** 묻는 이유 하나. `text` 는 카드에 이름으로 보인다 — 이유 없이 선 카드는 무엇을 봐야 할지 모른다. */
 export interface AskReason {
@@ -54,6 +55,29 @@ export function nonGitWriteRefusal(catalog: Engines, plan: AssignmentPlan, write
   return { code: 'H4', text: `git 아닌 폴더 · ${engine} 쓰기 → ${engine} 가 거절한다 (D-055). git init 하거나 쓰기를 끄라` };
 }
 
+/** 카드에 보일 미커밋 파일 수 상한 — 나머지는 개수로만 말한다. */
+const DIRTY_SHOWN = 3;
+
+/**
+ * H5 — 쓰기 위임인데 폴더에 미커밋 변경이 있다 (D-086). 자동 쓰기가 덮어도 git 으로 되돌릴 수 없는 유일한 것이라
+ * 어느 방식에서도 시작 전에 알린다 — 직전 위임이 남긴 변경도 여기에 걸린다.
+ */
+export function dirtyWriteRisk(write: boolean, dirty: readonly string[]): AskReason | null {
+  if (!write || dirty.length === 0) return null;
+  const shown = dirty.slice(0, DIRTY_SHOWN).join(', ');
+  const more = dirty.length > DIRTY_SHOWN ? ` 외 ${dirty.length - DIRTY_SHOWN}개` : '';
+  return { code: 'H5', text: `미커밋 변경 ${dirty.length}개가 있는 폴더에 쓰기 — 위임이 덮을 수 있다 (${shown}${more}). 커밋하거나 확인하고 승인하라` };
+}
+
+/**
+ * H6 — 쓰기 행인데 git 아닌 폴더라 쓰기 없이 선 배정이다 (D-086). 그대로 돌면 파일을 하나도 못 만들고 reviewer FAIL 로
+ * 끝난다(1005-1844-173 실측) — 헛실행을 클릭 없이 시작하지 않는다.
+ */
+export function readOnlyWriteRow(rowWrite: boolean, write: boolean, inGit: boolean): AskReason | null {
+  if (!rowWrite || write || inGit) return null;
+  return { code: 'H6', text: '쓰기 행인데 git 아닌 폴더라 읽기 전용으로 돈다 — 파일을 만들거나 고치지 못한다. 스캐폴더를 먼저 돌리거나 git init 하라' };
+}
+
 const isFailure = (r: TranscriptRecord): boolean =>
   r.kind === 'result' && (r.outcome === 'wrong' || r.outcome === 'rework' || r.verdict === 'fail');
 
@@ -73,6 +97,10 @@ export interface ApprovalInput {
   readonly retry?: boolean;
   /** 폴더가 git 작업 트리인가 (D-074). 없으면 git 으로 본다 — 모르는 것을 거절로 예고하지 않는다. */
   readonly inGit?: boolean;
+  /** 쓰기가 본질인 행이고 쓰기를 켤 수 있는 세션(project)이다 (D-086, `limits.json` writeRows). */
+  readonly rowWrite?: boolean;
+  /** 쓰기 위임이 설 때의 미커밋 파일 (`git status --porcelain`). 쓰기가 아니면 비어 있다. */
+  readonly dirty?: readonly string[];
 }
 
 /**
@@ -97,15 +125,20 @@ export function evaluateRead(input: { readonly mode: ApprovalMode; readonly slot
 }
 
 export function evaluateApproval(input: ApprovalInput): ApprovalCheck {
-  const { mode, plan, reason, write, catalog, budget, records, ladder = false, retry = false, inGit = true } = input;
+  const { mode, plan, reason, write, catalog, budget, records, ladder = false, retry = false, inGit = true, rowWrite = false, dirty = [] } = input;
   if (mode === 'manual') return { mode, asks: [], auto: false };
   const asks: AskReason[] = [];
   const primary = plan.slots.primary;
 
   if (isModelPick(reason)) asks.push({ code: 'H1', text: `모델이 고른 행 (${reason})` });
-  if (write) asks.push({ code: 'H2', text: '쓰기를 켠 위임' });
+  // auto 의 쓰기 행 · git 폴더는 묻지 않는다 (D-086) — workspace-write 가 폴더 밖을 막고 git 이 되돌린다. 남는 위험은 H5 가 알린다.
+  if (write && !(mode === 'auto' && rowWrite && inGit)) asks.push({ code: 'H2', text: '쓰기를 켠 위임' });
   const refusal = nonGitWriteRefusal(catalog, plan, write, inGit);
   if (refusal) asks.push(refusal);
+  const risk = dirtyWriteRisk(write, dirty);
+  if (risk) asks.push(risk);
+  const readOnly = readOnlyWriteRow(rowWrite, write, inGit);
+  if (readOnly) asks.push(readOnly);
   if (catalog.engines[primary.engine].readOnlyArgv === undefined) {
     asks.push({ code: 'H3', text: `${primary.engine} 는 읽기 전용이 인자로 보장되지 않는다` });
   }
