@@ -76,6 +76,22 @@ describe('대화 기록 (SPEC §6.4.1)', () => {
     assert.deepEqual(listSessions(path.join(dir, 'none'), 'project'), []);
   });
 
+  it('목록 행에 세션의 spend 합을 싣는다 — 청구액과 환산액을 섞지 않고, 내역 모르는 캐시 읽기는 하한으로 적는다', () => {
+    const dir = tmp();
+    const at = '2026-09-23T00:00:00.000Z';
+    const file = transcriptPath(dir, 'spent');
+    appendRecord(file, user(1, '안녕'));
+    appendRecord(file, { v: 1, at, turn: 1, kind: 'spend', tokens: 1000, cacheReadTokens: 600, unreported: 0,
+      charges: [{ label: 'a', usd: 0.01, source: 'actual', plan: 'subscription' }] });
+    appendRecord(file, { v: 1, at, turn: 2, kind: 'spend', tokens: 500, unreported: 0,
+      charges: [{ label: 'b', usd: 0.02, source: 'metered', plan: 'api' }] });
+    appendRecord(transcriptPath(dir, 'free'), user(1, '무료'));
+
+    const byId = new Map(listSessions(dir, 'project').map((s) => [s.id, s.usage]));
+    assert.deepEqual(byId.get('spent'), { tokens: 1500, cacheReadTokens: 600, cacheReadPartial: true, billedUsd: 0.02, convertedUsd: 0.01 });
+    assert.equal(byId.get('free'), undefined);
+  });
+
   it('기록은 세션 폴더가 아니라 홈의 프로젝트 상태에 쓴다 (D-071)', () => {
     const dir = tmp();
     const file = transcriptPath(dir, 'a');

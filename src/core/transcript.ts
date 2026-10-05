@@ -219,6 +219,49 @@ export interface SessionSummary {
   readonly kind: SessionKind;
   readonly lastAt: string;
   readonly preview: string;
+  /** 쓴 것이 있으면 그 합. 유료 호출이 없던 세션에는 없다. */
+  readonly usage?: SessionUsage;
+}
+
+/**
+ * 사이드바 한 줄용 세션 사용량 — 기록의 `spend` 줄 합이다 (D-054 재료 그대로, 기록 형식은 바꾸지 않는다). **표시 전용**이다.
+ * 미보고 횟수 같은 정확한 내역은 세션을 열면 머리의 Budget 요약이 보인다.
+ */
+export interface SessionUsage {
+  readonly tokens: number;
+  /** `tokens` 중 캐시 읽기로 알려진 몫. */
+  readonly cacheReadTokens: number;
+  /** 캐시 읽기 내역을 모르는 보고가 섞였다 — D-070 이전 `spend` 이거나 칸을 안 준 엔진. `cacheReadTokens` 는 하한이다. */
+  readonly cacheReadPartial?: true;
+  /** 청구되는 금액 (plan `api`). */
+  readonly billedUsd: number;
+  /** 구독제 슬롯의 API 환산액 — 청구되지 않는다 (D-030). */
+  readonly convertedUsd: number;
+}
+
+function sessionUsage(records: readonly TranscriptRecord[]): SessionUsage | undefined {
+  let tokens = 0;
+  let cacheRead = 0;
+  let partial = false;
+  let billed = 0;
+  let converted = 0;
+  let spent = false;
+  for (const r of records) {
+    if (r.kind !== 'spend') continue;
+    spent = true;
+    tokens += r.tokens;
+    if ((r.tokens > 0 && r.cacheReadTokens === undefined) || (r.cacheReadUnreported ?? 0) > 0) partial = true;
+    cacheRead += r.cacheReadTokens ?? 0;
+    for (const c of r.charges) if (c.plan === 'api') billed += c.usd; else converted += c.usd;
+  }
+  if (!spent) return undefined;
+  return {
+    tokens,
+    cacheReadTokens: cacheRead,
+    ...(partial ? { cacheReadPartial: true as const } : {}),
+    billedUsd: Number(billed.toFixed(6)),
+    convertedUsd: Number(converted.toFixed(6)),
+  };
 }
 
 function sessionIds(folder: string): string[] {
@@ -247,12 +290,14 @@ export function listSessions(dir: string, kind: SessionKind): SessionSummary[] {
         return { id, dir, kind, lastAt: '', preview: '(읽지 못한 기록)' };
       }
       const first = records.find((r) => r.kind === 'user');
+      const usage = sessionUsage(records);
       return {
         id,
         dir,
         kind,
         lastAt: records.at(-1)?.at ?? '',
         preview: first?.kind === 'user' ? first.text.slice(0, 60) : '',
+        ...(usage ? { usage } : {}),
       };
     })
     .sort((a, b) => b.lastAt.localeCompare(a.lastAt));
