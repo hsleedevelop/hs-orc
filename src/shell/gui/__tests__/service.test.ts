@@ -11,7 +11,10 @@ import type { SlotExecutor } from '../../../core/executor.ts';
 import { readDecisions } from '../../../core/decision-log.ts';
 import { gitEnv } from '../../../core/git-env.ts';
 import { projectStateDir } from '../../../core/project-state.ts';
-import { transcriptPath } from '../../../core/transcript.ts';
+import { appendRecord, transcriptPath } from '../../../core/transcript.ts';
+import { restoreBudget } from '../../conversation.ts';
+import { lockPath } from '../../../core/session-lock.ts';
+import { sendToSession } from '../../session-cmd.ts';
 import { GuiService, skipGitCheck } from '../service.ts';
 import { samePath } from '../worktree.ts';
 import { spawnSync } from 'node:child_process';
@@ -616,5 +619,75 @@ describe('GUI — 사다리 버튼 (D-068)', () => {
     assert.ok(card?.kind === 'plan' && card.ladder?.stage === 'evidence' && card.asked?.some((a) => a.code === 'A3'));
     const after = await service.converseApprove({ verify: [], write: false });
     assert.equal(after.ladder?.stage, 'effort');
+  });
+});
+
+describe('GUI — 세션 상태·이름·외부 조작 (D-085)', () => {
+  it('배정 카드가 선 동안 목록은 승인 대기, 거절하면 idle 이고 점유를 놓는다', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    const view = service.startConversation('scratch');
+    await service.converse('이 타입 에러 고쳐줘');
+    assert.equal(service.conversation().state, 'blocked');
+    const status = () => service.conversations().scratch.find((s) => s.id === view.id)?.status?.state;
+    assert.equal(status(), 'blocked');
+    service.converseReject();
+    assert.equal(status(), 'idle');
+    assert.equal(existsSync(lockPath(view.dir, view.id)), false);
+  });
+
+  it('다른 프로세스가 보낸 턴을 열린 화면이 다시 조립해 잇는다 — 턴 번호가 겹치지 않는다', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    service.startConversation('scratch');
+    await service.converse('넌 누구니');
+    service.converseRename('gui1');
+    await sendToSession({ cwd: process.cwd(), ref: 'gui1', message: '두 번째', write: false, run: false, verify: [], execute: fake });
+    const users = service.conversation().records.filter((r) => r.kind === 'user');
+    assert.deepEqual(users.map((r) => r.turn), [1, 2], '낡은 객체가 남으면 화면에 두 번째 턴이 없다');
+    await service.converse('세 번째');
+    const turns = service.conversation().records.filter((r) => r.kind === 'user').map((r) => r.turn);
+    assert.deepEqual(turns, [1, 2, 3]);
+    assert.equal(service.conversation().name, 'gui1');
+    assert.equal(service.conversation().external, null);
+  });
+
+  it('다른 곳이 쥐었으면 화면에 그 사실을 싣고, 보내기·방식 바꾸기를 거절한다', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    const view = service.startConversation('scratch');
+    await service.converse('넌 누구니');
+    writeFileSync(lockPath(view.dir, view.id), JSON.stringify({ pid: process.ppid, by: 'cli', state: 'working', at: '' }));
+    assert.equal(service.conversation().external?.by, 'cli');
+    await assert.rejects(service.converse('또'), /다른 곳\(cli/);
+    assert.throws(() => service.converseMode('auto'), /다른 곳\(cli/);
+  });
+
+  it('닫았다 다시 연 세션은 그 사이 다른 프로세스의 지출까지 Budget 에 싣는다 (PR #111 리뷰 2)', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    const a = service.startConversation('scratch');
+    await service.converse('넌 누구니');
+    service.startConversation('scratch');
+    // 다른 프로세스(`hs-orc session send`)가 A 에 쓴 지출.
+    appendRecord(transcriptPath(a.dir, a.id), {
+      v: 1, at: new Date().toISOString(), turn: 2, kind: 'spend', tokens: 1000, unreported: 0,
+      charges: [{ label: 'Luna', usd: 0.42, source: 'actual', plan: 'api' }],
+    });
+    const reopened = service.openConversation('scratch', a.dir, a.id);
+    assert.equal(reopened.budget, restoreBudget(a.dir, a.id, 20).summary());
+    assert.match(reopened.budget, /0\.42/);
+  });
+
+  it('이름은 다른 세션과 겹치면 거절한다', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    service.startConversation('scratch');
+    await service.converse('넌 누구니');
+    service.converseRename('alpha');
+    service.startConversation('scratch');
+    await service.converse('넌 누구니');
+    assert.throws(() => service.converseRename('alpha'), /이미 다른 세션/);
+    assert.equal(service.converseRename('beta').name, 'beta');
   });
 });
