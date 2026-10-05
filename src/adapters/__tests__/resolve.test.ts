@@ -252,10 +252,15 @@ describe('격리 (D-032 B1) — 지휘자만 사용자 전역 설정에서 뗀�
     assert.equal(buildInvocation(catalog, 'haiku', 'low', 'hi', { engine: 'claude' }).env, undefined);
   });
 
-  it('선언이 없는 엔진(codex)에 isolate 를 요청하면 격리 없이 조용히 돌리지 않고 던진다', () => {
+  it('선언이 없는 엔진(cursor)에 isolate 를 요청하면 격리 없이 조용히 돌리지 않고 던진다', () => {
     assert.throws(
-      () => buildInvocation(catalog, 'luna', 'low', 'hi', { engine: 'codex', isolate: true }),
+      () => buildInvocation(catalog, 'luna', 'low', 'hi', { engine: 'cursor', isolate: true }),
       /격리 인자 선언이 없다/,
     );
+  });
+
+  it('codex 지휘자 격리는 사용자 config.toml·rules 를 싣지 않고 세션 파일을 남기지 않는다 (D-087)', () => {
+    const argv = buildInvocation(catalog, 'sol', 'high', 'hi', { engine: 'codex', isolate: true }).argv;
+    for (const flag of ['--ignore-user-config', '--ignore-rules', '--ephemeral']) assert.ok(argv.includes(flag), flag);
   });
 });

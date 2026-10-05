@@ -98,7 +98,7 @@ describe('대화 세션 — 메시지 1건 (SPEC §6.4.2)', () => {
     assert.equal(direct.text, '저는 hs-orc 입니다.');
     assert.equal(direct.suggest, null);
     assert.equal(session.state, 'waiting_input');
-    assert.equal(budget.charges[0]?.label, '지휘자·Haiku·low');
+    assert.equal(budget.charges[0]?.label, '지휘자·Opus·high', '새 세션의 지휘자는 limits.json 기본(claude Opus·high)이다 (D-087)');
   });
 
   it('직접 답이 실패하면 사유를 남기고 입력 대기로 돌아간다 — 조용히 삼키지 않는다', async () => {
@@ -988,5 +988,100 @@ describe('대화 세션 — 엔진 진행 줄 (D-084)', () => {
     await session.send('넌 누구니');
     await session.readAnswer();
     assert.deepEqual(session.progress.map((l) => l.replace(/^── .*/, '머리')), ['머리', 'reviewer 일하는 중']);
+  });
+});
+
+describe('지휘자 선택·단계 계획 (D-087)', () => {
+  const twoSteps = JSON.stringify({ steps: [
+    { id: 's1', task: 'R01', prompt: '타입을 고친다', dependsOn: [] },
+    { id: 's2', task: 'R01', prompt: '테스트를 더한다', dependsOn: ['s1'] },
+  ] });
+  /** 지휘자 가짜: 단계 계획 요청이면 계획을, 요약이면 요약을, 아니면 직접 답을 준다. 받은 슬롯을 남긴다. */
+  const orcSpy = (plan = twoSteps) => {
+    const slots: Parameters<SlotExecutor>[0][] = [];
+    const exec: SlotExecutor = (slot, prompt) => {
+      slots.push(slot);
+      return Promise.resolve(reply(prompt.includes('위임 단계로 나눈 계획') ? plan : prompt.startsWith('아래') ? '요약 한 줄' : '답\nSUGGEST: NONE'));
+    };
+    return { exec, slots };
+  };
+
+  it('새 세션은 limits 기본(claude Opus·high·1M)으로 답하고, 바꾼 지휘자는 기록에 남아 다시 열어도 그대로다', async () => {
+    isolate();
+    const c = orcSpy();
+    const { session, dir } = make(c.exec);
+    const [, direct] = await session.send('넌 누구니');
+    assert.deepEqual([c.slots[0]?.model, c.slots[0]?.effort, c.slots[0]?.longContext], ['opus', 'high', true]);
+    assert.ok(direct?.kind === 'direct');
+    assert.equal(direct.by, '지휘자·Opus·high → claude/claude-opus-5-5[1m]');
+    assert.deepEqual(session.setOrchestrator({ model: 'sol', effort: 'xhigh' }).map((r) => r.kind), ['orchestrator']);
+    assert.deepEqual(session.setOrchestrator({ model: 'sol', effort: 'xhigh' }), [], '같은 값은 다시 기록하지 않는다');
+    await session.send('또 물어본다');
+    assert.deepEqual([c.slots[1]?.engine, c.slots[1]?.modelId, c.slots[1]?.effort], ['codex', 'gpt-6.1-sol', 'xhigh']);
+    const reopened = new ConversationSession({ matrix, catalog, kind: 'project', dir, id: '0923-1200-aaa', budget: new Budget(20, 0), journal: new Journal(), conduct: c.exec, executorFor: () => c.exec });
+    assert.deepEqual(reopened.orchestrator, { model: 'sol', effort: 'xhigh' });
+  });
+
+  it('지휘자 기록이 없는 옛 세션은 Haiku·low 로 연다 — 조용히 비싼 모델로 바꾸지 않는다', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-'));
+    appendRecord(transcriptPath(dir, '0923-1200-aaa'), { v: 1, at: '2026-09-28T00:00:00Z', turn: 1, kind: 'user', text: '넌 누구니' });
+    assert.deepEqual(make(orcSpy().exec, dir).session.orchestrator, { model: 'haiku', effort: 'low' });
+  });
+
+  it('지휘자로 쓸 수 없는 선택은 기록하지 않고 던진다', () => {
+    const { session } = make(orcSpy().exec);
+    assert.throws(() => session.setOrchestrator({ model: 'nope' as 'opus', effort: 'high' }), /모르는 지휘자 모델/);
+    assert.throws(() => session.setOrchestrator({ model: 'opus', effort: 'ultra' as 'max' }));
+    assert.ok(!session.records().some((r) => r.kind === 'orchestrator'));
+  });
+
+  it('단계 계획은 카드만 세우고, 승인하면 의존 순서대로 단계마다 두 슬롯이 돈다 — 앞 단계 결과를 다음 단계에 싣는다', async () => {
+    const log = isolate();
+    const d = delegateSpy();
+    const { session } = make(orcSpy().exec, undefined, d.exec);
+    await session.send('넌 누구니');
+    const [card] = await session.planSteps();
+    assert.ok(card?.kind === 'steps');
+    assert.deepEqual(card.steps.map((s) => [s.id, s.taskId, s.dependsOn]), [['s1', 'R01', []], ['s2', 'R01', ['s1']]]);
+    assert.equal(card.estimateUsd, Number((card.steps[0]!.estimateUsd * 2).toFixed(4)));
+    assert.equal(session.state, 'blocked');
+    assert.equal(d.calls.length, 0, '카드만 선다 — 승인 전에는 아무것도 돌지 않는다');
+    const out = await session.approve();
+    assert.deepEqual(out.map((r) => (r.kind === 'result' ? `result:${r.step}` : r.kind)), ['approval', 'result:s1', 'result:s2', 'summary']);
+    const s2 = d.calls.filter((c) => c.label !== 'Haiku')[1]?.prompt ?? '';
+    assert.match(s2, /\[앞 단계 s1 결과\]\nran:/);
+    assert.match(s2, /\[이번 단계 s2\]\n테스트를 더한다/);
+    assert.equal(session.state, 'waiting_input');
+    assert.equal(session.ladderOffer(), null, '단계 결과는 사다리를 세우지 않는다');
+    assert.equal(readDecisions(log).filter((r) => r.status === 'decided' && /단계 계획 s\d$/.test(r.note ?? '')).length, 2, '단계마다 결정 로그 1차 줄');
+  });
+
+  it('앞 단계가 실패하면 그 단계에 의존한 단계는 건너뛰고 다음 제안에 그 사실을 남긴다', async () => {
+    isolate();
+    const failing: SlotExecutor = (slot) => Promise.resolve(reply(slot.role === 'reviewer' ? 'PASS' : '', slot.role === 'reviewer'));
+    const { session } = make(orcSpy().exec, undefined, failing);
+    await session.send('넌 누구니');
+    await session.planSteps();
+    const out = await session.approve();
+    assert.deepEqual(out.filter((r) => r.kind === 'result').map((r) => r.kind === 'result' && r.step), ['s1']);
+    const summary = out.at(-1);
+    assert.ok(summary?.kind === 'summary');
+    assert.match(summary.next, /건너뜀 s2/);
+  });
+
+  it('계획을 못 읽으면 받은 답과 함께 오류를 남기고 입력 대기다 · 거절한 계획은 단계마다 미실행으로 남는다', async () => {
+    const log = isolate();
+    const bad = make(orcSpy('계획은 이렇습니다').exec);
+    await bad.session.send('넌 누구니');
+    const [error] = await bad.session.planSteps();
+    assert.ok(error?.kind === 'error');
+    assert.match(error.text, /계획 JSON 이 없다\. — 받은 답: 계획은 이렇습니다/);
+    assert.equal(bad.session.state, 'waiting_input');
+
+    const { session } = make(orcSpy().exec);
+    await session.send('넌 누구니');
+    await session.planSteps();
+    session.reject();
+    assert.deepEqual(readDecisions(log).map((r) => r.status), ['decided', 'declined', 'decided', 'declined']);
   });
 });

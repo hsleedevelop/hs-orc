@@ -3,7 +3,11 @@
  * 여기는 기록을 터미널 줄로 그리고 입력을 세션 호출로 옮긴다.
  */
 import { createInterface } from 'node:readline';
-import { APPROVAL_MODES, isApprovalMode, type ApprovalMode } from '../data/limits.ts';
+import { loadEngines } from '../data/engines.ts';
+import { EFFORTS, type Effort } from '../data/matrix.ts';
+import { APPROVAL_MODES, isApprovalMode, isOrchestratorEngine, type ApprovalMode, type OrchestratorChoice } from '../data/limits.ts';
+import { defaultOrchestrator, orchestratorOptions } from '../core/conductor.ts';
+import { slotLine } from '../core/reader.ts';
 import type { Budget } from '../core/budget.ts';
 import type { ConversationSession } from '../core/session.ts';
 import { listScratchSessions, listSessions, readSessionLog, type SessionSummary, type TranscriptRecord } from '../core/transcript.ts';
@@ -20,7 +24,7 @@ export function renderRecord(r: TranscriptRecord): string[] {
         // 읽기 답(D-083)은 지휘자가 아니라 읽기 전용 엔진 1슬롯이 낸 답이다 — reviewer 판정이 없다는 것을 같이 말한다.
         ...(r.read ? [`읽기   ${r.read.slot} · 읽기 전용 · reviewer 없음 · ${r.read.by === 'auto' ? 'Jev GENERAL 자동' : '사용자 요청'}`] : []),
         r.text,
-        `비용   ${r.cost}`,
+        `비용   ${r.cost}${r.by ? ` · ${r.by}` : ''}`,
         // 제안이 있으면 곧이어 배정 카드가 붙는다 (D-064) — 카드 이전 기록에는 붙지 않아 openingLines 가 /task 길을 알린다.
         ...(r.suggest ? [`제안   ${r.suggest} (지휘자)`] : []),
         // GENERAL 은 배정이 서지 않는다 — 고르는 행은 가장 가까운 것일 뿐이라고 말한다 (D-082).
@@ -47,11 +51,24 @@ export function renderRecord(r: TranscriptRecord): string[] {
       return [r.approved ? `승인   ${r.write ? '쓰기 켬 — primary 가 파일을 고칠 수 있다' : '읽기 전용'}` : '거절'];
     case 'mode':
       return [`방식   승인 방식 → ${r.mode}`];
+    case 'orchestrator':
+      return [`지휘   지휘자 → ${r.model}·${r.effort}`];
+    case 'steps':
+      return [
+        `계획   지휘자 단계 계획 ${r.steps.length}단계 · ${r.by} · ${r.cost}`,
+        ...r.steps.flatMap((st) => [
+          `단계   ${st.id} ${st.taskId} ${st.task}${st.dependsOn.length > 0 ? `  (← ${st.dependsOn.join(', ')})` : ''}`,
+          `       ${st.prompt.slice(0, 200)}`,
+          `       primary ${st.primary} · reviewer ${st.reviewer} · $${st.estimateUsd}`,
+        ]),
+        `비용   $${r.estimateUsd} (추정, 단계 합 · 단계는 순서대로 하나씩 돈다)`,
+        ...cutLine(r.cut),
+      ];
     case 'result':
       // 취소는 결과가 아니라 멈춤이다 (D-066) — reviewer 판정·검증이 없다. 받은 출력은 남겨 보여준다.
-      if (r.outcome === 'cancelled') return [`결과   취소됨 · 결정 ${r.decisionId}`, `증거   ${r.evidence}`, ...(r.text ? [r.text] : [])];
+      if (r.outcome === 'cancelled') return [`결과   ${r.step ? `단계 ${r.step} · ` : ''}취소됨 · 결정 ${r.decisionId}`, `증거   ${r.evidence}`, ...(r.text ? [r.text] : [])];
       return [
-        `결과   ${r.outcome} · reviewer ${r.verdict.toUpperCase()} · 결정 ${r.decisionId}`,
+        `결과   ${r.step ? `단계 ${r.step} · ` : ''}${r.outcome} · reviewer ${r.verdict.toUpperCase()} · 결정 ${r.decisionId}`,
         `증거   ${r.evidence}`,
         r.text,
         ...(r.review ? [`검증   ${r.review.slice(0, 600)}`] : []),
@@ -69,11 +86,27 @@ export function renderRecord(r: TranscriptRecord): string[] {
 }
 
 export const CHAT_HELP = [
-  '명령   메시지를 그냥 쓰면 보낸다 · /write <문장> 쓰기 위임으로 보낸다 · /task Rxx 마지막 메시지를 그 행으로 배정 · /read 마지막 메시지를 읽기 전용 1슬롯이 코드를 읽고 답한다(카드 없이 바로) · /ladder 실패·미검증 뒤 사다리 다음 단계로 다시 위임(카드만 선다) · /mode [방식] · /help · /quit (Ctrl-D)',
+  '명령   메시지를 그냥 쓰면 보낸다 · /write <문장> 쓰기 위임으로 보낸다 · /task Rxx 마지막 메시지를 그 행으로 배정 · /read 마지막 메시지를 읽기 전용 1슬롯이 코드를 읽고 답한다(카드 없이 바로) · /ladder 실패·미검증 뒤 사다리 다음 단계로 다시 위임(카드만 선다) · /steps 마지막 메시지를 지휘자가 위임 단계로 나눈 계획으로 세운다(승인하면 단계마다 차례로 위임) · /mode [방식] · /orc [claude|codex|모델] [effort] 지휘자 바꾸기 · /help · /quit (Ctrl-D)',
   '방식   /mode manual 매번 묻는다 · auto-ask 쓰기·모델이 고른 행·비싼 조합·상한 근접·첫 위임만 묻는다 · auto 쓰기·모델이 고른 행만 묻는다 — 자동은 이 메시지의 배정 1건만 시작한다',
   '승인   배정이 뜨면 y 읽기 전용 · w 쓰기 · n 거절 · a 지휘자에게 묻기 · 문장을 쓰면 거절하고 그 메시지를 보낸다',
   '취소   위임이 도는 중 Ctrl-C 한 번 — 그 위임만 멈추고 세션은 남는다 · 한 번 더 누르면 나간다',
 ].join('\n');
+
+/**
+ * `/orc` 인자 → 지휘자 선택 (D-087). `claude`·`codex` 는 그 벤더의 기본, 모델 키는 그 모델(effort 는 지금 값), effort 만 주면 effort 만 바꾼다.
+ * 모르는 낱말은 던진다 — 조용히 무시하면 바꾼 줄 안다.
+ */
+export function parseOrchestratorArgs(current: OrchestratorChoice, words: readonly string[]): OrchestratorChoice {
+  const models = orchestratorOptions(loadEngines()).flatMap((o) => o.models.map((m) => m.model as string));
+  let choice = current;
+  for (const word of words) {
+    if (isOrchestratorEngine(word)) choice = defaultOrchestrator(word);
+    else if (models.includes(word)) choice = { ...choice, model: word as OrchestratorChoice['model'] };
+    else if ((EFFORTS as readonly string[]).includes(word)) choice = { ...choice, effort: word as Effort };
+    else throw new Error(`모르는 지휘자 인자다: ${word} — claude·codex · 모델(${models.join('·')}) · effort(${EFFORTS.join('·')})`);
+  }
+  return choice;
+}
 
 export interface ChatIO {
   readonly input: NodeJS.ReadableStream;
@@ -103,7 +136,7 @@ export async function runChat(
   });
   const ask = (): void => {
     if (closed) return;
-    if (session.state === 'blocked') say('승인?  y 읽기 전용 · w 쓰기 · n 거절 · a 지휘자에게 묻기');
+    if (session.state === 'blocked') say(session.stepsPending ? '승인?  y 읽기 전용 · w 쓰기 · n 거절 — 단계마다 차례로 위임한다' : '승인?  y 읽기 전용 · w 쓰기 · n 거절 · a 지휘자에게 묻기');
     rl.setPrompt('> ');
     rl.prompt();
   };
@@ -128,6 +161,17 @@ export async function runChat(
             else show(out);
             if (session.state === 'blocked') say('안내   지금 선 카드는 자동 승인하지 않는다 — 다음 배정부터 적용된다.');
           } else say(`모르는 방식이다: ${arg} — ${APPROVAL_MODES.join(' · ')}`);
+        } else if (line === '/orc' || line.startsWith('/orc ')) {
+          const words = line.slice('/orc'.length).trim().split(/\s+/).filter(Boolean);
+          if (words.length === 0) say(`지휘   ${slotLine(session.conductor())} — /orc claude·codex 는 그 벤더 기본, /orc <모델> [effort]`);
+          else {
+            const out = session.setOrchestrator(parseOrchestratorArgs(session.orchestrator, words));
+            if (out.length === 0) say(`지휘   이미 ${slotLine(session.conductor())}`);
+            else say(`지휘   → ${slotLine(session.conductor())}`);
+          }
+        } else if (line === '/steps') {
+          // 카드만 세운다 — 시작은 y·w 로 따로 한다 (D-087). 배정 카드가 선 채 부르면 그 배정은 거절로 남는다.
+          show(await session.planSteps());
         } else if (line === '/ladder') {
           // 카드만 세운다 — 시작은 y·w 로 따로 한다 (D-068). 블로킹 중에는 아래 blocked 분기가 먼저 받는다.
           if (session.state === 'blocked') say('이미 선 배정이 있다 — 먼저 y·w·n·a 로 답한다.');
@@ -139,7 +183,7 @@ export async function runChat(
             show(await session.approve({ verify: options.verify, write: line === 'w' }));
             say(`누적   ${budget.summary()}`);
           } else if (line === 'n') show(session.reject());
-          else if (line === 'a') show(await session.askConductor());
+          else if (line === 'a' && !session.stepsPending) show(await session.askConductor());
           // 공백이 든 문장은 새 메시지다 — 배정은 거절로 남는다 (D-064). 한 단어(오타 y·yes 등)는 유료 호출로 새지 않게 되묻는다.
           else if (/\s/.test(line) && !line.startsWith('/')) show(await session.send(line));
           else say('y·w·n·a 중 하나로 답한다 (새 메시지는 문장으로 쓴다).');
@@ -228,6 +272,7 @@ export function openingLines(session: ConversationSession, budget: Budget, tail 
   return [
     `세션   ${session.kind} ${session.id} · ${session.dir}`,
     `방식   승인 방식 ${session.mode}`,
+    `지휘   ${slotLine(session.conductor())}`,
     `누적   ${budget.summary()}`,
     ...(broken > 0 ? [`경고   기록에 깨진 줄 ${broken}개 — 건너뛰고 보여준다`] : []),
     ...(records.length > tail ? [`       (앞 기록 ${records.length - tail}개 생략)`] : []),

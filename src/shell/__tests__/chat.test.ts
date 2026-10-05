@@ -12,7 +12,7 @@ import { Journal } from '../../core/journal.ts';
 import { appendRecord, prepareSession, transcriptPath, type TranscriptRecord } from '../../core/transcript.ts';
 import { assembleSession, restoreBudget } from '../conversation.ts';
 import type { ApprovalMode } from '../../data/limits.ts';
-import { findSession, interruptGuard, openingLines, parseChatArgs, renderRecord, runChat } from '../chat.ts';
+import { findSession, interruptGuard, openingLines, parseChatArgs, parseOrchestratorArgs, renderRecord, runChat } from '../chat.ts';
 
 const at = { v: 1 as const, at: '2026-09-26T00:00:00.000Z', turn: 1 };
 
@@ -64,6 +64,26 @@ describe('chat — 기록 렌더', () => {
     assert.ok(lines.includes('압축   엔진이 앞 맥락을 요약으로 바꿨다 (manual)'));
   });
 
+  it('단계 계획은 단계마다 행·의존·두 슬롯을 찍고, 단계 결과는 어느 단계인지 앞에 붙인다 (D-087)', () => {
+    const lines = renderRecord({
+      ...at, kind: 'steps', title: 't', estimateUsd: 0.78, by: '지휘자·Opus·high → claude/claude-opus-5-5[1m]', cost: '$0.0200 actual',
+      steps: [{ id: 's1', taskId: 'R03', task: '원인 분석', prompt: '원인을 찾는다', dependsOn: [], primary: 'p', reviewer: 'r', estimateUsd: 0.39 }, { id: 's2', taskId: 'R01', task: '짧은 구현', prompt: '고친다', dependsOn: ['s1'], primary: 'p', reviewer: 'r', estimateUsd: 0.39 }],
+    });
+    assert.equal(lines[0], '계획   지휘자 단계 계획 2단계 · 지휘자·Opus·high → claude/claude-opus-5-5[1m] · $0.0200 actual');
+    assert.ok(lines.includes('단계   s2 R01 짧은 구현  (← s1)'));
+    const result = renderRecord({ ...at, kind: 'result', outcome: 'ok', verdict: 'pass', text: '', review: '', evidence: 'e', decisionId: 'd', step: 's2' });
+    assert.equal(result[0], '결과   단계 s2 · ok · reviewer PASS · 결정 d');
+  });
+
+  it('/orc 인자: 벤더 이름은 그 벤더 기본, 모델·effort 는 그 칸만 바꾸고, 모르는 낱말은 던진다 (D-087)', () => {
+    const now = { model: 'opus', effort: 'high' } as const;
+    assert.deepEqual(parseOrchestratorArgs(now, ['codex']), { model: 'sol', effort: 'high' });
+    assert.deepEqual(parseOrchestratorArgs(now, ['sonnet']), { model: 'sonnet', effort: 'high' });
+    assert.deepEqual(parseOrchestratorArgs(now, ['max']), { model: 'opus', effort: 'max' });
+    assert.deepEqual(parseOrchestratorArgs(now, ['codex', 'xhigh']), { model: 'sol', effort: 'xhigh' });
+    assert.throws(() => parseOrchestratorArgs(now, ['gpt']), /모르는 지휘자 인자/);
+  });
+
   it('spend 줄은 화면에 찍지 않는다 (D-054)', () => {
     assert.deepEqual(renderRecord({ ...at, kind: 'spend', charges: [], tokens: 0, unreported: 0 } as unknown as TranscriptRecord), []);
   });
@@ -105,7 +125,7 @@ describe('chat — 입력 루프', () => {
   it('잡담은 지휘자가 직접 답한다', async () => {
     const { out, session } = await drive(['넌 누구니']);
     assert.match(out, /나 {5}넌 누구니/);
-    assert.deepEqual(session.records().filter((r) => r.kind !== 'spend' && r.kind !== 'mode').map((r) => r.kind), ['user', 'direct']);
+    assert.deepEqual(session.records().filter((r) => r.kind !== 'spend' && r.kind !== 'mode' && r.kind !== 'orchestrator').map((r) => r.kind), ['user', 'direct']);
   });
 
   it('배정이 뜨면 y 로 읽기 전용 위임하고 누적을 찍는다', async () => {
@@ -144,7 +164,7 @@ describe('chat — 입력 루프', () => {
 
   it('/read 는 마지막 메시지를 읽기 전용 1슬롯이 답한다 — 카드·승인 없이, 지휘자 아닌 답이라고 찍는다 (D-083)', async () => {
     const { out, calls, session } = await drive(['넌 누구니', '/read']);
-    assert.deepEqual(calls, ['지휘자·Haiku', '읽기·Luna']);
+    assert.deepEqual(calls, ['지휘자·Opus', '읽기·Luna']);
     assert.match(out, /읽기 {3}읽기·Luna·medium → codex\/\S+ · 읽기 전용 · reviewer 없음 · 사용자 요청/);
     assert.ok(!session.records().some((r) => r.kind === 'plan' || r.kind === 'approval'));
   });
@@ -174,13 +194,13 @@ describe('chat — 입력 루프', () => {
     const { out, session } = await drive(['넌 누구니', 'y'], 'R01');
     assert.match(out, /제안 {3}R01 \(지휘자\)/);
     assert.match(out, /업무 {3}R01 .*\(지휘자 제안 R01\)/);
-    assert.deepEqual(session.records().filter((r) => r.kind !== 'spend' && r.kind !== 'mode').map((r) => r.kind), ['user', 'direct', 'plan', 'approval', 'result', 'summary']);
+    assert.deepEqual(session.records().filter((r) => r.kind !== 'spend' && r.kind !== 'mode' && r.kind !== 'orchestrator').map((r) => r.kind), ['user', 'direct', 'plan', 'approval', 'result', 'summary']);
   });
 
   it('카드가 선 채 공백이 든 문장을 쓰면 거절하고 새 메시지로 보낸다 — 한 단어는 되묻는다', async () => {
     const { out, session } = await drive(['넌 누구니', 'yes', '아니 그냥 얘기하자'], 'R01');
     assert.match(out, /y·w·n·a 중 하나로 답한다/);
-    const kinds = session.records().filter((r) => r.kind !== 'spend' && r.kind !== 'mode').map((r) => r.kind);
+    const kinds = session.records().filter((r) => r.kind !== 'spend' && r.kind !== 'mode' && r.kind !== 'orchestrator').map((r) => r.kind);
     assert.deepEqual(kinds, ['user', 'direct', 'plan', 'approval', 'user', 'direct', 'plan']);
     assert.ok(session.records().some((r) => r.kind === 'approval' && !r.approved));
   });
@@ -299,7 +319,7 @@ describe('chat — Ctrl-C', () => {
     assert.match(out, /결과 {3}취소됨 · 결정 /);
     assert.match(out, /증거 {3}취소됨 — primary 실행 중/);
     assert.deepEqual(roles.slice(0, 1), ['primary'], '취소한 위임은 reviewer 를 띄우지 않는다');
-    const kinds = session.records().filter((r) => r.kind !== 'spend' && r.kind !== 'mode').map((r) => r.kind);
+    const kinds = session.records().filter((r) => r.kind !== 'spend' && r.kind !== 'mode' && r.kind !== 'orchestrator').map((r) => r.kind);
     assert.deepEqual(kinds, ['user', 'plan', 'approval', 'result', 'user', 'plan', 'approval', 'result', 'summary'], '취소 뒤 새 위임이 돈다');
   });
 
@@ -315,7 +335,7 @@ describe('chat — 예외 재시도 카드 (D-081)', () => {
     assert.match(out, /오류 {3}위임이 끝나지 못했다: spawn 실패/);
     assert.match(out, /재시도 — 승인한 같은 배정이 예외로 끝나 같은 계획으로 다시 세운 카드다/);
     assert.equal(calls.filter((c) => c === 'Luna').length, 2);
-    const kinds = session.records().filter((r) => r.kind !== 'spend' && r.kind !== 'mode').map((r) => r.kind);
+    const kinds = session.records().filter((r) => r.kind !== 'spend' && r.kind !== 'mode' && r.kind !== 'orchestrator').map((r) => r.kind);
     assert.deepEqual(kinds, ['user', 'plan', 'approval', 'error', 'plan', 'approval', 'result', 'summary']);
   });
 });

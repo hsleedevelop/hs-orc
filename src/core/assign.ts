@@ -23,6 +23,8 @@ export interface ResolvedSlot {
   readonly role: SlotRole;
   /** 이 슬롯의 비용이 **청구되는가** (D-030). 슬롯이 들고 다녀야 Budget 이 카탈로그를 몰라도 된다. */
   readonly plan: BillingPlan;
+  /** 1M 컨텍스트 창으로 띄운다 (D-087). 지휘자 슬롯에만 있다 — 위임 슬롯은 엔진 기본 창이다. */
+  readonly longContext?: true;
 }
 
 export interface CrossVendorPair {

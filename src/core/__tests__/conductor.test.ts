@@ -2,19 +2,21 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadMatrix } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
-import { buildDirectPrompt, buildSummaryPrompt, conductorSlot, directAnswer, nextSuggestion, parseSuggest } from '../conductor.ts';
+import { LEGACY_ORCHESTRATOR, StepsError, buildDirectPrompt, buildSummaryPrompt, conductorSlot, defaultOrchestrator, directAnswer, nextSuggestion, orchestratorOptions, parseSteps, parseSuggest } from '../conductor.ts';
+import { buildInvocation } from '../../adapters/resolve.ts';
 import type { SlotExecutor } from '../executor.ts';
 
 const matrix = loadMatrix();
 const catalog = loadEngines();
 
 describe('지휘자 — 직접 답 (SPEC §6.4.2)', () => {
-  it('Haiku·low 이고, 쓰기를 줄 수 없는 reviewer 자리로 뜬다', () => {
-    const slot = conductorSlot(catalog);
+  it('옛 지휘자는 Haiku·low 이고, 쓰기를 줄 수 없는 reviewer 자리로 뜬다', () => {
+    const slot = conductorSlot(catalog, LEGACY_ORCHESTRATOR);
     assert.equal(slot.model, 'haiku');
     assert.equal(slot.effort, 'low');
     assert.equal(slot.role, 'reviewer');
     assert.equal(slot.label, '지휘자·Haiku');
+    assert.equal(slot.longContext, undefined, 'Haiku 에는 1M 선언이 없다');
   });
 
   it('마지막 줄의 SUGGEST 만 제안으로 읽고 본문에서 뗀다', () => {
@@ -59,10 +61,53 @@ describe('지휘자 — 직접 답 (SPEC §6.4.2)', () => {
       prompts.push(prompt);
       return Promise.resolve({ ok: true, text: '안녕하세요.\nSUGGEST: NONE', rawStdout: '', rawStderr: '', durationMs: 1 });
     };
-    const answer = await directAnswer(conduct, conductorSlot(catalog), matrix, '', '넌 누구니');
+    const answer = await directAnswer(conduct, conductorSlot(catalog, LEGACY_ORCHESTRATOR), matrix, '', '넌 누구니');
     assert.equal(prompts.length, 1);
     assert.equal(answer.body, '안녕하세요.');
     assert.equal(answer.suggest, null);
+  });
+});
+
+describe('지휘자 모델 선택 (D-087)', () => {
+  it('기본은 벤더마다 그 CLI 의 기본 모델·high 이고 1M 창으로 뜬다 — claude 는 모델 id 끝, codex 는 설정 인자', () => {
+    const claude = conductorSlot(catalog, defaultOrchestrator('claude'));
+    assert.deepEqual([claude.engine, claude.modelId, claude.effort, claude.role, claude.longContext], ['claude', 'claude-opus-5-5', 'high', 'reviewer', true]);
+    assert.equal(buildInvocation(catalog, claude.model, claude.effort, 'X', { isolate: true, longContext: true }).modelId, 'claude-opus-5-5[1m]');
+    const codex = conductorSlot(catalog, defaultOrchestrator('codex'));
+    assert.deepEqual([codex.engine, codex.modelId, codex.effort, codex.role, codex.longContext], ['codex', 'gpt-6.1-sol', 'high', 'reviewer', true]);
+    const argv = buildInvocation(catalog, codex.model, codex.effort, 'X', { isolate: true, longContext: true }).argv;
+    assert.ok(argv.join(' ').includes('-c model_context_window=1000000'));
+    assert.ok(argv.includes('--ignore-user-config'), 'codex 지휘자도 사용자 설정을 싣지 않는다 (D-032 B1)');
+    assert.equal(defaultOrchestrator().model, 'opus', '시작 엔진은 claude 다');
+  });
+
+  it('1M 선언이 없는 모델에 1M 을 요청하면 기본 창으로 바꾸지 않고 던진다', () => {
+    assert.throws(() => buildInvocation(catalog, 'haiku', 'low', 'X', { longContext: true }), /1M 창 선언이 없다/);
+  });
+
+  it('선택지는 엔진마다 그 엔진이 기본인 모델이고, 모르는 모델은 지휘자로 받지 않는다', () => {
+    const options = orchestratorOptions(catalog);
+    assert.deepEqual(options.map((o) => o.engine), ['claude', 'codex']);
+    assert.ok(options[0]?.models.some((m) => m.model === 'opus' && m.longContext));
+    assert.ok(options[1]?.models.every((m) => catalog.models[m.model].defaultEngine === 'codex'));
+    assert.throws(() => conductorSlot(catalog, { model: 'nope' as 'opus', effort: 'high' }), /모르는 지휘자 모델/);
+  });
+});
+
+describe('지휘자 — 단계 계획 (D-087)', () => {
+  it('행·의존을 검사해 단계마다 매트릭스 배정을 붙인다 — 펜스를 둘러도 읽는다', () => {
+    const nodes = parseSteps(matrix, catalog, '```json\n{"steps":[{"id":"s1","task":"R03","prompt":"원인 찾기","dependsOn":[]},{"id":"s2","task":"R01","prompt":"고치기","dependsOn":["s1"]}]}\n```', 24);
+    assert.deepEqual(nodes.map((n) => [n.id, n.plan.assignment.id, n.dependsOn]), [['s1', 'R03', []], ['s2', 'R01', ['s1']]]);
+    assert.ok(nodes.every((n) => n.onFailure === 'skip-dependents'));
+  });
+
+  it('없는 행·순환·모양 틀림·상한 초과는 계획으로 받지 않는다', () => {
+    const bad = (steps: unknown, max = 24) => () => parseSteps(matrix, catalog, JSON.stringify({ steps }), max);
+    assert.throws(bad([{ id: 's1', task: 'R99', prompt: 'x' }]), StepsError);
+    assert.throws(bad([{ id: 'a', task: 'R01', prompt: 'x', dependsOn: ['b'] }, { id: 'b', task: 'R01', prompt: 'y', dependsOn: ['a'] }]), /순환/);
+    assert.throws(bad([{ id: 's1', task: 'R01', prompt: 'x', dependsOn: 's0' }]), /모양이 틀렸다/);
+    assert.throws(bad([{ id: 's1', task: 'R01', prompt: 'x' }, { id: 's2', task: 'R01', prompt: 'y' }], 1), /상한/);
+    assert.throws(() => parseSteps(matrix, catalog, '계획은 이렇습니다', 24), /JSON 이 없다/);
   });
 });
 

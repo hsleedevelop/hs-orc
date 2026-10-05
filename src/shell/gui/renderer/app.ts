@@ -44,17 +44,23 @@ const MODES: { id: ApprovalMode; label: string; hint: string }[] = [
   { id: 'auto', label: 'auto', hint: '쓰기·모델이 고른 행만 묻는다' },
 ];
 interface Cut { turns: number; chars: number }
+interface Step { id: string; taskId: string; task: string; prompt: string; dependsOn: string[]; primary: string; reviewer: string; estimateUsd: number }
+interface OrchestratorChoice { model: string; effort: string }
+// `conductor.ts` 의 OrchestratorOption 과 같은 모양 — 렌더러는 node 모듈을 못 싣는다.
+interface OrchestratorOption { engine: string; defaults: OrchestratorChoice; models: { model: string; label: string; efforts: string[]; longContext: boolean }[] }
 interface Compaction { trigger: string; preTokens?: number; postTokens?: number }
 type Rec =
   | { kind: 'user'; turn: number; text: string }
-  | { kind: 'direct'; turn: number; text: string; suggest: string | null; cost: string; notes: string[]; guide?: string[]; general?: true; read?: { slot: string; by: 'auto' | 'user' }; cut?: Cut }
+  | { kind: 'direct'; turn: number; text: string; suggest: string | null; cost: string; notes: string[]; guide?: string[]; general?: true; read?: { slot: string; by: 'auto' | 'user' }; cut?: Cut; by?: string }
   | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; reviewer2?: string; estimateUsd: number; notes: string[]; guide?: string[]; mode?: ApprovalMode; asked?: { code: string; text: string }[]; write?: boolean; ladder?: { stage: string; label: string; from: string; changes: string[] }; retry?: true }
   | { kind: 'approval'; turn: number; approved: boolean; write: boolean; by?: 'user' | 'auto'; mode?: ApprovalMode }
   | { kind: 'mode'; turn: number; mode: ApprovalMode }
-  | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string; cut?: Cut; compacted?: Compaction[] }
-  | { kind: 'summary'; turn: number; text: string; next: string }
+  | { kind: 'orchestrator'; turn: number; model: string; effort: string }
+  | { kind: 'steps'; turn: number; title: string; steps: Step[]; estimateUsd: number; by: string; cost: string; cut?: Cut }
+  | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string; cut?: Cut; compacted?: Compaction[]; step?: string }
+  | { kind: 'summary'; turn: number; text: string; next: string; by?: string }
   | { kind: 'error'; turn: number; text: string };
-interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; progress: string[]; mode: ApprovalMode; ladder: { stage: string; label: string; changes: string[] } | null }
+interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; progress: string[]; mode: ApprovalMode; ladder: { stage: string; label: string; changes: string[] } | null; orchestrator: OrchestratorChoice & { engine: string; line: string }; stepsPending: boolean }
 interface SessionUsage { tokens: number; cacheReadTokens: number; cacheReadPartial?: true; billedUsd: number; convertedUsd: number }
 interface SessionSummary { id: string; dir: string; kind: SessionKind; lastAt: string; preview: string; usage?: SessionUsage }
 interface ConversationTree { projects: { project: ProjectInfo; sessions: SessionSummary[] }[]; scratch: SessionSummary[] }
@@ -66,6 +72,9 @@ interface Bridge {
   convView(): Promise<SessionView>;
   convSend(text: string, write?: boolean): Promise<SessionView>;
   convMode(mode: ApprovalMode): Promise<SessionView>;
+  convOrchestrator(choice: OrchestratorChoice): Promise<SessionView>;
+  convSteps(): Promise<SessionView>;
+  orchestrators(): Promise<OrchestratorOption[]>;
   convPlanAs(taskId: string): Promise<SessionView>;
   convReplan(taskId: string): Promise<SessionView>;
   convRead(): Promise<SessionView>;
@@ -410,6 +419,36 @@ function Sidebar(props: {
       ]);
 }
 
+/** 세션 머리의 지휘자 선택 셋 — 엔진 · 모델 · effort (D-087). 선택지가 아직 없으면 지금 값 한 줄만 보인다. */
+function orchestratorSelects(
+  options: OrchestratorOption[],
+  current: OrchestratorChoice & { engine: string; line: string },
+  busy: boolean,
+  pick: (choice: OrchestratorChoice) => void,
+): ReactNode[] {
+  const engine = options.find((o) => o.engine === current.engine);
+  if (!engine) return [h('span', { key: 'orc', className: 'dim mono', title: current.line }, `지휘 · ${current.model}·${current.effort}`)];
+  const model = engine.models.find((m) => m.model === current.model);
+  return [
+    h('select', {
+      key: 'orc-engine', value: current.engine, disabled: busy, title: `지휘자 · ${current.line}`,
+      onChange: (e: { target: { value: string } }) => { const o = options.find((x) => x.engine === e.target.value); if (o) pick(o.defaults); },
+    }, ...options.map((o) => h('option', { key: o.engine, value: o.engine }, `지휘 · ${o.engine}`))),
+    h('select', {
+      key: 'orc-model', value: current.model, disabled: busy, title: current.line,
+      onChange: (e: { target: { value: string } }) => {
+        const m = engine.models.find((x) => x.model === e.target.value);
+        // 지금 effort 를 그 모델이 받으면 유지하고, 못 받으면 그 모델의 마지막(가장 높은) effort 로 간다.
+        if (m) pick({ model: m.model, effort: m.efforts.includes(current.effort) ? current.effort : (m.efforts.at(-1) ?? current.effort) });
+      },
+    }, ...engine.models.map((m) => h('option', { key: m.model, value: m.model }, `${m.label}${m.longContext ? ' [1m]' : ''}`))),
+    h('select', {
+      key: 'orc-effort', value: current.effort, disabled: busy, title: current.line,
+      onChange: (e: { target: { value: string } }) => pick({ model: current.model, effort: e.target.value }),
+    }, ...(model?.efforts ?? [current.effort]).map((x) => h('option', { key: x, value: x }, x))),
+  ];
+}
+
 function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v: SessionView) => void; onClose: () => void }): ReactElement {
   const { onChange } = props;
   // 요청이 도는 동안 받은 뷰. 자동 승인 위임은 send 하나가 카드·승인·실행·결과를 모두 지나므로 (D-064 결정 7) 끝나기 전에는 카드도 취소 버튼(D-066)도 없다.
@@ -424,6 +463,9 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
   // 제안 없는 직접 답 아래의 행 선택 (D-079). 빈 값 = 아직 안 골랐다.
   const [pick, setPick] = useState('');
   const [terminal, setTerminal] = useState(() => localStorage.getItem(TERMINAL_KEY) ?? 'default');
+  // 지휘자 선택지 (D-087) — 카탈로그라 세션 동안 바뀌지 않는다.
+  const [orcOptions, setOrcOptions] = useState<OrchestratorOption[]>([]);
+  useEffect(() => { orc.orchestrators().then(setOrcOptions, (e: unknown) => setError(why(e))); }, []);
   const [busy, setBusy] = useState(false);
   // 승인한 위임이 도는 동안의 화면 쪽 표시 (D-066). 요청이 안 끝났으니 `view.cancellable` 은 아직 갱신 전이다.
   const [delegation, setDelegation] = useState<'' | 'running' | 'cancelling'>('');
@@ -459,7 +501,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     act(orc.convSend(t, sendWrite && view.kind !== 'scratch'));
   };
 
-  const last = view.records.at(-1);
+  // 설정 줄(승인 방식·지휘자)은 건너뛴다 — 지휘자를 바꾸자마자 마지막 답·카드의 버튼이 사라지면 바꾼 지휘자로 할 일이 없다 (D-087).
+  const last = view.records.findLast((r) => r.kind !== 'mode' && r.kind !== 'orchestrator');
   // 배정 카드가 선 채 보내면 그 배정은 거절로 남는다 (D-064) — 제안 카드가 대화를 막지 않는다.
   const canType = (view.state === 'waiting_input' || view.state === 'blocked') && !busy;
 
@@ -516,7 +559,53 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
               }, busy ? '실행 중…' : `승인하고 실행 · ${r.reviewer2 ? '세' : '두'} 슬롯${(write ?? r.write === true) && view.kind !== 'scratch' ? ' · 쓰기 켜짐' : ''}`),
               h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convReject()) }, '거절'),
               // 규칙이 대화성 후속을 작업 행으로 잡았을 때 — 거절하고 같은 메시지를 지휘자가 답한다 (D-038).
-              h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convAsk()) }, '지휘자에게 묻기')))
+              h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convAsk()) }, '지휘자에게 묻기'),
+              // 한 행으로 안 끝날 요청이면 — 이 배정을 거절로 남기고 지휘자가 단계로 나눈다 (D-087).
+              h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convSteps()) }, '단계로 나눠 계획')))
+        : null);
+
+  // 지휘자가 마지막 메시지를 위임 단계로 나눈다 (D-087). 카드만 선다 — 시작은 그 카드의 승인이다.
+  const stepsButton = (): ReactNode =>
+    h('div', { className: 'row', style: { whiteSpace: 'normal', marginTop: 6 } },
+      h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convSteps()) }, '단계로 나눠 계획'),
+      h('span', { className: 'hint' }, `${view.orchestrator.line} 가 이 요청을 위임 단계로 나눈다 — 승인하면 단계마다 차례로 위임`));
+
+  const stepsCard = (r: Extract<Rec, { kind: 'steps' }>, i: number, active: boolean): ReactNode =>
+    h('section', { key: i, className: 'card' },
+      h('span', { className: 'label' }, `단계 계획 · ${r.steps.length}단계`),
+      h('div', { className: 'hint' }, `계획 · ${r.by} · ${r.cost}`),
+      ...r.steps.flatMap((st, j) => [
+        planLine(`분류 ${st.id} · ${st.taskId} ${st.task}${st.dependsOn.length > 0 ? `  (← ${st.dependsOn.join(', ')})` : ''}`, j * 4),
+        h('div', { key: j * 4 + 1, className: 'hint', style: { whiteSpace: 'pre-wrap' } }, st.prompt),
+        planLine(`primary  ${st.primary}`, j * 4 + 2),
+        planLine(`reviewer ${st.reviewer}  · $${st.estimateUsd}`, j * 4 + 3),
+      ]),
+      planLine(`비용 예상 $${r.estimateUsd} · 단계 합 · 순서대로 하나씩 돈다`, r.steps.length * 4),
+      ...cutLine(r.cut).map((l, j) => h('div', { key: `c${j}`, className: 'hint' }, l)),
+      active
+        ? h('div', { className: 'stack', style: { padding: 0, width: '100%', marginTop: 10 } },
+            h('div', { className: 'hint warn' }, '묻는 이유: 행을 모델(지휘자)이 골랐다 — 어느 방식에서도 사람이 승인한다'),
+            h('textarea', {
+              className: 'code', rows: 2, value: verify, placeholder: '검증 명령 · 단계마다 돈다 · 한 줄에 하나 (예: npm test)',
+              onChange: (e: { target: { value: string } }) => setVerify(e.target.value),
+            }),
+            h('label', { className: 'toggle' },
+              h('input', {
+                type: 'checkbox', checked: (write ?? false) && view.kind !== 'scratch', disabled: view.kind === 'scratch',
+                onChange: (e: { target: { checked: boolean } }) => setWrite(e.target.checked),
+              }),
+              h('span', { className: 'track' }),
+              h('span', { className: 'text' },
+                view.kind === 'scratch' ? '스크래치는 쓰기를 켤 수 없다'
+                : write ? h('b', null, '단계마다 primary 슬롯이 이 폴더의 파일을 고칠 수 있다')
+                : 'primary 슬롯 파일 쓰기 (--write)',
+                h('span', { className: 'dim' }, ' · reviewer 는 언제나 읽기 전용'))),
+            h('div', { className: 'row' },
+              h('button', {
+                className: 'btn accent', disabled: busy,
+                onClick: () => { setDelegation('running'); act(orc.convApprove({ verify: lines(verify), write: (write ?? false) && view.kind !== 'scratch' })); },
+              }, busy ? '실행 중…' : `승인하고 실행 · ${r.steps.length}단계${write && view.kind !== 'scratch' ? ' · 쓰기 켜짐' : ''}`),
+              h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convReject()) }, '거절')))
         : null);
 
   const record = (r: Rec, i: number): ReactNode => {
@@ -532,7 +621,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
           // 읽기 답(D-083)은 지휘자가 아니라 읽기 전용 엔진 1슬롯이 낸 답이다 — reviewer 판정이 없다는 것을 같이 말한다.
           h('div', { className: 'hint' }, r.read
             ? `코드를 읽고 답함 · ${r.read.slot} · 읽기 전용 · reviewer 없음 · ${r.read.by === 'auto' ? 'Jev GENERAL 자동' : '요청'} · ${r.cost}`
-            : `직접 답 · 지휘자 Haiku·low · ${r.cost}`),
+            : `직접 답 · ${r.by ?? '지휘자·Haiku·low'} · ${r.cost}`),
           ...cutLine(r.cut).map((l, j) => h('div', { key: `c${j}`, className: 'hint' }, l)),
           suggest && r === last && view.state === 'waiting_input'
             ? h('button', { className: 'btn accent', disabled: busy, onClick: () => act(orc.convPlanAs(suggest)) }, `${suggest} 로 위임`)
@@ -557,7 +646,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
                     pick ? h('span', { className: 'sub', title: 'primary · reviewer (기본 effort)' }, props.rows.find((row) => row.id === pick)?.models ?? '') : null),
                   h('button', { className: 'btn', disabled: busy || !pick, onClick: () => { setPick(''); act(orc.convPlanAs(pick)); } }, '위임하기'),
                   h('span', { className: 'hint' }, '행을 직접 골라 위임 — 배정 카드가 서고 승인은 그대로다')))
-            : null);
+            : null,
+          r === last && view.state === 'waiting_input' && !r.read ? stepsButton() : null);
       }
       case 'plan':
         return planCard(r, i, r === last && view.state === 'blocked');
@@ -566,9 +656,13 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
         return h('div', { key: i, className: 'hint' }, r.approved && r.by === 'auto' ? `자동 승인 · ${r.mode ?? ''} · 묻는 조건 없음` : r.approved ? `승인${r.write ? ' · 쓰기 켜짐' : ''}` : '거절');
       case 'mode':
         return h('div', { key: i, className: 'hint' }, `승인 방식 → ${r.mode}`);
+      case 'orchestrator':
+        return h('div', { key: i, className: 'hint' }, `지휘자 → ${r.model}·${r.effort}`);
+      case 'steps':
+        return stepsCard(r, i, r === last && view.state === 'blocked' && view.stepsPending);
       case 'result':
         return h('section', { key: i, className: 'card' },
-          h('span', { className: 'label' }, `위임 결과 · ${r.decisionId}`),
+          h('span', { className: 'label' }, `위임 결과${r.step ? ` · 단계 ${r.step}` : ''} · ${r.decisionId}`),
           h('div', { className: 'row' },
             // 취소는 판정이 없다 (D-066) — UNKNOWN 칩을 붙이면 reviewer 가 돌고 판정을 못 낸 것처럼 읽힌다.
             r.outcome === 'cancelled' ? null : h('span', { className: `chip ${r.verdict}` }, r.verdict.toUpperCase()),
@@ -582,7 +676,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       case 'summary':
         return h('div', { key: i, className: 'bubble orc' },
           r.text ? h('div', null, r.text) : null,
-          r.next ? h('div', { className: 'warn' }, r.next) : null);
+          r.next ? h('div', { className: 'warn' }, r.next) : null,
+          r.by && r.text ? h('div', { className: 'hint' }, `요약 · ${r.by}`) : null);
       case 'error':
         return h('div', { key: i, className: 'banner error' }, r.text);
     }
@@ -598,6 +693,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
         value: view.mode, disabled: busy, title: MODES.find((m) => m.id === view.mode)?.hint ?? '',
         onChange: (e: { target: { value: string } }) => act(orc.convMode(e.target.value as ApprovalMode)),
       }, ...MODES.map((m) => h('option', { key: m.id, value: m.id, title: m.hint }, `승인 · ${m.label}`))),
+      // 지휘자 (D-087) — 엔진을 바꾸면 그 벤더의 기본 모델·effort 로 시작한다. 도는 호출은 시작한 지휘자로 끝난다.
+      ...orchestratorSelects(orcOptions, view.orchestrator, busy, (choice) => act(orc.convOrchestrator(choice))),
       h('span', { className: 'dim mono' }, view.budget),
       h('span', { className: 'dim mono' }, view.appBudget),
       // 엔진이 도는 중에도 연다 — 세션 상태를 건드리지 않고 그 폴더를 사람 손에 넘길 뿐이다.

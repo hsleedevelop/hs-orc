@@ -155,6 +155,7 @@ export function createExecutor(
       ...(write ? { write: true } : {}),
       ...(options.nonGit === true ? { nonGit: true } : {}),
       ...(options.isolate === true ? { isolate: true } : {}),
+      ...(slot.longContext === true ? { longContext: true } : {}),
       ...(runOptions?.resume !== undefined ? { resume: runOptions.resume } : {}),
     }, onEvent);
     const onAbort = (): void => handle.cancel();

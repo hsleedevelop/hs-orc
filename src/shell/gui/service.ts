@@ -6,7 +6,9 @@
  */
 import { loadMatrix, type Slot } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
-import { loadLimits, type ApprovalMode } from '../../data/limits.ts';
+import { loadLimits, type ApprovalMode, type OrchestratorChoice } from '../../data/limits.ts';
+import { orchestratorOptions, type OrchestratorOption } from '../../core/conductor.ts';
+import { slotLine } from '../../core/reader.ts';
 import { routeWithFallback } from '../../core/pipeline.ts';
 import { createExecutor, type SlotExecutor } from '../../core/executor.ts';
 import { Budget } from '../../core/budget.ts';
@@ -126,6 +128,10 @@ export interface SessionView {
   readonly mode: ApprovalMode;
   /** 지금 '사다리 다음 단계로 다시 위임' 을 누를 수 있으면 그 단계 (D-068). 입력 대기 중이고 올릴 단계가 있을 때만 있다. */
   readonly ladder: LadderOffer | null;
+  /** 이 세션의 지휘자 (D-087). 세션 머리의 선택이 이것을 본다 — `line` 은 기록·카드와 같은 슬롯 한 줄이다. */
+  readonly orchestrator: OrchestratorChoice & { readonly engine: string; readonly line: string };
+  /** 승인 대기 중인 것이 단계 계획이다 (D-087) — 카드가 '지휘자에게 묻기'·행 바꾸기 없이 선다. */
+  readonly stepsPending: boolean;
 }
 
 export interface WorktreeState {
@@ -243,6 +249,11 @@ export class GuiService {
   tasks(): { id: string; task: string; models: string }[] {
     const slot = (s: Slot): string => `${s.label}·${s.efforts[0] ?? ''}`;
     return loadMatrix().assignments.map((a) => ({ id: a.id, task: a.task, models: `${slot(a.primary)} · ${slot(a.reviewer)}` }));
+  }
+
+  /** 지휘자 선택지 (D-087). 카탈로그를 그대로 읽는다 — 목록을 셸에 따로 적지 않는다. */
+  orchestrators(): OrchestratorOption[] {
+    return orchestratorOptions(loadEngines());
   }
 
   dashboard() {
@@ -392,6 +403,16 @@ export class GuiService {
       progress: s.state === 'working' ? [...s.progress] : [],
       mode: s.mode,
       ladder: s.state === 'waiting_input' ? s.ladderOffer() : null,
+      orchestrator: (() => {
+        // 기록의 모델이 카탈로그에서 빠졌어도 화면은 열린다 — 지휘자를 부르는 호출이 그때 던진다.
+        try {
+          const slot = s.conductor();
+          return { ...s.orchestrator, engine: slot.engine, line: slotLine(slot) };
+        } catch (error) {
+          return { ...s.orchestrator, engine: '', line: `지휘자를 띄울 수 없다: ${error instanceof Error ? error.message : String(error)}` };
+        }
+      })(),
+      stepsPending: s.stepsPending,
     };
   }
 
@@ -437,6 +458,18 @@ export class GuiService {
   /** 승인 방식을 바꾼다 (D-064). 엔진을 부르지 않으므로 `live` 에 두지 않는다 — 도는 세션에도 바로 붙는다. */
   converseMode(mode: ApprovalMode): SessionView {
     this.requireConversation().setMode(mode);
+    return this.conversation();
+  }
+
+  /** 지휘자 모델·effort 를 바꾼다 (D-087). 엔진을 부르지 않으므로 `live` 에 두지 않는다 — 도는 호출은 시작한 지휘자로 끝난다. */
+  converseOrchestrator(choice: OrchestratorChoice): SessionView {
+    this.requireConversation().setOrchestrator(choice);
+    return this.conversation();
+  }
+
+  /** 마지막 메시지를 지휘자가 단계로 나눈 계획으로 세운다 (D-087). 지휘자를 부르므로 `running` 으로 돈다. 시작은 카드의 승인이다. */
+  async converseSteps(): Promise<SessionView> {
+    await this.running((s) => s.planSteps());
     return this.conversation();
   }
 

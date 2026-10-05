@@ -19,6 +19,7 @@ export function createAdapter(engine: EngineName, catalog: Engines = loadEngines
       ...(req.write === true ? { write: true } : {}),
       ...(req.nonGit === true ? { nonGit: true } : {}),
       ...(req.isolate === true ? { isolate: true } : {}),
+      ...(req.longContext === true ? { longContext: true } : {}),
       ...(req.resume !== undefined ? { resume: req.resume } : {}),
     });
   const argvFor = (req: RunRequest): string[] => [...invocationFor(req).argv, ...spec.streamArgv];

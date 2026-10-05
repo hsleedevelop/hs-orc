@@ -43,7 +43,7 @@ npm link            # 또는: ln -s "$PWD/bin/hs-orc.mjs" ~/.local/bin/hs-orc
 hs-orc "<작업>"                      # 배정·비용 제시까지. 여기서 멈춘다
 hs-orc "<작업>" --run                # 두 슬롯 실행 (읽기 전용)
 hs-orc "<작업>" --write --run        # primary 가 파일을 고칠 수 있다
-hs-orc chat [--scratch|--resume <id>] [--approval manual|auto-ask|auto]   # 대화 세션 (줄 입력, /mode 로 승인 방식)
+hs-orc chat [--scratch|--resume <id>] [--approval manual|auto-ask|auto]   # 대화 세션 (줄 입력, /mode 승인 방식 · /orc 지휘자 · /steps 단계 계획)
 hs-orc gui                           # GUI (Electron)
 hs-orc --help
 ```
@@ -64,6 +64,19 @@ v1 의 TUI(`hs-orc tui`)는 제거했다 (D-077). 치면 위 대체 명령을 �
 | `--no-classify-llm` | 규칙이 빗나갔을 때의 LLM 분류 폴백을 끈다 |
 | `--no-jev` | Jev 분류(아래 "외부 전송")를 끈다 — 요청이 밖으로 나가지 않는다 |
 | `--no-reviewer` | reviewer 생략 (끈 것이지 통과가 아니다) |
+
+### 대화 세션의 지휘자 (D-087)
+
+대화 세션(`chat`·`gui`)에서 직접 답·결과 요약·단계 계획을 맡는 **지휘자**는 세션마다 고른다. 기본은 벤더의 기본 모델이고 1M 창으로 뜬다:
+
+| 엔진 | 기본 | 1M 창 |
+|---|---|---|
+| claude (시작 엔진) | Opus 5.5 · high | `claude-opus-5-5[1m]` |
+| codex | gpt-6.1-sol · high | `-c model_context_window=1000000` |
+
+- GUI 는 세션 머리의 `지휘 · 엔진` · 모델 · effort 선택, chat 은 `/orc codex` · `/orc sonnet max` 처럼 바꾼다. 바꾼 값은 세션 기록에 남는다. 지휘자 기록이 없는 옛 세션은 옛 지휘자(Haiku·low)로 연다.
+- **단계 계획** — GUI "단계로 나눠 계획" · chat `/steps` 는 마지막 메시지를 지휘자가 위임 단계로 나눈다. 지휘자는 **행과 순서만** 정하고 단계마다 모델·effort 는 매트릭스가 배정한다. 카드가 서면 사람이 승인해야 단계가 의존 순서대로 하나씩 돈다(단계마다 두 슬롯·증거). 앞 단계가 실패하면 그 단계에 의존한 단계는 건너뛴다.
+- 위임 슬롯(primary·reviewer)의 모델은 여기서 바꾸지 않는다 — 그건 매트릭스의 일이다.
 
 그래프 모드는 커밋된 예제가 있다:
 

@@ -8,7 +8,7 @@ import { loadMatrix } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
 import { assign } from '../assign.ts';
 import { Budget } from '../budget.ts';
-import { conductorSlot } from '../conductor.ts';
+import { conductorSlot, defaultOrchestrator } from '../conductor.ts';
 import { createExecutor, sinceBaseline, type SlotRun } from '../executor.ts';
 
 /**
@@ -284,7 +284,7 @@ describe('압축 창 env 는 지휘자 실행에만 싣는다 (D-061)', () => {
     await withParentEnv(undefined, async () => {
       assert.equal(claudePrimary.engine, 'claude');
       assert.equal(plan.slots.reviewer.engine, 'claude');
-      assert.equal(await envOf(createExecutor(catalog, fakeDir, 10_000, { isolate: true }), conductorSlot(catalog)), '1000000');
+      assert.equal(await envOf(createExecutor(catalog, fakeDir, 10_000, { isolate: true }), conductorSlot(catalog, defaultOrchestrator('claude'))), '1000000');
       const delegated = createExecutor(catalog, fakeDir, 10_000);
       assert.equal(await envOf(delegated, claudePrimary), '<unset>', 'primary 에 실리면 사용자 설정(autoCompactWindow)을 덮는다');
       assert.equal(await envOf(delegated, plan.slots.reviewer), '<unset>');
@@ -293,7 +293,7 @@ describe('압축 창 env 는 지휘자 실행에만 싣는다 (D-061)', () => {
 
   it('부모 env 에 같은 이름이 있으면 지휘자만 덮고, 위임은 사용자 값을 그대로 물려받는다', async () => {
     await withParentEnv('300000', async () => {
-      assert.equal(await envOf(createExecutor(catalog, fakeDir, 10_000, { isolate: true }), conductorSlot(catalog)), '1000000');
+      assert.equal(await envOf(createExecutor(catalog, fakeDir, 10_000, { isolate: true }), conductorSlot(catalog, defaultOrchestrator('claude'))), '1000000');
       assert.equal(await envOf(createExecutor(catalog, fakeDir, 10_000), claudePrimary), '300000');
     });
   });
@@ -313,7 +313,7 @@ describe('내장 도구 제거는 지휘자 실행에만 싣는다 (D-080)', () 
 
   it('지휘자는 `--tools ""` 를 받고, 같은 claude 라도 primary·reviewer 는 받지 않는다', async () => {
     assert.equal(claudePrimary.engine, 'claude');
-    const conductor = await argsOf(createExecutor(catalog, fakeDir, 10_000, { isolate: true }), conductorSlot(catalog));
+    const conductor = await argsOf(createExecutor(catalog, fakeDir, 10_000, { isolate: true }), conductorSlot(catalog, defaultOrchestrator('claude')));
     const at = conductor.indexOf('--tools');
     assert.ok(at >= 0, '지휘자 argv 에 --tools 가 없다');
     assert.equal(conductor[at + 1], '', '빈 문자열 하나가 그대로 넘어가야 도구가 0개다');
