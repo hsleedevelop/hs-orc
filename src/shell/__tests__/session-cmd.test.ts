@@ -3,7 +3,9 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { gitEnv } from '../../core/git-env.ts';
 import os from 'node:os';
 import path from 'node:path';
 import type { SlotExecutor } from '../../core/executor.ts';
@@ -151,5 +153,29 @@ describe('session — --run 이 없으면 위임을 시작하지 않는다 (PR #
     assert.ok(out.records.some((r) => r.kind === 'approval' && !r.approved));
     const reopened = assembleSession({ kind: 'project', dir, id, budget: restoreBudget(dir, id), journal: new Journal(), execute: fake });
     assert.equal(reopened.mode, 'auto', 'GUI·chat 에서는 auto 가 그대로다');
+  });
+});
+
+describe('session — --run 게이트와 D-086 쓰기 행 자동 시작', () => {
+  it('깨끗한 git 폴더의 auto 세션이라도 --run 없는 send 는 쓰기 행(R01) 위임을 시작하지 않는다 — --run 이면 쓰기로 시작한다', async () => {
+    const { dir, id } = fixture('gitw');
+    const git = spawnSync('git', ['init', '-q', dir], { env: gitEnv() });
+    assert.equal(git.status, 0, git.stderr.toString());
+    assembleSession({ kind: 'project', dir, id, budget: restoreBudget(dir, id), journal: new Journal(), execute: fake }).setMode('auto');
+    const roles: string[] = [];
+    const watch: SlotExecutor = (slot, prompt, options) => {
+      roles.push(slot.role);
+      return fake(slot, prompt, options);
+    };
+    const shown = await sendToSession({ cwd: dir, ref: 'gitw', message: '이 타입 에러 고쳐줘', write: false, run: false, verify: [], execute: watch });
+    assert.equal(roles.length, 0, `기록: ${shown.records.map((r) => r.kind).join(',')}`);
+    const card = shown.records.find((r) => r.kind === 'plan');
+    assert.ok(card?.kind === 'plan' && card.write === true, '쓰기 행 카드는 쓰기가 켜진 채 선다 (D-086)');
+    assert.ok(shown.records.some((r) => r.kind === 'approval' && !r.approved));
+
+    // 대조: --run 이면 D-086 대로 클릭 없이 쓰기로 시작한다 — 위 0 회가 이 경로를 막은 결과임을 보인다.
+    const ran = await sendToSession({ cwd: dir, ref: 'gitw', message: '이 타입 에러 고쳐줘', write: false, run: true, verify: [], execute: watch });
+    assert.ok(ran.records.some((r) => r.kind === 'approval' && r.approved && r.write && r.by === 'auto'), `기록: ${ran.records.map((r) => r.kind).join(',')}`);
+    assert.ok(roles.includes('primary'));
   });
 });

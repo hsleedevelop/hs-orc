@@ -3264,6 +3264,7 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 **검증**
 - 리뷰 5(전하 결정): auto 세션 + `--run` 없는 `send` → 위임 엔진 호출 0, 카드 거절, 기록된 방식 auto 유지 — 회귀 테스트(수정 전 `user,plan,approval,result,summary` 로 실패).
+- D-086 과의 맞물림: 깨끗한 git 폴더 · auto 세션 · 쓰기 행 R01 — `--run` 없으면 엔진 0회(카드는 쓰기 켠 채 서고 거절), `--run` 이면 D-086 대로 클릭 없이 쓰기로 시작. 게이트를 빼면(`autoStart: true`) 첫 단계에서 쓰기 위임이 돌아 테스트가 실패함을 확인.
 - PR #111 독립 리뷰(hs-orc-72) med 1~4 수정, 항목마다 수정 전 실패를 확인한 회귀 테스트 1개 — 동시 claim(자식 프로세스 6개 × 4회, 새 자리·죽은 표식), 재오픈 Budget, 재시도 카드, `lastEvent`.
 - `npm run gate` 통과 — 테스트 655 → 674 (`session-lock.test.ts` 7 · `session-cmd.test.ts` 7 · `service.test.ts` 4 · `chat.test.ts` 1).
 - 실제 진입점 스모크(격리 상태 폴더): `hs-orc session ls` → `세션 없음`, `show nope` → exit 1 `그런 세션이 없다`, 인자·옵션 오류 → exit 1 + 사용법.
