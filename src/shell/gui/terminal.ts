@@ -18,11 +18,33 @@ export interface TerminalCommand {
 }
 
 /**
- * 플랫폼별 명령. `HS_ORC_TERMINAL` 로 터미널을 바꾼다 — macOS 는 `open -a` 에 줄 앱 이름(`iTerm`·`Ghostty`),
+ * 화면에서 고르는 터미널. 렌더러는 이 id 만 넘긴다 — 임의 앱 이름을 실행하게 두지 않는다(D-021).
+ * `app` 은 macOS `open -a` 의 앱 이름, 그 밖 플랫폼에서는 소문자로 실행 파일 이름이 된다.
+ */
+export const TERMINALS = [
+  { id: 'default', label: '기본' },
+  { id: 'ghostty', label: 'Ghostty', app: 'Ghostty' },
+  { id: 'otty', label: 'Otty', app: 'Otty' },
+] as const;
+export type TerminalId = (typeof TERMINALS)[number]['id'];
+
+export function isTerminalId(v: unknown): v is TerminalId {
+  return TERMINALS.some((t) => t.id === v);
+}
+
+/**
+ * 플랫폼별 명령. `기본` 이면 `HS_ORC_TERMINAL` 로 바꾼 터미널, 없으면 플랫폼 기본 — macOS 는 `open -a` 에 줄 앱 이름(`iTerm`),
  * 그 밖은 실행 파일. 경로는 셸을 거치지 않고 인자·cwd 로만 넘긴다 — 폴더 이름의 공백·따옴표가 명령이 되지 않게.
  */
-export function terminalCommand(dir: string, platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): TerminalCommand {
-  const custom = env['HS_ORC_TERMINAL']?.trim() || undefined;
+export function terminalCommand(
+  dir: string,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  terminal: TerminalId = 'default',
+): TerminalCommand {
+  const picked = TERMINALS.find((t) => t.id === terminal);
+  const app = picked && 'app' in picked ? picked.app : undefined;
+  const custom = (platform === 'darwin' ? app : app?.toLowerCase()) ?? (env['HS_ORC_TERMINAL']?.trim() || undefined);
   if (platform === 'darwin') return { cmd: 'open', args: ['-a', custom ?? 'Terminal', dir], cwd: dir, wait: true };
   if (platform === 'win32') return { cmd: custom ?? 'cmd.exe', args: custom ? [] : ['/c', 'start', 'cmd.exe'], cwd: dir, wait: false };
   return { cmd: custom ?? 'x-terminal-emulator', args: [], cwd: dir, wait: false };
