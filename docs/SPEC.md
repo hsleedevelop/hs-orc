@@ -524,7 +524,7 @@ v1 의 TUI(Ink 7 + React 19, D-018 — Run·Tasks·Dashboard·Sessions·Reviews�
 | 화면 | 내용 |
 |---|---|
 | **세션 목록** | 최근 세션(`project` 는 폴더 이름, `scratch` 는 표시) · 마지막 메시지 시각. 상태 열은 두지 않는다 — 상태는 저장되지 않고, 다시 열면 배정을 되살리지 않아 늘 `waiting_input` 이다 (2026-09-24). "새 프로젝트 세션" · "새 스크래치" |
-| **세션** | 상단: 작업 폴더(스크래치면 그렇다고)·워크트리·쓰기 스위치 — 폴더가 **항상 보인다**(D-029). "터미널" 은 그 폴더에서 시스템 터미널을 연다(macOS `open -a`, 앱은 `HS_ORC_TERMINAL`). 본문: 대화. 배정·비용·승인, 결과, 직접 답의 비용 한 줄이 **대화 안의 카드**로 뜬다. "업무 행 직접 지정" 은 배정 카드의 컨트롤로 남는다 |
+| **세션** | 상단: 작업 폴더(스크래치면 그렇다고)·워크트리·쓰기 스위치 — 폴더가 **항상 보인다**(D-029). "터미널" 은 그 폴더에서 옆 선택(기본·Ghostty·Otty, 이 기기에 기억)의 터미널을 연다(macOS `open -a`). "기본" 은 `HS_ORC_TERMINAL`, 없으면 Terminal 이다. 본문: 대화. 배정·비용·승인, 결과, 직접 답의 비용 한 줄이 **대화 안의 카드**로 뜬다. "업무 행 직접 지정" 은 배정 카드의 컨트롤로 남는다 |
 | Dashboard · Reviews · Debug | v2 그대로 — Debug 의 "고의 크래시" 가 TUI `c` 키의 자리다 |
 | **Agents** | v2 의 "Sessions" 화면(FR-9 — `claude agents`·codex 색인)을 이름만 바꾼다. orc 의 대화 세션과 이름이 겹치면 안 된다 |
 
@@ -554,7 +554,7 @@ v2 의 Run 폼은 세션 화면으로 대체한다. 탭을 옮겨도 세션 화�
 | `engines.json` | 바이너리 경로·이름 해석, 모델↔엔진 매핑, 가용성, effort 표기, cursor 변형 정책 | 수기 |
 | `limits.json` | 최대 반복 수, 최대 노드 수, 누적 비용 상한, 타임아웃. v2.1: `contextTurns`(6)·`contextChars`(6000) | 수기 |
 
-환경 변수 (테스트가 홈을 건드리지 않게 가두는 자리이기도 하다): `HS_ORC_DECISION_LOG` · `HS_ORC_RUN_STORE` · `HS_ORC_PROJECTS` · `HS_ORC_WORKTREES` · v2.1 `HS_ORC_SCRATCH` · `HS_ORC_PROJECT_STATE`(D-071). GUI 세션의 "터미널" 이 여는 앱은 `HS_ORC_TERMINAL`(macOS 앱 이름, 그 밖은 실행 파일)이다.
+환경 변수 (테스트가 홈을 건드리지 않게 가두는 자리이기도 하다): `HS_ORC_DECISION_LOG` · `HS_ORC_RUN_STORE` · `HS_ORC_PROJECTS` · `HS_ORC_WORKTREES` · v2.1 `HS_ORC_SCRATCH` · `HS_ORC_PROJECT_STATE`(D-071). GUI 세션의 "터미널" 이 "기본" 일 때 여는 앱은 `HS_ORC_TERMINAL`(macOS 앱 이름, 그 밖은 실행 파일)이다.
 
 `matrix.json`은 생성물이며 수기 편집하지 않는다.
 
