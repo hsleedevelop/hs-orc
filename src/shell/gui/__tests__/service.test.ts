@@ -226,6 +226,17 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     assert.ok(service.conversations().scratch.some((s) => s.id === view.id && s.preview === '넌 누구니'));
   });
 
+  it('터미널은 열린 세션의 폴더에서 열고, 세션이 없으면 거절한다', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    const opened: string[] = [];
+    const open = (dir: string) => { opened.push(dir); return Promise.resolve(); };
+    await assert.rejects(service.openSessionTerminal(open), /열린 세션이 없다/);
+    const view = service.startConversation('scratch');
+    assert.equal(await service.openSessionTerminal(open), view.dir);
+    assert.deepEqual(opened, [view.dir]);
+  });
+
   it('분류되지 않는 메시지에 직접 답한다', async () => {
     isolated();
     const service = new GuiService(fake, 20, process.cwd());
