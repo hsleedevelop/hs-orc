@@ -216,6 +216,16 @@ describe('chat — 입력 루프', () => {
     assert.ok(session.records().some((r) => r.kind === 'approval' && !r.approved));
   });
 
+  it('다른 곳이 그 사이 기록을 붙였으면 낡은 세션으로 쓰지 않고 다시 열라고 한다 (D-085)', async () => {
+    const { session } = await drive(['넌 누구니']);
+    appendRecord(transcriptPath(session.dir, session.id), { v: 1, at: new Date().toISOString(), turn: 2, kind: 'user', text: '밖에서 보냄' });
+    let out = '';
+    const output = new Writable({ write(chunk: Buffer, _enc, cb) { out += chunk.toString(); cb(); } });
+    await runChat(session, restoreBudget(session.dir, session.id), { input: Readable.from(['또\n']), output }, { verify: [] });
+    assert.match(out, /다른 곳에서 이 세션에 기록이 붙었다 — \/quit 하고 hs-orc chat --resume/);
+    assert.equal(session.records().filter((r) => r.kind === 'user').length, 1);
+  });
+
   it('/quit 뒤의 줄은 처리하지 않는다', async () => {
     const { calls } = await drive(['/quit', '넌 누구니']);
     assert.deepEqual(calls, []);

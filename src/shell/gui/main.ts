@@ -83,6 +83,7 @@ ipcMain.handle('conv-escalate', () => service.converseEscalate());
 ipcMain.handle('conv-reject', () => service.converseReject());
 ipcMain.handle('conv-ask', () => service.converseAsk());
 ipcMain.handle('conv-terminal', (_e, terminal: unknown) => service.openSessionTerminal(terminal));
+ipcMain.handle('conv-rename', (_e, name: string) => service.converseRename(name));
 ipcMain.handle('conv-close', () => service.closeConversation());
 
 void app.whenReady().then(() => {

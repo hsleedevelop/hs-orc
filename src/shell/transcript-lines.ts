@@ -21,9 +21,23 @@ export const cutLine = (cut: Cut | undefined): string[] => (cut ? [`맥락   앞
 export const compactLines = (compacted: readonly Compaction[] | undefined): string[] =>
   (compacted ?? []).map((c) => `압축   엔진이 앞 맥락을 요약으로 바꿨다 (${c.trigger}${c.preTokens !== undefined && c.postTokens !== undefined ? ` ${c.preTokens}→${c.postTokens} 토큰` : ''})`);
 
+interface Status { readonly state: 'working' | 'blocked' | 'done' | 'interrupted' | 'idle'; readonly outcome?: string; readonly holder?: { readonly pid: number; readonly by: string } }
+
+/** 세션 상태 한 마디 (D-085). chat·`hs-orc session`·GUI 사이드바가 같은 말을 쓴다. */
+export function statusLabel(status: Status | undefined): string {
+  switch (status?.state) {
+    case 'working': return '진행 중';
+    case 'blocked': return '승인 대기';
+    case 'done': return status.outcome ? `완료 · ${status.outcome}` : '완료';
+    case 'interrupted': return '끊김';
+    case 'idle': return 'idle';
+    case undefined: return '?';
+  }
+}
+
 /**
- * 대화 흐름의 마지막 기록 — 설정 줄(승인 방식·지휘자 D-087)은 건너뛴다. 화면이 "지금 살아 있는 카드·제안" 을 이것으로 가린다:
- * 지휘자를 바꿨다고 카드·제안 버튼이 사라지면 안 된다. Core `ConversationSession.lastEvent` 와 같은 규칙이다.
+ * 대화 흐름의 마지막 기록 — 설정 줄(이름 D-085 · 승인 방식 · 지휘자 D-087)은 건너뛴다. 화면이 "지금 살아 있는 카드·제안" 을 이것으로 가린다:
+ * 승인 대기 중 이름을 붙이거나 지휘자를 바꿨다고 카드 버튼이 사라지면 안 된다. Core `ConversationSession.lastEvent` 와 같은 규칙이다.
  */
 export const lastEvent = <T extends { readonly kind: string }>(records: readonly T[]): T | undefined =>
-  records.findLast((r) => r.kind !== 'mode' && r.kind !== 'orchestrator');
+  records.findLast((r) => r.kind !== 'name' && r.kind !== 'mode' && r.kind !== 'orchestrator');

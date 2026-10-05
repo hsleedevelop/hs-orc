@@ -38,9 +38,11 @@ import { LadderError, planLadder, requestStage, type EscalationStage } from './l
 import { route as routeTask, routeWithFallback } from './pipeline.ts';
 import { buildReadPrompt, readerSlot, slotLine } from './reader.ts';
 import { readUnclassifiedWithLegacy, recordUnclassified, suggestRows, unclassifiedLogPath } from './unclassified.ts';
+import { markStateOrigin } from './project-state.ts';
 import {
   appendRecord,
   readSessionLog,
+  sessionName,
   transcriptPath,
   type LadderRecord,
   type SessionKind,
@@ -48,6 +50,12 @@ import {
   type TranscriptEntry,
   type TranscriptRecord,
 } from './transcript.ts';
+
+/**
+ * 세션 이름 모양 (D-085). 영문자로 시작해 id(`MMDD-HHMM-xxx`, 숫자로 시작)와 겹칠 수 없다 —
+ * `hs-orc session send <id|이름>` 이 같은 자리에서 둘을 받는다.
+ */
+export const SESSION_NAME = /^[A-Za-z][A-Za-z0-9._-]{0,31}$/;
 
 export class SessionStateError extends Error {
   override name = 'SessionStateError';
@@ -76,6 +84,11 @@ export interface SessionDeps {
   readonly context?: ContextLimits;
   /** 기록이 빈 새 세션의 시작 방식 (D-064 결정 8). 없으면 `limits.json` 의 `approvalMode`. 기록에 방식이 있으면 그것이 이긴다. */
   readonly approvalMode?: ApprovalMode;
+  /**
+   * false 면 이 객체는 세션 방식과 무관하게 위임·읽기 답을 자동으로 시작하지 않는다 — 판정을 manual 로 한다 (D-085 결정 5).
+   * `hs-orc session send` 는 `--run` 이 없으면 이것을 끈다. 기록된 방식은 바꾸지 않는다(GUI·chat 에서는 그대로 auto 다). 기본 true.
+   */
+  readonly autoStart?: boolean;
   /** project 폴더가 git 작업 트리인가 (D-074). 없으면 git 으로 본다 — 조립(`assembleSession`)이 `repoRoot` 로 정해 넘긴다. */
   readonly inGit?: boolean;
   /** 기록이 빈 새 세션의 지휘자 (D-087). 없으면 `limits.json` 의 기본. 기록에 지휘자가 있으면 그것이 이긴다. */
@@ -157,6 +170,7 @@ export class ConversationSession {
   private orchestratorValue: OrchestratorChoice;
   /** 기록된 지휘자를 지금 카탈로그로 띄울 수 없어 기본 지휘자로 연 사유 (D-087). 셸이 세션을 열 때 알린다. */
   private orchestratorFallback: string | null = null;
+  private originMarked = false;
 
   constructor(deps: SessionDeps) {
     this.deps = deps;
@@ -170,7 +184,7 @@ export class ConversationSession {
     this.modeValue =
       recorded?.kind === 'mode' && isApprovalMode(recorded.mode)
         ? recorded.mode
-        : this.log.length === 0
+        : this.log.every((r) => r.kind === 'name') // 첫 메시지 전에 이름만 붙인 세션도 새 세션이다 (D-085).
           ? (deps.approvalMode ?? loadLimits().approvalMode)
           : 'manual';
     const orchestrator = this.log.findLast((r) => r.kind === 'orchestrator');
@@ -223,6 +237,11 @@ export class ConversationSession {
 
   get mode(): ApprovalMode {
     return this.modeValue;
+  }
+
+  /** 자동 시작 판정에 쓰는 방식 — `autoStart: false` 면 manual 이다 (D-085 결정 5). */
+  private get decisionMode(): ApprovalMode {
+    return this.deps.autoStart === false ? 'manual' : this.modeValue;
   }
 
   /**
@@ -372,15 +391,46 @@ export class ConversationSession {
   }
 
   /**
-   * 마지막 기록 — 설정 줄(승인 방식·지휘자 D-087)은 대화의 흐름이 아니라 건너뛴다. 끊김·지휘자 제안 판정이 설정을 바꿨다고 바뀌면 안 된다
-   * (옛 기록에서 지휘자를 바꾼 뒤 제안 행을 누르면 H1 이 빠지던 것). 셸의 `lastEvent`(transcript-lines.ts)와 같은 규칙이다.
+   * 마지막 기록 — 설정 줄(이름 D-085 · 승인 방식 · 지휘자 D-087)은 대화의 흐름이 아니라 건너뛴다. 끊김·지휘자 제안 판정이 설정을 바꿨다고
+   * 바뀌면 안 된다(옛 기록에서 지휘자를 바꾼 뒤 제안 행을 누르면 H1 이 빠지던 것). 셸의 `lastEvent`(transcript-lines.ts)와 같은 규칙이다.
    */
   private lastEvent(): TranscriptRecord | undefined {
-    return this.log.findLast((r) => r.kind !== 'mode' && r.kind !== 'orchestrator');
+    return this.log.findLast((r) => r.kind !== 'name' && r.kind !== 'mode' && r.kind !== 'orchestrator');
+  }
+
+  /**
+   * 다른 프로세스가 이 세션의 기록에 덧붙였다 (D-085) — 들고 있는 기록·턴 번호·Budget 이 낡았다. 이대로 쓰면 턴이 겹친다.
+   * 셸은 새로 조립하거나(GUI) 다시 열라고 알린다(chat). 엔진이 도는 동안은 우리가 쓰는 중이라 보지 않는다.
+   */
+  isStale(): boolean {
+    return this.stateValue !== 'working' && readSessionLog(this.deps.dir, this.deps.id).records.length !== this.log.length;
+  }
+
+  /** 붙인 이름 (D-085). 없으면 undefined. */
+  get name(): string | undefined {
+    return sessionName(this.log);
+  }
+
+  /**
+   * 이름을 붙인다 (D-085). 빈 문자열은 지운다. 다른 세션과 겹치는지는 모든 세션을 아는 셸이 먼저 본다 —
+   * Core 는 모양만 본다. 입력 대기·승인 대기 어디서든 붙일 수 있다(대화를 진행시키지 않는다).
+   */
+  rename(name: string): TranscriptRecord[] {
+    const next = name.trim();
+    if (next && !SESSION_NAME.test(next)) {
+      throw new SessionStateError(`이름은 영문자로 시작하고 영문·숫자·. _ - 만 쓴다 (최대 32자): ${next}`);
+    }
+    if (next === (this.name ?? '')) return [];
+    return [this.append({ kind: 'name', name: next })];
   }
 
   private append(entry: TranscriptEntry): TranscriptRecord {
     const record = { ...entry, v: 1, at: (this.deps.now?.() ?? new Date()).toISOString(), turn: this.turn } as TranscriptRecord;
+    // id 로 세션을 찾는 `hs-orc session` 이 이 폴더를 알게 한다 (D-085). 객체마다 한 번 — 이 결정 전 세션도 다음 기록에서 남는다.
+    if (!this.originMarked) {
+      markStateOrigin(this.deps.dir);
+      this.originMarked = true;
+    }
     appendRecord(this.file, record);
     this.log.push(record);
     return record;
@@ -454,7 +504,7 @@ export class ConversationSession {
     const rowWrite = this.deps.kind === 'project' && (this.deps.writeRows ?? loadLimits().writeRows).includes(plan.assignment.id);
     const write = sentWrite || (!retry && rowWrite && inGit);
     const dirty = write && inGit ? this.uncommitted() : [];
-    const check = evaluateApproval({ mode: this.modeValue, plan, reason, write, catalog, budget, records: this.log, inGit, rowWrite, dirty, ...(ladder ? { ladder: true } : {}), ...(retry ? { retry: true } : {}) });
+    const check = evaluateApproval({ mode: this.decisionMode, plan, reason, write, catalog, budget, records: this.log, inGit, rowWrite, dirty, ...(ladder ? { ladder: true } : {}), ...(retry ? { retry: true } : {}) });
     // manual 은 묻는 이유(`asked`)가 비므로 H4·H5·H6 을 안내 줄로 싣는다 — 어느 방식이든 카드가 같은 줄을 보인다 (D-074·D-086).
     const warnings = check.mode === 'manual'
       ? [nonGitWriteRefusal(catalog, plan, write, inGit), dirtyWriteRisk(write, dirty), readOnlyWriteRow(rowWrite, write, inGit)].flatMap((w) => (w ? [w.text] : []))
@@ -520,7 +570,7 @@ export class ConversationSession {
   private readCheck(): ApprovalCheck {
     const { matrix, catalog, budget } = this.deps;
     const slot = readerSlot(catalog);
-    return evaluateRead({ mode: this.modeValue, slot, catalog, budget, estimateUsd: estimateUsd(matrix, slot) });
+    return evaluateRead({ mode: this.decisionMode, slot, catalog, budget, estimateUsd: estimateUsd(matrix, slot) });
   }
 
   /**
