@@ -1,6 +1,6 @@
 {
   "name": "hs-orchestrator",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "작업 1건을 분류 → primary·reviewer 두 슬롯 배정 → 하한선 검사 → 실제 CLI 엔진(claude/codex/cursor) 실행 → 증거로 종료하는 로컬 오케스트레이터",
   "license": "MIT",
   "repository": {
