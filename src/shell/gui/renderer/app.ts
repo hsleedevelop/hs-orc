@@ -52,17 +52,19 @@ interface Compaction { trigger: string; preTokens?: number; postTokens?: number 
 type Rec =
   | { kind: 'user'; turn: number; text: string }
   | { kind: 'direct'; turn: number; text: string; suggest: string | null; cost: string; notes: string[]; guide?: string[]; general?: true; read?: { slot: string; by: 'auto' | 'user' }; cut?: Cut; by?: string }
-  | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; reviewer2?: string; estimateUsd: number; notes: string[]; guide?: string[]; mode?: ApprovalMode; asked?: { code: string; text: string }[]; write?: boolean; ladder?: { stage: string; label: string; from: string; changes: string[] }; retry?: true }
-  | { kind: 'approval'; turn: number; approved: boolean; write: boolean; by?: 'user' | 'auto'; mode?: ApprovalMode }
+  | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; reviewer2?: string; estimateUsd: number; notes: string[]; guide?: string[]; mode?: ApprovalMode; asked?: { code: string; text: string }[]; write?: boolean; ladder?: { stage: string; label: string; from: string; changes: string[] }; retry?: true; readOnlyBlocked?: true }
+  | { kind: 'approval'; turn: number; approved: boolean; write: boolean; by?: 'user' | 'auto'; mode?: ApprovalMode; asked?: string[] }
+  | { kind: 'scaffold'; turn: number; scaffolder: string; label: string; argv: string[]; asked: { code: string; text: string }[] }
+  | { kind: 'scaffold-run'; turn: number; step: 'scaffold' | 'git-init'; commands: string[][]; outcome: string; exitCode: number | null; tail: string; durationMs: number; git?: 'existing' | 'scaffolder' | 'offer'; created?: string[] }
   | { kind: 'mode'; turn: number; mode: ApprovalMode }
   | { kind: 'orchestrator'; turn: number; model: string; effort: string }
-  | { kind: 'steps'; turn: number; title: string; steps: Step[]; estimateUsd: number; by: string; cost: string; cut?: Cut; write?: true; asked?: { code: string; text: string }[]; guide?: string[] }
+  | { kind: 'steps'; turn: number; title: string; steps: Step[]; estimateUsd: number; by: string; cost: string; cut?: Cut; write?: true; asked?: { code: string; text: string }[]; guide?: string[]; readOnlyBlocked?: true }
   | { kind: 'name'; turn: number; name: string }
   | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string; cut?: Cut; compacted?: Compaction[]; step?: string }
   | { kind: 'summary'; turn: number; text: string; next: string; by?: string }
   | { kind: 'error'; turn: number; text: string };
 interface Hold { pid: number; by: string; state: 'working' | 'blocked' }
-interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; progress: string[]; mode: ApprovalMode; ladder: { stage: string; label: string; changes: string[] } | null; orchestrator: OrchestratorChoice & { engine: string; line: string }; stepsPending: boolean; name?: string; external: Hold | null }
+interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; progress: string[]; mode: ApprovalMode; ladder: { stage: string; label: string; changes: string[] } | null; orchestrator: OrchestratorChoice & { engine: string; line: string }; stepsPending: boolean; scaffoldPending: boolean; gitInitOffered: boolean; name?: string; external: Hold | null }
 interface SessionUsage { tokens: number; cacheReadTokens: number; cacheReadPartial?: true; billedUsd: number; convertedUsd: number }
 type Activity = 'working' | 'blocked' | 'done' | 'interrupted' | 'idle';
 interface SessionStatus { state: Activity; outcome?: string; holder?: { pid: number; by: string } }
@@ -87,6 +89,7 @@ interface Bridge {
   convEscalate(): Promise<SessionView>;
   convReject(): Promise<SessionView>;
   convAsk(): Promise<SessionView>;
+  convGitInit(): Promise<SessionView>;
   convTerminal(terminal: string): Promise<string>;
   convRename(name: string): Promise<SessionView>;
   convClose(): Promise<void>;
@@ -590,9 +593,13 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
                 : (write ?? r.write === true) ? h('b', null, 'primary 슬롯이 이 폴더의 파일을 고칠 수 있다')
                 : 'primary 슬롯 파일 쓰기 (--write)',
                 h('span', { className: 'dim' }, ' · reviewer 는 언제나 읽기 전용'))),
+            // git 밖 쓰기 행(H6)은 읽기 전용 승인을 막는다 (D-088) — 쓰기를 켜면 승인할 수 있다(엔진이 거절하면 H4 대로다).
+            r.readOnlyBlocked && !(write ?? r.write === true)
+              ? h('div', { className: 'hint warn' }, '읽기 전용으로는 승인하지 않는다 (H6) — 이 행은 파일을 하나도 못 만든다. 새 프로젝트면 빈 폴더에서 "next 앱 init 해줘" 처럼 보내 스캐폴딩 카드로, 기존 파일이면 터미널에서 git init 한 뒤 다시 보낸다')
+              : null,
             h('div', { className: 'row' },
               h('button', {
-                className: 'btn accent', disabled: locked,
+                className: 'btn accent', disabled: locked || (r.readOnlyBlocked === true && !(write ?? r.write === true)),
                 onClick: () => { setDelegation('running'); act(orc.convApprove({ verify: lines(verify), write: (write ?? r.write === true) && view.kind !== 'scratch' })); },
               }, busy ? '실행 중…' : `승인하고 실행 · ${r.reviewer2 ? '세' : '두'} 슬롯${(write ?? r.write === true) && view.kind !== 'scratch' ? ' · 쓰기 켜짐' : ''}`),
               h('button', { className: 'btn', disabled: locked, onClick: () => act(orc.convReject()) }, '거절'),
@@ -642,12 +649,43 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
                     (write ?? r.write === true) ? h('b', null, '쓰기 행 단계의 primary 슬롯이 이 폴더의 파일을 고칠 수 있다') : '쓰기 행 단계 파일 쓰기 (--write)',
                     h('span', { className: 'dim' }, ' · 읽기 행 단계와 reviewer 는 언제나 읽기 전용')))
               : h('div', { className: 'hint' }, '쓰기 행 단계가 없다 — 모든 단계가 읽기 전용으로 돈다'),
+            r.readOnlyBlocked ? h('div', { className: 'hint warn' }, '승인하지 않는다 (H6) — git 아닌 폴더의 쓰기 행 단계는 읽기 전용으로 헛돈다. 스캐폴딩 카드나 git init 뒤 다시 계획한다') : null,
             h('div', { className: 'row' },
               h('button', {
-                className: 'btn accent', disabled: locked,
+                className: 'btn accent', disabled: locked || r.readOnlyBlocked === true,
                 onClick: () => { setDelegation('running'); act(orc.convApprove({ verify: lines(verify), write: (write ?? r.write === true) && view.kind !== 'scratch' })); },
               }, busy ? '실행 중…' : `승인하고 실행 · ${r.steps.length}단계${(write ?? r.write === true) && view.kind !== 'scratch' ? ' · 쓰기 행 쓰기 켜짐' : ''}`),
               h('button', { className: 'btn', disabled: locked, onClick: () => act(orc.convReject()) }, '거절')))
+        : null);
+
+  // 스캐폴딩 카드 (D-088) — hs-orc 가 엔진 없이 허용 목록 명령을 이 폴더에서 실행한다. 어느 방식에서도 이 버튼이 승인이다(H7).
+  const scaffoldCard = (r: Extract<Rec, { kind: 'scaffold' }>, i: number, active: boolean): ReactNode =>
+    h('section', { key: i, className: 'card' },
+      h('span', { className: 'label' }, `스캐폴딩 · ${r.label}`),
+      h('div', { className: 'hint' }, `엔진 없이 hs-orc 가 직접 실행한다 · 엔진 비용 0 · 폴더 ${view.dir}`),
+      h('pre', { className: 'plain mono', style: { marginTop: 8 } }, r.argv.join(' ')),
+      active ? h('div', { className: 'hint warn' }, `묻는 이유: ${r.asked.map((a) => a.text).join(' · ')}`) : null,
+      active
+        ? h('div', { className: 'row', style: { marginTop: 10 } },
+            h('button', { className: 'btn accent', disabled: locked, onClick: () => { setDelegation('running'); act(orc.convApprove({ verify: [], write: false })); } }, busy ? '실행 중…' : '확인하고 실행'),
+            h('button', { className: 'btn', disabled: locked, onClick: () => act(orc.convReject()) }, '거절'))
+        : null);
+
+  const scaffoldRunCard = (r: Extract<Rec, { kind: 'scaffold-run' }>, i: number): ReactNode =>
+    h('section', { key: i, className: 'card' },
+      h('span', { className: 'label' }, `${r.step === 'scaffold' ? '스캐폴딩' : 'git init'} 결과 · 엔진 비용 0`),
+      h('div', { className: 'row' },
+        h('span', { className: `chip ${r.outcome === 'ok' ? 'pass' : 'fail'}` }, r.outcome.toUpperCase()),
+        h('span', { className: r.outcome === 'ok' ? 'good mono' : 'warn mono' }, `exit ${r.exitCode ?? '—'} · ${(r.durationMs / 1000).toFixed(1)}s`)),
+      ...r.commands.map((c, j) => h('div', { key: `c${j}`, className: 'hint mono' }, `$ ${c.join(' ')}`)),
+      r.created ? h('div', { className: 'hint' }, `폴더: ${r.created.join(', ')}`) : null,
+      r.tail ? h('pre', { style: { marginTop: 10 } }, r.tail.split('\n').slice(-20).join('\n')) : null,
+      r.git === 'scaffolder' ? h('div', { className: 'good' }, '스캐폴더가 git 저장소와 첫 커밋을 만들었다 — 쓰기 행 위임이 git 폴더 규칙으로 선다') : null,
+      r.git === 'offer' ? h('div', { className: 'warn' }, '아직 git 이 아니다 — git init + 첫 커밋을 하면 쓰기 위임이 이어서 돈다') : null,
+      r === last && view.gitInitOffered
+        ? h('div', { className: 'row', style: { marginTop: 8 } },
+            h('button', { className: 'btn accent', disabled: locked, onClick: () => act(orc.convGitInit()) }, 'git init + 첫 커밋'),
+            h('span', { className: 'hint' }, 'git init · git add -A · git commit — 내 git 신원으로 커밋한다'))
         : null);
 
   const record = (r: Rec, i: number): ReactNode => {
@@ -693,7 +731,12 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       }
       case 'plan':
         return planCard(r, i, r === last && view.state === 'blocked');
+      case 'scaffold':
+        return scaffoldCard(r, i, r === last && view.state === 'blocked' && view.scaffoldPending);
+      case 'scaffold-run':
+        return scaffoldRunCard(r, i);
       case 'approval':
+        if (r.approved && r.asked?.includes('H7')) return h('div', { key: i, className: 'hint' }, '스캐폴딩 실행 확인');
         // 자동 승인도 카드·비용은 그대로 위에 보인다 (G2·FR-5) — 승인 클릭만 없다 (D-064 결정 7).
         return h('div', { key: i, className: 'hint' }, r.approved && r.by === 'auto' ? `자동 승인 · ${r.mode ?? ''} · 묻는 조건 없음` : r.approved ? `승인${r.write ? ' · 쓰기 켜짐' : ''}` : '거절');
       case 'mode':

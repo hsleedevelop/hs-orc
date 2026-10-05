@@ -22,7 +22,7 @@ export const A2_REMAINING_FACTOR = 2;
 /** A2 토큰 (D-064 U4): 남은 토큰이 `tokenBudget` 의 이 비율 미만이다. 배정별 예상 토큰이 없어 비율로 둔다. */
 export const A2_TOKEN_REMAINING_RATIO = 0.2;
 
-export type AskCode = 'H1' | 'H2' | 'H3' | 'H4' | 'H5' | 'H6' | 'A1' | 'A2' | 'A3' | 'A4';
+export type AskCode = 'H1' | 'H2' | 'H3' | 'H4' | 'H5' | 'H6' | 'H7' | 'A1' | 'A2' | 'A3' | 'A4';
 
 /** 묻는 이유 하나. `text` 는 카드에 이름으로 보인다 — 이유 없이 선 카드는 무엇을 봐야 할지 모른다. */
 export interface AskReason {
@@ -73,12 +73,20 @@ export function dirtyWriteRisk(write: boolean, dirty: readonly string[] | null):
 
 /**
  * H6 — 쓰기 행인데 git 아닌 폴더라 쓰기 없이 선 배정이다 (D-086). 그대로 돌면 파일을 하나도 못 만들고 reviewer FAIL 로
- * 끝난다(1005-1844-173 실측) — 헛실행을 클릭 없이 시작하지 않는다.
+ * 끝난다(1005-1844-173·1005-2233-dc3 실측) — **읽기 전용 승인은 막는다** (D-088). 묻는 이유가 아니라 승인을 막는 조건이다.
  */
 export function readOnlyWriteRow(rowWrite: boolean, write: boolean, inGit: boolean): AskReason | null {
   if (!rowWrite || write || inGit) return null;
-  return { code: 'H6', text: '쓰기 행인데 git 아닌 폴더라 읽기 전용으로 돈다 — 파일을 만들거나 고치지 못한다. 스캐폴더를 먼저 돌리거나 git init 하라' };
+  return { code: 'H6', text: H6_TEXT };
 }
+
+export const H6_TEXT = '쓰기 행인데 git 아닌 폴더라 읽기 전용으로만 돈다 — 파일을 만들거나 고치지 못해 읽기 전용 승인은 막는다. 새 프로젝트면 빈 폴더에서 "next 앱 init" 처럼 보내 스캐폴딩 카드로, 기존 파일이면 git init 한 뒤 다시 보낸다 (D-088)';
+
+/** H7 — hs-orc 가 허용 목록의 스캐폴더를 엔진 없이 직접 실행한다 (D-088). 어느 방식에서도 사람이 확인한다 — 자동 승인 경로가 없다. */
+export const scaffoldAsk = (): AskReason => ({
+  code: 'H7',
+  text: 'hs-orc 가 이 명령을 엔진 없이 이 폴더에서 직접 실행한다 — 네트워크로 패키지를 받아 폴더에 파일을 만든다. 사람이 확인해야 돈다 (자동 승인 없음)',
+});
 
 const isFailure = (r: TranscriptRecord): boolean =>
   r.kind === 'result' && (r.outcome === 'wrong' || r.outcome === 'rework' || r.verdict === 'fail');

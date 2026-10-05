@@ -11,7 +11,7 @@ import { loadEngines } from '../../data/engines.ts';
 import { Budget } from '../budget.ts';
 import { Journal } from '../journal.ts';
 import type { EngineReport, SlotExecutor, SlotRun } from '../executor.ts';
-import { ConversationSession, SessionStateError } from '../session.ts';
+import { ConversationSession, H6_BLOCKED, SessionStateError } from '../session.ts';
 import { readDecisions } from '../decision-log.ts';
 import { JevUnavailableError, type JevChoiceAnswer, type JevChoiceRequest, type RowClassifier } from '../../adapters/jev.ts';
 import { appendRecord, replaySpend, transcriptPath, type TranscriptRecord } from '../transcript.ts';
@@ -1129,8 +1129,11 @@ describe('지휘자 선택·단계 계획 (D-087)', () => {
     assert.deepEqual(card.asked?.map((a) => a.code), ['H1', 'H6']);
     assert.equal(card.write, undefined, 'git 밖에서는 쓰기로 서지 않는다');
     assert.ok(card.guide?.some((g) => /스캐폴더/.test(g)));
-    await session.approve({ write: true });
-    assert.deepEqual(writes, [false, false], '쓰기 단계가 없으면 스위치를 켜도 쓰지 않는다');
+    assert.equal(card.readOnlyBlocked, true);
+    // git 밖 쓰기 행 단계는 읽기 전용으로 헛돈다 — 승인을 막는다 (D-088). 카드는 그대로 남아 거절·새 메시지로 넘어간다.
+    await assert.rejects(session.approve({ write: true }), new RegExp(H6_BLOCKED.slice(0, 20)));
+    assert.deepEqual(writes, [], '어느 단계도 시작하지 않는다');
+    assert.equal(session.state, 'blocked');
   });
 
   it('승인했지만 시작하지 않은 단계(선행 실패로 건너뜀)도 사유와 함께 결정 로그에 남는다 (SPEC §8, 리뷰 #114-2)', async () => {

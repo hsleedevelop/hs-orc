@@ -9,11 +9,12 @@ import { APPROVAL_MODES, isApprovalMode, isOrchestratorEngine, type ApprovalMode
 import { CODEX_BLOCKED, defaultOrchestrator, orchestratorOptions } from '../core/conductor.ts';
 import { slotLine } from '../core/reader.ts';
 import type { Budget } from '../core/budget.ts';
-import type { ConversationSession } from '../core/session.ts';
+import { H6_BLOCKED, type ConversationSession } from '../core/session.ts';
 import { readSessionLog, type SessionSummary, type TranscriptRecord } from '../core/transcript.ts';
 import { busyMessage, claimSession, foreignHold, lockPath, releaseSession, syncHold } from '../core/session-lock.ts';
 import { ambiguous, matchSessions } from './session-registry.ts';
 import { compactLines, cutLine, lastEvent, ladderLines, retryLines } from './transcript-lines.ts';
+import { commandLine } from '../core/scaffold.ts';
 
 export function renderRecord(r: TranscriptRecord): string[] {
   switch (r.kind) {
@@ -47,8 +48,18 @@ export function renderRecord(r: TranscriptRecord): string[] {
         ...retryLines(r.retry),
         // 묻는 카드는 걸린 조건을 이름으로 보인다 (D-064). manual 은 늘 묻고, 이유가 없으면 자동 승인이 뒤따른다.
         ...(r.mode && r.mode !== 'manual' && r.asked && r.asked.length > 0 ? [`묻는 이유  ${r.asked.map((a) => `${a.code} ${a.text}`).join(' · ')}`] : []),
+        ...(r.readOnlyBlocked ? [`막음   ${H6_BLOCKED}`] : []),
       ];
+    case 'scaffold':
+      return [
+        `스캐폴딩  ${r.label} — hs-orc 가 엔진 없이 이 폴더에서 직접 실행한다 · 엔진 비용 0`,
+        `명령   ${commandLine(r.argv)}`,
+        `묻는 이유  ${r.asked.map((a) => `${a.code} ${a.text}`).join(' · ')}`,
+      ];
+    case 'scaffold-run':
+      return scaffoldRunLines(r);
     case 'approval':
+      if (r.approved && r.asked?.includes('H7')) return ['승인   스캐폴딩 실행 — 사람이 확인했다'];
       if (r.approved && r.by === 'auto') return [`승인   자동 승인 · ${r.mode ?? ''} · 묻는 조건 없음 — 읽기 전용`];
       return [r.approved ? `승인   ${r.write ? '쓰기 켬 — primary 가 파일을 고칠 수 있다' : '읽기 전용'}` : '거절'];
     case 'mode':
@@ -91,8 +102,21 @@ export function renderRecord(r: TranscriptRecord): string[] {
   }
 }
 
+/** 스캐폴딩·git init 결과 (D-088). chat·`hs-orc session` 이 같은 줄을 쓴다. */
+function scaffoldRunLines(r: Extract<TranscriptRecord, { kind: 'scaffold-run' }>): string[] {
+  const what = r.step === 'scaffold' ? '스캐폴딩' : 'git init';
+  return [
+    `결과   ${what} · ${r.outcome}${r.exitCode !== null ? ` · exit ${r.exitCode}` : ''} · ${(r.durationMs / 1000).toFixed(1)}s · 엔진 비용 0`,
+    ...r.commands.map((c) => `명령   ${commandLine(c)}`),
+    ...(r.created ? [`폴더   ${r.created.join(', ')}`] : []),
+    ...(r.tail ? [r.tail.split('\n').slice(-12).join('\n')] : []),
+    ...(r.git === 'scaffolder' ? ['git    스캐폴더가 저장소와 첫 커밋을 만들었다 — 쓰기 행 위임이 git 폴더 규칙으로 선다'] : []),
+    ...(r.git === 'offer' ? ['git    아직 git 이 아니다 — /git-init 으로 git init + 첫 커밋을 하면 쓰기 위임이 이어서 돈다'] : []),
+  ];
+}
+
 export const CHAT_HELP = [
-  '명령   메시지를 그냥 쓰면 보낸다 · /write <문장> 쓰기 위임으로 보낸다 · /task Rxx 마지막 메시지를 그 행으로 배정 · /read 마지막 메시지를 읽기 전용 1슬롯이 코드를 읽고 답한다(카드 없이 바로) · /ladder 실패·미검증 뒤 사다리 다음 단계로 다시 위임(카드만 선다) · /steps 마지막 메시지를 지휘자가 위임 단계로 나눈 계획으로 세운다(승인하면 단계마다 차례로 위임) · /mode [방식] · /orc [claude|모델] [effort] 지휘자 바꾸기(claude 만 — codex 는 막았다) · /help · /quit (Ctrl-D)',
+  '명령   메시지를 그냥 쓰면 보낸다 · /write <문장> 쓰기 위임으로 보낸다 · /task Rxx 마지막 메시지를 그 행으로 배정 · /read 마지막 메시지를 읽기 전용 1슬롯이 코드를 읽고 답한다(카드 없이 바로) · /ladder 실패·미검증 뒤 사다리 다음 단계로 다시 위임(카드만 선다) · /steps 마지막 메시지를 지휘자가 위임 단계로 나눈 계획으로 세운다(승인하면 단계마다 차례로 위임) · /git-init 스캐폴딩이 git 없이 끝났으면 git init + 첫 커밋 · /mode [방식] · /orc [claude|모델] [effort] 지휘자 바꾸기(claude 만 — codex 는 막았다) · /help · /quit (Ctrl-D)',
   '방식   /mode manual 매번 묻는다 · auto-ask 쓰기·모델이 고른 행·비싼 조합·상한 근접·첫 위임만 묻는다 · auto 쓰기·모델이 고른 행만 묻는다 — 자동은 이 메시지의 배정 1건만 시작한다',
   '승인   배정이 뜨면 y 읽기 전용 · w 쓰기 · n 거절 · a 지휘자에게 묻기 · 문장을 쓰면 거절하고 그 메시지를 보낸다',
   '취소   위임이 도는 중 Ctrl-C 한 번 — 그 위임만 멈추고 세션은 남는다 · 한 번 더 누르면 나간다',
@@ -145,7 +169,11 @@ export async function runChat(
   });
   const ask = (): void => {
     if (closed) return;
-    if (session.state === 'blocked') say(session.stepsPending ? '승인?  y 읽기 전용 · w 쓰기 행 단계에 쓰기 · n 거절 — 단계마다 차례로 위임한다' : '승인?  y 읽기 전용 · w 쓰기 · n 거절 · a 지휘자에게 묻기');
+    if (session.state === 'blocked') {
+      say(session.scaffoldPending ? '실행?  y 위 명령을 이 폴더에서 실행 · n 거절'
+        : session.stepsPending ? '승인?  y 읽기 전용 · w 쓰기 행 단계에 쓰기 · n 거절 — 단계마다 차례로 위임한다'
+        : '승인?  y 읽기 전용 · w 쓰기 · n 거절 · a 지휘자에게 묻기');
+    }
     rl.setPrompt('> ');
     rl.prompt();
   };
@@ -210,14 +238,17 @@ export async function runChat(
         } else if (line.startsWith('/write ')) {
           show(await session.send(line.slice('/write '.length), { write: true }));
         } else if (session.state === 'blocked') {
-          if (line === 'y' || line === 'w') {
+          if (line === 'y' || (line === 'w' && !session.scaffoldPending)) {
             show(await session.approve({ verify: options.verify, write: line === 'w' }));
             say(`누적   ${budget.summary()}`);
           } else if (line === 'n') show(session.reject());
-          else if (line === 'a' && !session.stepsPending) show(await session.askConductor());
+          else if (line === 'a' && !session.stepsPending && !session.scaffoldPending) show(await session.askConductor());
           // 공백이 든 문장은 새 메시지다 — 배정은 거절로 남는다 (D-064). 한 단어(오타 y·yes 등)는 유료 호출로 새지 않게 되묻는다.
           else if (/\s/.test(line) && !line.startsWith('/')) show(await session.send(line));
           else say('y·w·n·a 중 하나로 답한다 (새 메시지는 문장으로 쓴다).');
+        } else if (line === '/git-init') {
+          // 스캐폴딩이 git 없이 끝났을 때만 (D-088) — 이 명령이 승인이다.
+          show(await session.initGit());
         } else if (line === '/read') {
           // 질문형 경로 (D-083) — 이 명령이 승인이다. 카드 없이 바로 돈다.
           show(await session.readAnswer());
@@ -323,6 +354,8 @@ export function openingLines(session: ConversationSession, budget: Budget, tail 
     ...(session.state === 'waiting_input' && session.ladderOffer() ? [`안내   /ladder — 사다리 ${session.ladderOffer()?.label}(으)로 다시 위임하는 배정 카드를 세운다.`] : []),
     // 카드 합치기(D-064) 이전 기록 — 제안만 있고 배정이 없다.
     ...(last?.kind === 'direct' && last.suggest ? [`안내   ${last.suggest} 로 위임하려면 /task ${last.suggest}.`] : []),
+    ...(last?.kind === 'scaffold' ? ['안내   승인 안 된 스캐폴딩 카드는 되살리지 않는다 — 같은 메시지를 다시 보낸다.'] : []),
+    ...(session.gitInitOffered ? ['안내   /git-init — 스캐폴딩 폴더에 git init + 첫 커밋을 한다.'] : []),
     CHAT_HELP,
   ];
 }

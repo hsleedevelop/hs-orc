@@ -92,6 +92,8 @@ export type TranscriptEntry =
       readonly ladder?: LadderRecord;
       /** 승인한 같은 배정이 예외(throw)로 끝나 같은 계획으로 다시 세운 카드다 (D-081). 옛 기록에는 없다. */
       readonly retry?: true;
+      /** git 아닌 폴더의 쓰기 행이라(H6) 읽기 전용으로는 승인하지 않는다 (D-088). 쓰기를 켜면 승인할 수 있다(H4). 옛 기록에는 없다. */
+      readonly readOnlyBlocked?: true;
     }
   | {
       readonly kind: 'approval';
@@ -100,7 +102,7 @@ export type TranscriptEntry =
       /** 누가 승인했나 (D-064 결정 7). 이 결정 전 기록·거절에는 없다. */
       readonly by?: 'user' | 'auto';
       readonly mode?: ApprovalMode;
-      /** 그 배정에서 걸린 조건 코드(`H1`…`H6`·`A1`…`A4`). 자동 승인은 비어 있다. */
+      /** 그 배정에서 걸린 조건 코드(`H1`…`H7`·`A1`…`A4`). 자동 승인은 비어 있다. 스캐폴딩 승인은 `H7` 이다 (D-088). */
       readonly asked?: readonly string[];
     }
   /** 승인 방식 변경 (D-064 결정 8). 세션을 열면 마지막 것을 재생한다 — 화면에 한 줄로 보인다(감사용). */
@@ -134,10 +136,44 @@ export type TranscriptEntry =
       readonly asked?: readonly AskReason[];
       /** 다음 행동 안내 — git 아닌 폴더의 쓰기 행 스캐폴더 (D-074·D-086). */
       readonly guide?: readonly string[];
+      /** git 아닌 폴더의 쓰기 행 단계가 있어(H6) 승인하지 않는다 — 그 단계들이 읽기 전용으로 헛돈다 (D-088). 옛 기록에는 없다. */
+      readonly readOnlyBlocked?: true;
       /** 계획한 지휘자 슬롯 한 줄과 그 실행 비용. */
       readonly by: string;
       readonly cost: string;
       readonly cut?: ContextCut;
+    }
+  /**
+   * 스캐폴딩 카드 (D-088). 허용 목록(`data/scaffolders.json`)의 명령을 엔진 없이 이 폴더에서 실행할지 묻는다 —
+   * 어느 승인 방식에서도 사람이 확인해야 돈다(H7, 자동 승인 없음). 옛 기록에는 없다.
+   */
+  | {
+      readonly kind: 'scaffold';
+      /** 허용 목록 항목 id (`next` 등). */
+      readonly scaffolder: string;
+      readonly label: string;
+      readonly argv: readonly string[];
+      readonly asked: readonly AskReason[];
+    }
+  /**
+   * 스캐폴딩·git init 실행 결과 (D-088). 엔진을 부르지 않아 비용이 없다 — `spend` 를 남기지 않는다. 옛 기록에는 없다.
+   * `refused` 는 실행 직전 다시 본 폴더가 비어 있지 않거나 명령이 허용 목록에 없어 띄우지 않은 것이다.
+   */
+  | {
+      readonly kind: 'scaffold-run';
+      readonly step: 'scaffold' | 'git-init';
+      readonly commands: readonly (readonly string[])[];
+      readonly outcome: 'ok' | 'failed' | 'cancelled' | 'timeout' | 'refused';
+      readonly exitCode: number | null;
+      /** 출력 끝부분 (ANSI 제거). `refused` 면 거부 사유. */
+      readonly tail: string;
+      readonly durationMs: number;
+      /**
+       * 스캐폴딩이 성공했을 때 폴더의 git: `existing` 원래 git · `scaffolder` 스캐폴더가 만들었다 · `offer` 아직 없다 — `git init` + 첫 커밋을 제안한다.
+       */
+      readonly git?: 'existing' | 'scaffolder' | 'offer';
+      /** 끝난 뒤 폴더 맨 위 이름들(앞 12개) — 무엇이 생겼는지의 증거. */
+      readonly created?: readonly string[];
     }
   /** 세션 이름 (D-085). 마지막 것이 이긴다 — 빈 문자열은 이름을 지운다. id 와 함께 `hs-orc session` 이 세션을 찾는 열쇠다. */
   | { readonly kind: 'name'; readonly name: string }

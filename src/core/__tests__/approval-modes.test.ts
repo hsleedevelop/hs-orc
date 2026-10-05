@@ -4,7 +4,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadMatrix } from '../../data/matrix.ts';
@@ -12,7 +12,7 @@ import { loadEngines, type Engines } from '../../data/engines.ts';
 import { loadLimits, type ApprovalMode } from '../../data/limits.ts';
 import type { JevChoiceAnswer, RowClassifier } from '../../adapters/jev.ts';
 import { assign } from '../assign.ts';
-import { evaluateApproval, evaluateRead, isModelPick } from '../approval.ts';
+import { H6_TEXT, evaluateApproval, evaluateRead, isModelPick } from '../approval.ts';
 import { readerSlot } from '../reader.ts';
 import { uncommittedFiles } from '../evidence-gather.ts';
 import { Budget } from '../budget.ts';
@@ -352,13 +352,18 @@ describe('git 아닌 폴더의 쓰기 위임 — H4 예고·스캐폴더 안내 
     assert.deepEqual(guideOf(plan), [H4, SCAFFOLD_GUIDE]);
   });
 
-  it('행 없이 직접 답으로 가도 git 아닌 폴더의 쓰기 메시지면 스캐폴더 안내가 붙는다', async () => {
+  it('행 없이 직접 답으로 가도 git 아닌 폴더의 쓰기 메시지면 스캐폴딩 안내가 붙는다 — 파일이 있어 스캐폴딩 카드가 서지 않는 폴더 (D-088)', async () => {
     isolate();
-    const m = make({ mode: 'auto-ask', inGit: false, withJev: false });
-    const out = await m.session.send('빈 폴더에 Expo 프로젝트 생성해줘', { write: true });
+    const occupied = () => {
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-modes-occupied-'));
+      writeFileSync(path.join(dir, 'README.md'), '#');
+      return dir;
+    };
+    const m = make({ mode: 'auto-ask', inGit: false, withJev: false, dir: occupied() });
+    const out = await m.session.send('Expo 프로젝트 생성해줘', { write: true });
     assert.deepEqual(guideOf(out.find((r) => r.kind === 'direct')), [SCAFFOLD_GUIDE]);
-    const git = make({ mode: 'auto-ask', inGit: true, withJev: false });
-    assert.deepEqual(guideOf((await git.session.send('빈 폴더에 Expo 프로젝트 생성해줘', { write: true })).find((r) => r.kind === 'direct')), []);
+    const git = make({ mode: 'auto-ask', inGit: true, withJev: false, dir: occupied() });
+    assert.deepEqual(guideOf((await git.session.send('Expo 프로젝트 생성해줘', { write: true })).find((r) => r.kind === 'direct')), []);
   });
 });
 
@@ -369,7 +374,7 @@ describe('쓰기 행 기본값 — auto 는 git 폴더에서 쓰기로 바로 �
   it('auto · git · 쓰기 행 · 깨끗한 폴더면 카드는 쓰기 켠 채 보이고 클릭 없이 쓰기로 시작한다', async () => {
     isolate();
     const m = make({ mode: 'auto', row: 'R03', writeRows: WRITE_ROWS, inGit: true });
-    const out = await m.session.send('next 앱 init 해줘');
+    const out = await m.session.send('기능 추가해줘');
     assert.deepEqual(kinds(out), ['user', 'plan', 'approval', 'result', 'summary']);
     const [, plan, approval] = out;
     assert.ok(plan?.kind === 'plan' && plan.write === true && plan.asked?.length === 0);
@@ -415,15 +420,28 @@ describe('쓰기 행 기본값 — auto 는 git 폴더에서 쓰기로 바로 �
     assert.match(plan?.kind === 'plan' ? (plan.asked?.[0]?.text ?? '') : '', /확인하지 못했다/);
   });
 
-  it('H6 — git 아닌 폴더의 쓰기 행은 읽기 전용으로 헛돌지 않게 묻고 스캐폴더 안내를 붙인다', async () => {
+  it('H6 — git 아닌 폴더의 쓰기 행은 묻고 스캐폴딩 안내를 붙이며, 읽기 전용 승인은 막는다 (D-088) — 쓰기를 켜면 승인된다', async () => {
     isolate();
-    const m = make({ mode: 'auto', row: 'R03', writeRows: WRITE_ROWS, inGit: false });
-    await m.session.send('next 앱 init 해줘');
-    assert.equal(m.session.state, 'blocked');
-    const plan = lastPlan(m.session);
-    assert.ok(plan?.kind === 'plan' && plan.write !== true, 'git 밖에서는 쓰기를 켜지 않는다 — codex 가 거절한다(H4)');
-    assert.deepEqual(codes(m.session), ['H6']);
-    assert.deepEqual(guideOf(plan), [SCAFFOLD_GUIDE]);
+    for (const mode of ['auto', 'manual'] as const) {
+      const m = make({ mode, row: 'R03', writeRows: WRITE_ROWS, inGit: false });
+      await m.session.send('기능 추가해줘');
+      assert.equal(m.session.state, 'blocked');
+      const plan = lastPlan(m.session);
+      assert.ok(plan?.kind === 'plan' && plan.write !== true, 'git 밖에서는 쓰기를 켜지 않는다 — codex 가 거절한다(H4)');
+      assert.equal(plan?.kind === 'plan' && plan.readOnlyBlocked, true, mode);
+      if (mode === 'auto') {
+        assert.deepEqual(codes(m.session), ['H6']);
+        assert.deepEqual(guideOf(plan), [SCAFFOLD_GUIDE]);
+      } else assert.deepEqual(guideOf(plan), [H6_TEXT, SCAFFOLD_GUIDE], 'manual 은 같은 줄을 안내로 싣는다');
+      // 1005-2233-dc3 재현: 승인하면 읽기 전용 헛실행이 돌았다. 이제 막고 카드는 남는다.
+      await assert.rejects(m.session.approve({ write: false }), /읽기 전용으로 승인하지 않는다/);
+      assert.equal(m.spy.roles.length, 0, `${mode} — 엔진을 띄우지 않는다`);
+      assert.equal(m.session.state, 'blocked');
+      assert.ok(!m.session.records().some((r) => r.kind === 'approval'), '승인 기록도 남기지 않는다');
+      // 쓰기를 켠 승인은 사람이 고른 것이다 — H4(엔진 거절 예고) 규칙대로 시작한다.
+      await m.session.approve({ write: true });
+      assert.equal(m.spy.primaries(), 1);
+    }
   });
 
   it('쓰기 행이 아니거나 스크래치면 종전대로 읽기 전용 자동 시작이다', async () => {

@@ -1,0 +1,28 @@
+{
+  "$note": "스캐폴딩 전용 경로의 허용 목록 (D-088). 수기 파일이다. hs-orc 는 여기 적힌 argv 만, 사람이 카드에서 확인한 뒤, 엔진 없이 세션 폴더에서 셸 없이(spawn argv) 실행한다. 사용자 문장은 argv 에 들어가지 않는다 — 문장은 아래 keywords 로 어느 항목인지 고르기만 한다.",
+  "$rules": "bin 은 npx 만, 패키지는 create-* 만, 대상 폴더 인자는 '.' 하나, 인자는 영문·숫자·@ . _ / = : - 만 (로더가 검사한다 — 셸 메타문자를 담을 수 없다). 대화형 질문이 없게 비대화 플래그를 함께 적는다 — stdin 은 닫혀 있고 묻는 스캐폴더는 timeoutMs 에서 죽는다.",
+  "timeoutMs": 600000,
+  "timeoutRationale": "npm install 까지 도는 스캐폴더(create-next-app·create-expo-app)가 느린 망에서 수 분이 걸린다. 넘으면 프로세스 그룹째 종료한다.",
+  "ignore": [".git", ".DS_Store"],
+  "ignoreRationale": "빈 폴더 판정에서 빼는 이름. git init 만 한 폴더·Finder 가 만든 파일은 비어 있는 것으로 본다. 그 밖의 파일이 하나라도 있으면 카드를 세우지 않고 실행 직전에도 다시 보고 거부한다 — 스캐폴더가 덮을 수 있다.",
+  "scaffolders": [
+    {
+      "id": "next",
+      "label": "Next.js (App Router · TypeScript · ESLint · npm)",
+      "keywords": ["create-next-app", "next.js", "nextjs", "next"],
+      "argv": ["npx", "--yes", "create-next-app@latest", ".", "--ts", "--eslint", "--app", "--use-npm", "--yes"]
+    },
+    {
+      "id": "expo",
+      "label": "Expo (기본 템플릿)",
+      "keywords": ["create-expo-app", "expo"],
+      "argv": ["npx", "--yes", "create-expo-app@latest", ".", "--yes"]
+    },
+    {
+      "id": "vite",
+      "label": "Vite (React · TypeScript)",
+      "keywords": ["create-vite", "vite"],
+      "argv": ["npx", "--yes", "create-vite@latest", ".", "--template", "react-ts", "--no-interactive", "--no-immediate"]
+    }
+  ]
+}
