@@ -65,6 +65,7 @@ interface Bridge {
   convEscalate(): Promise<SessionView>;
   convReject(): Promise<SessionView>;
   convAsk(): Promise<SessionView>;
+  convTerminal(): Promise<string>;
   convClose(): Promise<void>;
   tasks(): Promise<TaskRow[]>;
   projects(): Promise<ProjectState>;
@@ -586,6 +587,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       }, ...MODES.map((m) => h('option', { key: m.id, value: m.id, title: m.hint }, `승인 · ${m.label}`))),
       h('span', { className: 'dim mono' }, view.budget),
       h('span', { className: 'dim mono' }, view.appBudget),
+      // 엔진이 도는 중에도 연다 — 세션 상태를 건드리지 않고 그 폴더를 사람 손에 넘길 뿐이다.
+      h('button', { className: 'btn', title: `${view.dir} 에서 터미널 열기`, onClick: () => { orc.convTerminal().catch((e: unknown) => setError(why(e))); } }, '터미널'),
       h('button', { className: 'btn', onClick: props.onClose }, '세션 닫기')),
     view.broken > 0 ? h('div', { className: 'banner error' }, `기록에 깨진 줄 ${view.broken}개 — 건너뛰고 보여준다`) : null,
     view.interrupted ? h('div', { className: 'banner error' }, '승인한 위임의 결과가 기록되지 않았다 — 실행 중 앱이 끊겼다. 결정 로그 1차 줄만 남아 있을 수 있다.') : null,

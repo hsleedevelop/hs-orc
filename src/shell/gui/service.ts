@@ -27,7 +27,7 @@ import {
   type SessionSummary,
   type TranscriptRecord,
 } from '../../core/transcript.ts';
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import {
   describeProject,
@@ -46,6 +46,7 @@ import {
   type WorktreeInfo,
 } from './worktree.ts';
 import type { RowClassifier } from '../../adapters/jev.ts';
+import { openTerminal } from './terminal.ts';
 import { assembleSession, restoreBudget } from '../conversation.ts';
 
 export { skipGitCheck } from '../conversation.ts';
@@ -467,6 +468,17 @@ export class GuiService {
       if (this.live.get(key) === s) this.live.delete(key);
       if (this.liveCalls.get(key) === call) this.liveCalls.delete(key);
     }
+  }
+
+  /**
+   * 열린 세션의 폴더에서 터미널을 연다. 경로는 화면에서 받지 않는다 — 렌더러가 임의 폴더를 열게 하지 않는다(D-021).
+   * `open` 은 테스트가 실제 터미널을 띄우지 않게 바꿔 끼우는 자리다.
+   */
+  async openSessionTerminal(open: (dir: string) => Promise<void> = openTerminal): Promise<string> {
+    const { dir } = this.requireConversation();
+    if (!existsSync(dir)) throw new Error(`세션 폴더가 없다: ${dir}`);
+    await open(dir);
+    return dir;
   }
 
   closeConversation(): void {

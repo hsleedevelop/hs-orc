@@ -79,6 +79,7 @@ ipcMain.handle('conv-cancel', () => service.converseCancel());
 ipcMain.handle('conv-escalate', () => service.converseEscalate());
 ipcMain.handle('conv-reject', () => service.converseReject());
 ipcMain.handle('conv-ask', () => service.converseAsk());
+ipcMain.handle('conv-terminal', () => service.openSessionTerminal());
 ipcMain.handle('conv-close', () => service.closeConversation());
 
 void app.whenReady().then(() => {
