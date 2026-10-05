@@ -46,7 +46,7 @@ import {
   type WorktreeInfo,
 } from './worktree.ts';
 import type { RowClassifier } from '../../adapters/jev.ts';
-import { openTerminal } from './terminal.ts';
+import { isTerminalId, openTerminal, terminalCommand, type TerminalId } from './terminal.ts';
 import { assembleSession, restoreBudget } from '../conversation.ts';
 
 export { skipGitCheck } from '../conversation.ts';
@@ -473,12 +473,16 @@ export class GuiService {
 
   /**
    * 열린 세션의 폴더에서 터미널을 연다. 경로는 화면에서 받지 않는다 — 렌더러가 임의 폴더를 열게 하지 않는다(D-021).
-   * `open` 은 테스트가 실제 터미널을 띄우지 않게 바꿔 끼우는 자리다.
+   * 터미널도 목록의 id 로만 받는다. `open` 은 테스트가 실제 터미널을 띄우지 않게 바꿔 끼우는 자리다.
    */
-  async openSessionTerminal(open: (dir: string) => Promise<void> = openTerminal): Promise<string> {
+  async openSessionTerminal(
+    terminal: unknown = 'default',
+    open: (dir: string, terminal: TerminalId) => Promise<void> = (dir, t) => openTerminal(dir, terminalCommand(dir, undefined, undefined, t)),
+  ): Promise<string> {
+    if (!isTerminalId(terminal)) throw new Error(`모르는 터미널: ${String(terminal)}`);
     const { dir } = this.requireConversation();
     if (!existsSync(dir)) throw new Error(`세션 폴더가 없다: ${dir}`);
-    await open(dir);
+    await open(dir, terminal);
     return dir;
   }
 
