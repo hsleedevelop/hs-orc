@@ -201,13 +201,20 @@ describe('session — --run 은 카드의 쓰기 값을 따른다 (D-085 결정 
     });
   }
 
-  it('미커밋 변경이 있으면(H5) --run 은 쓰기를 켜지 않고 그 사실을 알린다', async () => {
+  it('쓰기 행 카드 + 미커밋 변경(H5) + --run(--write 없음) 이면 실행하지 않고 거절로 남긴다 — 엔진 0회·exit 1', async () => {
     const { dir } = gitFixture('w-dirty', 'manual');
     writeFileSync(path.join(dir, 'draft.txt'), '커밋 안 한 변경');
-    const out = await sendToSession({ cwd: dir, ref: 'w-dirty', message: '이 타입 에러 고쳐줘', write: false, run: true, verify: [], execute: fake });
+    const roles: string[] = [];
+    const watch: SlotExecutor = (slot, prompt, options) => {
+      roles.push(slot.role);
+      return fake(slot, prompt, options);
+    };
+    const out = await sendToSession({ cwd: dir, ref: 'w-dirty', message: '이 타입 에러 고쳐줘', write: false, run: true, verify: [], execute: watch });
+    assert.equal(roles.length, 0, `기록: ${out.records.map((r) => r.kind).join(',')}`);
     const approval = out.records.find((r) => r.kind === 'approval');
-    assert.ok(approval?.kind === 'approval' && approval.approved && !approval.write);
-    assert.match(out.lines.join('\n'), /미커밋 변경 1개가 있어 읽기 전용으로 승인했다 \(H5\)/);
+    assert.ok(approval?.kind === 'approval' && !approval.approved, '거절로 남긴다');
+    assert.equal(out.exitCode, 1);
+    assert.match(out.lines.join('\n'), /미커밋 변경 1개가 있다 \(H5\) — 실행하지 않고 거절로 남겼다\. 커밋하거나 --write 로 명시하라/);
   });
 });
 

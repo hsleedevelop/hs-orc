@@ -30,7 +30,8 @@ export const SESSION_USAGE = [
   '',
   'send 는 --run 이 있어야 위임(읽기 위임·읽기 답 포함)을 시작한다 — 세션 방식이 auto·auto-ask 여도 같다(auto 는 GUI·chat 몫).',
   '--run 이 없으면 배정 카드는 거절로 남는다 — 제시만 했다. --run 이면 세션 방식대로 승인하고, 선 카드는 --run 이 승인한다.',
-  '--run 은 카드의 쓰기 값을 따른다 — 쓰기 행 카드(D-086)는 --write 없이도 쓰기로 승인하되, 미커밋 변경이 있으면 읽기 전용이다.',
+  '--run 은 카드의 쓰기 값을 따른다 — 쓰기 행 카드(D-086)는 --write 없이도 쓰기로 승인한다. 미커밋 변경이 있거나 확인 못 하면',
+  '실행하지 않고 거절로 남긴다(exit 1) — 커밋하거나 --write 로 명시한다.',
   '--write 는 읽기 행 카드에도 쓰기를 켠다(미커밋 변경이 있어도 켠다 — 명시한 쓰기다).',
   '예외로 끝난 위임의 재시도 카드는 --run 이 있어도 승인하지 않는다. 다른 곳(GUI·chat)이 그 세션을 쥐고 있으면 거절한다.',
 ].join('\n');
@@ -140,7 +141,7 @@ export interface SendOutcome {
   readonly target: SessionSummary;
   readonly records: readonly TranscriptRecord[];
   readonly lines: readonly string[];
-  /** 0 = 오류 없이 끝났다(ok·unverified·직접 답·제시만). 1 = 오류 기록이나 완료가 아닌 결과(wrong·rework·cancelled). */
+  /** 0 = 오류 없이 끝났다(ok·unverified·직접 답·제시만). 1 = 오류 기록이나 완료가 아닌 결과(wrong·rework·cancelled), --run 을 H5 로 거절. */
   readonly exitCode: 0 | 1;
 }
 
@@ -168,28 +169,28 @@ export async function sendToSession(input: SendInput): Promise<SendOutcome> {
     input.onSession?.(session);
     const out: TranscriptRecord[] = [...(await session.send(input.message, { write: input.write }))];
     const notes: string[] = [];
+    // --run 을 받고도 시작하지 않았다(H5) — 제시만(0)과 가르게 exit 1 이다.
+    let refused = false;
     if (session.state === 'blocked') {
       // 자동 승인된 위임이 예외로 끝나 다시 선 카드(D-081)는 사람이 실패를 보고 다시 승인하는 자리다 — 미리 받은 --run 으로 넘기지 않는다.
       const card = session.records().findLast((r) => r.kind === 'plan');
       const retry = card?.kind === 'plan' && card.retry === true;
-      if (input.run && !retry) {
-        // --run 은 카드의 쓰기 값을 따른다 (D-085 결정 5-a, 전하 결정) — D-086 쓰기 행 카드는 --write 없이도 쓰기로 승인한다.
-        // 읽기 전용으로 승인하면 쓰기 행이 파일을 하나도 못 고치고 헛돈다. 미커밋 변경이 있거나 확인 못 하면(H5) 켜지 않는다 —
-        // 사람이 --write 로 정한다. git 밖 쓰기 행(H6)은 카드가 원래 읽기 전용으로 선다.
-        const cardWrite = card?.kind === 'plan' && card.write === true;
-        const dirty = cardWrite && !input.write ? uncommittedFiles(dir) : [];
-        const inherit = cardWrite && !input.write && dirty !== null && dirty.length === 0;
-        if (cardWrite && !input.write && !inherit) {
-          notes.push(`안내   쓰기 행 카드지만 ${dirty === null ? '미커밋 변경을 확인하지 못해' : `미커밋 변경 ${dirty.length}개가 있어`} 읽기 전용으로 승인했다 (H5) — 쓰려면 커밋하거나 --write 를 붙인다.`);
-        }
-        out.push(...(await session.approve({ verify: input.verify, write: input.write || inherit })));
+      // --run 은 카드의 쓰기 값을 따른다 (D-085 결정 5-a, 전하 결정) — D-086 쓰기 행 카드는 --write 없이도 쓰기로 승인한다.
+      // 미커밋 변경이 있거나 확인 못 하면(H5, fail-closed) 승인하지 않는다 — 읽기 전용으로 돌리면 쓰기 행이 파일을 못 고치고 헛돌며
+      // 과금된다. 사람이 커밋하거나 --write 로 정한다. git 밖 쓰기 행(H6)은 카드가 원래 읽기 전용으로 선다.
+      const cardWrite = card?.kind === 'plan' && card.write === true;
+      const dirty = input.run && !retry && cardWrite && !input.write ? uncommittedFiles(dir) : [];
+      const unsafe = dirty === null || dirty.length > 0;
+      if (input.run && !retry && !unsafe) {
+        out.push(...(await session.approve({ verify: input.verify, write: input.write || cardWrite })));
       } else {
         // 카드를 메모리에만 두고 나가면 기록 끝에 죽은 카드가 남는다 — 거절로 닫는다. 실행은 다시 보내며 --run 이다.
         out.push(...session.reject());
+        if (input.run && !retry) refused = true;
         notes.push(
-          retry
-            ? '안내   위임이 예외로 끝났다 — 재시도 카드는 자동으로 승인하지 않는다(D-081). 오류를 보고 같은 메시지를 --run 으로 다시 보낸다.'
-            : '안내   제시만 했다 — 배정은 거절로 남겼다. 실행하려면 같은 메시지를 --run 을 붙여 다시 보낸다.',
+          retry ? '안내   위임이 예외로 끝났다 — 재시도 카드는 자동으로 승인하지 않는다(D-081). 오류를 보고 같은 메시지를 --run 으로 다시 보낸다.'
+          : input.run ? `안내   쓰기 행 카드인데 ${dirty === null ? '미커밋 변경을 확인하지 못했다' : `미커밋 변경 ${dirty.length}개가 있다`} (H5) — 실행하지 않고 거절로 남겼다. 커밋하거나 --write 로 명시하라.`
+          : '안내   제시만 했다 — 배정은 거절로 남겼다. 실행하려면 같은 메시지를 --run 을 붙여 다시 보낸다.',
         );
       }
     }
@@ -200,7 +201,7 @@ export async function sendToSession(input: SendInput): Promise<SendOutcome> {
       `상태   ${statusLabel(recordedStatus(session.records()))} · ${id}${session.name ? ` (${session.name})` : ''}`,
       `누적   ${budget.summary()}`,
     ];
-    return { target, records: out, lines, exitCode: failed ? 1 : 0 };
+    return { target, records: out, lines, exitCode: failed || refused ? 1 : 0 };
   } finally {
     releaseSession(dir, id);
   }
