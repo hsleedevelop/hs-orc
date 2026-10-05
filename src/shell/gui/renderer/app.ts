@@ -303,7 +303,7 @@ const sameSession = (a: { id: string; dir: string } | null, b: { id: string; dir
 const kTokens = (n: number): string => (n < 1000 ? String(n) : n < 1e6 ? `${(n / 1000).toFixed(1)}k` : `${(n / 1e6).toFixed(2)}M`);
 
 /**
- * 사이드바 세션 행의 사용량 한 줄과 그 풀이(title). 구독제 환산액을 청구액처럼 보이지 않게 `환산` 을 붙인다 (D-030).
+ * 사이드바 세션 행의 사용량 한 줄과 그 풀이(title). 줄에는 `토큰` 라벨을 빼 `환산` 이 잘리지 않게 한다 — 라벨은 title 에 있다. 구독제 환산액을 청구액처럼 보이지 않게 `환산` 을 붙인다 (D-030).
  * 캐시 읽기 내역을 모르는 보고가 섞였으면 비율은 하한이라 `≥` 를 붙이고, 아는 몫이 0 이면 비율을 뺀다 — 0% 는 거짓이다.
  */
 function usageLine(u: SessionUsage): { line: string; title: string } {
@@ -316,7 +316,7 @@ function usageLine(u: SessionUsage): { line: string; title: string } {
   const title =
     `토큰 ${u.tokens.toLocaleString()} · 캐시 읽기 ${u.cacheReadTokens.toLocaleString()}${u.cacheReadPartial ? ' 이상 (내역 모르는 보고 섞임)' : ''}` +
     ` · 청구 $${u.billedUsd.toFixed(4)} · API 환산 $${u.convertedUsd.toFixed(4)} (구독제, 청구 안 됨)`;
-  return { line: `토큰 ${kTokens(u.tokens)}${cache} · ${usd}`, title };
+  return { line: `${kTokens(u.tokens)}${cache} · ${usd}`, title };
 }
 
 /**
