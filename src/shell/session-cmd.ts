@@ -11,7 +11,7 @@
 import type { RowClassifier } from '../adapters/jev.ts';
 import type { SlotExecutor } from '../core/executor.ts';
 import { Journal } from '../core/journal.ts';
-import type { ConversationSession } from '../core/session.ts';
+import { H6_BLOCKED, type ConversationSession } from '../core/session.ts';
 import { uncommittedFiles } from '../core/evidence-gather.ts';
 import { claimSession, releaseSession } from '../core/session-lock.ts';
 import { readSessionLog, recordedStatus, sessionStatus, type SessionSummary, type TranscriptRecord } from '../core/transcript.ts';
@@ -33,7 +33,8 @@ export const SESSION_USAGE = [
   '--run 은 카드의 쓰기 값을 따른다 — 쓰기 행 카드(D-086)는 --write 없이도 쓰기로 승인한다. 미커밋 변경이 있거나 확인 못 하면',
   '실행하지 않고 거절로 남긴다(exit 1) — 커밋하거나 --write 로 명시한다.',
   '--write 는 읽기 행 카드에도 쓰기를 켠다(미커밋 변경이 있어도 켠다 — 명시한 쓰기다).',
-  '예외로 끝난 위임의 재시도 카드는 --run 이 있어도 승인하지 않는다. 다른 곳(GUI·chat)이 그 세션을 쥐고 있으면 거절한다.',
+  '예외로 끝난 위임의 재시도 카드·스캐폴딩 카드(D-088)는 --run 이 있어도 승인하지 않는다. git 밖 쓰기 행(H6)은 --write 없이는 승인하지 않는다.',
+  '다른 곳(GUI·chat)이 그 세션을 쥐고 있으면 거절한다.',
 ].join('\n');
 
 export type SessionCommand =
@@ -171,7 +172,12 @@ export async function sendToSession(input: SendInput): Promise<SendOutcome> {
     const notes: string[] = [];
     // --run 을 받고도 시작하지 않았다(H5) — 제시만(0)과 가르게 exit 1 이다.
     let refused = false;
-    if (session.state === 'blocked') {
+    if (session.state === 'blocked' && session.scaffoldPending) {
+      // 스캐폴딩 카드(D-088)는 hs-orc 가 임의 명령을 실행하는 첫 경로라 사람이 카드를 보고 확인한다 — 미리 받은 --run 으로 넘기지 않는다.
+      out.push(...session.reject());
+      if (input.run) refused = true;
+      notes.push('안내   스캐폴딩 카드는 --run 으로 승인하지 않는다 (H7, D-088) — GUI·hs-orc chat 에서 그 세션을 열고 명령을 확인해 실행한다.');
+    } else if (session.state === 'blocked') {
       // 자동 승인된 위임이 예외로 끝나 다시 선 카드(D-081)는 사람이 실패를 보고 다시 승인하는 자리다 — 미리 받은 --run 으로 넘기지 않는다.
       const card = session.records().findLast((r) => r.kind === 'plan');
       const retry = card?.kind === 'plan' && card.retry === true;
@@ -181,7 +187,13 @@ export async function sendToSession(input: SendInput): Promise<SendOutcome> {
       const cardWrite = card?.kind === 'plan' && card.write === true;
       const dirty = input.run && !retry && cardWrite && !input.write ? uncommittedFiles(dir) : [];
       const unsafe = dirty === null || dirty.length > 0;
-      if (input.run && !retry && !unsafe) {
+      // git 밖 쓰기 행(H6)은 읽기 전용 승인을 막는다 (D-088) — --write 를 명시하면 쓰기로 승인한다(엔진이 거절하면 H4 대로다).
+      const readOnlyBlocked = card?.kind === 'plan' && card.readOnlyBlocked === true && !input.write;
+      if (input.run && readOnlyBlocked) {
+        out.push(...session.reject());
+        refused = true;
+        notes.push(`안내   ${H6_BLOCKED} 실행하지 않고 거절로 남겼다.`);
+      } else if (input.run && !retry && !unsafe) {
         out.push(...(await session.approve({ verify: input.verify, write: input.write || cardWrite })));
       } else {
         // 카드를 메모리에만 두고 나가면 기록 끝에 죽은 카드가 남는다 — 거절로 닫는다. 실행은 다시 보내며 --run 이다.

@@ -11,7 +11,9 @@ import type { Engines } from '../data/engines.ts';
 import type { Matrix } from '../data/matrix.ts';
 import { isApprovalMode, loadLimits, type ApprovalMode, type OrchestratorChoice } from '../data/limits.ts';
 import type { AssignmentPlan } from './assign.ts';
-import { dirtyWriteRisk, evaluateApproval, evaluateRead, nonGitWriteRefusal, readOnlyWriteRow, type ApprovalCheck, type AskReason } from './approval.ts';
+import { dirtyWriteRisk, evaluateApproval, evaluateRead, nonGitWriteRefusal, readOnlyWriteRow, scaffoldAsk, type ApprovalCheck, type AskReason } from './approval.ts';
+import { loadScaffolders, type Scaffolder, type Scaffolders } from '../data/scaffolders.ts';
+import { GIT_INIT_COMMANDS, allowedArgv, commandLine, detectScaffold, folderEntries, runArgv, runSequence, type CommandRunner, type ScaffoldRequest } from './scaffold.ts';
 import type { Budget, BudgetMark } from './budget.ts';
 import {
   LEGACY_ORCHESTRATOR,
@@ -100,13 +102,31 @@ export interface SessionDeps {
    * 주지 않으면(테스트) 깨끗한 것으로 본다.
    */
   readonly dirtyFiles?: () => readonly string[] | null;
+  /**
+   * 폴더가 지금 git 작업 트리인가 (D-088). 주면 `inGit` 대신 카드를 세울 때마다 다시 본다 — 스캐폴더·사람이 `git init` 한 뒤
+   * 같은 세션의 다음 쓰기 행이 H6 없이 쓰기로 선다(D-073 사실 9 의 해소). 조립이 `repoRoot` 로 넘긴다.
+   */
+  readonly gitProbe?: () => boolean;
+  /** 스캐폴딩 허용 목록 (D-088). 없으면 `data/scaffolders.json`. */
+  readonly scaffolders?: Scaffolders;
+  /** 스캐폴더·git init 실행기 (D-088). 없으면 셸 없는 spawn(`runArgv`). 테스트가 가짜를 넣는다 — 네트워크를 부르지 않는다. */
+  readonly runCommand?: CommandRunner;
 }
 
 /** `plan.reason` 에 남는 출처 — 행을 고른 것이 지휘자다. `수동 지정` 이면 사람이 고른 것으로 적힌다 (`pipeline.ts` reasonLabel). */
 const SUGGESTED_LABEL = '지휘자 제안';
 
-/** 스캐폴더는 위임하지 않고 사람이 먼저 돌린다 (D-074 B1) — codex 샌드박스는 네트워크·홈 쓰기를, claude 쓰기 모드는 셸을 막는다 (D-073). */
-export const SCAFFOLD_GUIDE = 'git 아닌 폴더 · 쓰기 위임 — 스캐폴더(예: `npx create-expo-app@latest .`)는 먼저 직접 돌리고 그 뒤 위임하라 (D-074)';
+/**
+ * 스캐폴더는 위임으로 돌지 않는다 — codex 샌드박스는 네트워크·홈 쓰기를, claude 쓰기 모드는 셸을 막는다 (D-073). 대신 hs-orc 가
+ * 빈 폴더에서 허용 목록의 스캐폴더를 직접 실행하는 카드를 세운다 (D-088 — D-074 B1 번복).
+ */
+export const SCAFFOLD_GUIDE = 'git 아닌 폴더 · 쓰기 위임 — 새 프로젝트면 빈 폴더에서 "next 앱 init 해줘" 처럼 프레임워크를 넣어 보내면 hs-orc 가 스캐폴더를 직접 실행하는 카드가 선다. 기존 파일이면 git init 한 뒤 다시 보낸다 (D-088)';
+
+/** H6 카드를 읽기 전용으로 승인하려 할 때 (D-088). */
+export const H6_BLOCKED = 'git 아닌 폴더의 쓰기 행은 읽기 전용으로 승인하지 않는다 (H6, D-088) — 파일을 하나도 못 만든다. 새 프로젝트면 빈 폴더에서 "next 앱 init 해줘" 처럼 보내 스캐폴딩 카드로, 기존 파일이면 git init 한 뒤 다시 보낸다.';
+
+/** 끝난 뒤 기록에 남기는 폴더 맨 위 이름 수. */
+const CREATED_SHOWN = 12;
 
 /** 진행 줄 상한 (D-084) — 화면에는 끝부분만 보이므로 오래된 줄부터 버린다. */
 const PROGRESS_MAX = 200;
@@ -127,6 +147,13 @@ interface Pending {
   readonly ladder?: LadderRecord;
   /** 승인한 같은 배정이 예외로 끝나 다시 세운 카드다 (D-081). 이것이 또 던지면 다시 세우지 않는다. */
   readonly retry?: boolean;
+  /** git 아닌 폴더의 쓰기 행이다 (H6) — 읽기 전용 승인은 헛실행이라 막는다 (D-088). */
+  readonly readOnlyBlocked?: boolean;
+}
+
+/** 승인 대기 중인 스캐폴딩 카드 (D-088). 자동 승인 경로가 없다 — `approve()` 만 시작한다. */
+interface ScaffoldPending {
+  readonly scaffolder: Scaffolder;
 }
 
 /** 승인 대기 중인 단계 계획 (D-087). 배정 카드(`Pending`)와 따로 둔다 — 자동 승인·행 바꾸기·사다리가 타지 않는다. */
@@ -137,6 +164,8 @@ interface StepsPending {
   readonly writeSteps: ReadonlySet<string>;
   /** 카드가 물은 조건 — 승인 기록에 코드로 남는다. */
   readonly asked: readonly AskReason[];
+  /** git 아닌 폴더의 쓰기 행 단계가 있다 (H6) — 그 단계들이 읽기 전용으로 헛돌아 승인을 막는다 (D-088). */
+  readonly readOnlyBlocked: boolean;
 }
 
 /** 사다리가 다음에 올릴 단계 (D-068). 화면의 버튼과 chat `/ladder` 가 이것을 본다. */
@@ -158,6 +187,7 @@ export class ConversationSession {
   private stateValue: SessionState = 'waiting_input';
   private pending: Pending | null = null;
   private pendingSteps: StepsPending | null = null;
+  private pendingScaffold: ScaffoldPending | null = null;
   /** 도는 위임의 취소 신호 (D-066). primary·reviewer·읽기 답(D-083) 실행 동안만 있다 — 지휘자의 요약·직접 답은 취소 대상이 아니다. */
   private delegation: AbortController | null = null;
   /** 도는(또는 마지막으로 돈) 엔진 실행의 진행 줄 (D-084). 기록에 남기지 않는다 — 화면이 "실행 중…" 아래에 보여줄 뿐이다. */
@@ -212,6 +242,26 @@ export class ConversationSession {
   /** 승인 대기 중인 것이 단계 계획인가 (D-087) — 셸이 묻는 답(y·w·n)을 고른다. */
   get stepsPending(): boolean {
     return this.pendingSteps !== null;
+  }
+
+  /** 승인 대기 중인 것이 스캐폴딩 카드인가 (D-088) — 셸이 묻는 답(y·n)을 고르고, `session send --run` 은 승인하지 않는다. */
+  get scaffoldPending(): boolean {
+    return this.pendingScaffold !== null;
+  }
+
+  /** 지금 `git init` + 첫 커밋을 제안하나 (D-088) — 마지막 기록이 git 없이 끝난 스캐폴딩 성공이고 폴더가 아직 git 이 아니다. */
+  get gitInitOffered(): boolean {
+    const last = this.lastEvent();
+    return this.stateValue === 'waiting_input' && this.deps.kind === 'project' && last?.kind === 'scaffold-run' && last.step === 'scaffold' && last.git === 'offer' && !this.inGit;
+  }
+
+  /** 폴더가 git 인가 — 다시 볼 수 있으면 지금 본다(D-088), 아니면 조립 때 값, 모르면 git 으로 본다(D-074). */
+  private get inGit(): boolean {
+    return this.deps.gitProbe?.() ?? this.deps.inGit ?? true;
+  }
+
+  private get scaffolders(): Scaffolders {
+    return this.deps.scaffolders ?? loadScaffolders();
   }
 
   get orchestrator(): OrchestratorChoice {
@@ -297,14 +347,15 @@ export class ConversationSession {
    */
   private tapProgress(execute: SlotExecutor, role: boolean): SlotExecutor {
     this.progressLog = [];
-    const push = (line: string): void => {
-      this.progressLog.push(line.length > PROGRESS_LINE_MAX ? `${line.slice(0, PROGRESS_LINE_MAX)}…` : line);
-      if (this.progressLog.length > PROGRESS_MAX) this.progressLog.splice(0, this.progressLog.length - PROGRESS_MAX);
-    };
     return (slot, prompt, options) => {
-      push(`── ${role ? `${slot.role} ` : ''}${slotLine(slot)}`);
-      return execute(slot, prompt, { ...options, onProgress: push });
+      this.pushProgress(`── ${role ? `${slot.role} ` : ''}${slotLine(slot)}`);
+      return execute(slot, prompt, { ...options, onProgress: (line) => this.pushProgress(line) });
     };
+  }
+
+  private pushProgress(line: string): void {
+    this.progressLog.push(line.length > PROGRESS_LINE_MAX ? `${line.slice(0, PROGRESS_LINE_MAX)}…` : line);
+    if (this.progressLog.length > PROGRESS_MAX) this.progressLog.splice(0, this.progressLog.length - PROGRESS_MAX);
   }
 
   /** 지금 취소할 수 있는 위임이 도는가 — primary·reviewer 실행 중이고 아직 취소를 보내지 않았다 (D-066). */
@@ -450,6 +501,11 @@ export class ConversationSession {
   private async route(text: string, taskId?: string, reasonLabel?: string, write = false): Promise<TranscriptRecord[]> {
     const { matrix, catalog, dir } = this.deps;
     try {
+      // 새 프로젝트 생성 요청은 분류(Jev·규칙)보다 먼저 본다 (D-088) — 위임 엔진은 스캐폴더를 못 돌린다(D-073). 결정론이고 엔진·Jev 를 부르지 않는다.
+      // 행을 사람이 지정한 경로(`planAs`)는 그 지정을 따른다.
+      const scaffold = taskId ? null : detectScaffold(text, this.scaffolders);
+      const scaffoldWhy = scaffold ? this.scaffoldBlocker(scaffold) : null;
+      if (scaffold?.scaffolder && scaffoldWhy === null) return [this.stageScaffold(scaffold.scaffolder)];
       // D-033: 지휘자가 대화 맥락으로 직접 답하고 SUGGEST 로 행을 제안한다 — 맥락 없는
       // 폴백의 선택이 대화성 후속을 잘못 위임하는 일이 없다. 규칙이 놓친 메시지는 항상 직접 답으로 간다.
       const { classifier } = this.deps;
@@ -469,6 +525,7 @@ export class ConversationSession {
         ...(reasonLabel ? { reasonLabel } : {}),
       });
       const notes = routed.fallback ? [routed.fallback.line] : [];
+      if (scaffoldWhy) notes.push(`새 프로젝트 요청으로 보였지만 스캐폴딩 카드를 세우지 않았다 — ${scaffoldWhy}`);
       const result = routed.result;
       const general = routed.jev === 'general';
       if (general) notes.push(...this.countGeneral(text));
@@ -481,7 +538,8 @@ export class ConversationSession {
           notes.push(check.mode === 'manual' ? '코드를 읽고 답하기는 manual 이라 묻는다 — 아래 버튼 · /read' : `코드를 읽고 답하기는 묻는다 — ${check.asks.map((a) => `${a.code} ${a.text}`).join(' · ')}`);
         }
         // Jev 가 답했는데 행을 확정하지 않았으면(NONE·GENERAL·확신도 미만) 지휘자의 SUGGEST 가 그 판정을 뒤집지 못하게 한다.
-        return await this.answer(text, notes, general || routed.jev === 'none' || routed.jev === 'unsure', write, general);
+        // 스캐폴딩 요청이면 지휘자는 행 대신 스캐폴딩 길을 안내한다 (D-088).
+        return await this.answer(text, notes, general || routed.jev === 'none' || routed.jev === 'unsure', write, general, scaffoldWhy ? this.scaffoldPrompt(scaffoldWhy) : undefined);
       }
       const card = this.stage(text, result.plan, result.reason, notes, write);
       // 방식이 허락하면 승인 클릭 없이 시작한다 — 이 메시지가 만든 이 배정 1건만이다 (D-064 결정 2). 카드는 위에 그대로 남는다.
@@ -500,7 +558,7 @@ export class ConversationSession {
   private stage(title: string, plan: AssignmentPlan, reason: string, notes: readonly string[], sentWrite = false, ladder?: LadderRecord, retry = false): TranscriptRecord {
     const { primary, reviewer, secondReviewer } = plan.slots;
     const { catalog, budget } = this.deps;
-    const inGit = this.deps.inGit ?? true;
+    const inGit = this.inGit;
     const rowWrite = this.deps.kind === 'project' && (this.deps.writeRows ?? loadLimits().writeRows).includes(plan.assignment.id);
     const write = sentWrite || (!retry && rowWrite && inGit);
     const dirty = write && inGit ? this.uncommitted() : [];
@@ -509,8 +567,10 @@ export class ConversationSession {
     const warnings = check.mode === 'manual'
       ? [nonGitWriteRefusal(catalog, plan, write, inGit), dirtyWriteRisk(write, dirty), readOnlyWriteRow(rowWrite, write, inGit)].flatMap((w) => (w ? [w.text] : []))
       : [];
-    const guide = [...warnings, ...this.scaffoldGuide(write || rowWrite)];
-    this.pending = { title, plan, reason, write, check, ...(ladder ? { ladder } : {}), ...(retry ? { retry } : {}) };
+    const guide = [...warnings, ...this.scaffoldGuide(write || rowWrite, inGit)];
+    // H6 은 묻는 데서 그치지 않고 읽기 전용 승인을 막는다 (D-088) — 승인하면 읽기 전용 헛실행이 과금되며 돈다(1005-2233-dc3).
+    const readOnlyBlocked = readOnlyWriteRow(rowWrite, write, inGit) !== null;
+    this.pending = { title, plan, reason, write, check, ...(ladder ? { ladder } : {}), ...(retry ? { retry } : {}), ...(readOnlyBlocked ? { readOnlyBlocked } : {}) };
     this.stateValue = 'blocked';
     return this.append({
       kind: 'plan',
@@ -528,6 +588,7 @@ export class ConversationSession {
       ...(write ? { write: true } : {}),
       ...(ladder ? { ladder } : {}),
       ...(retry ? { retry: true as const } : {}),
+      ...(readOnlyBlocked ? { readOnlyBlocked: true as const } : {}),
     });
   }
 
@@ -631,12 +692,136 @@ export class ConversationSession {
     }
   }
 
-  /** git 아닌 project 폴더의 쓰기 위임이면 스캐폴더 안내 한 줄 (D-074 B1). */
-  private scaffoldGuide(write: boolean): string[] {
-    return write && this.deps.kind === 'project' && this.deps.inGit === false ? [SCAFFOLD_GUIDE] : [];
+  /**
+   * 스캐폴딩 카드를 세울 수 없는 이유 (D-088). null 이면 세운다. 규칙: project 세션 · 허용 목록에서 정확히 하나 · 폴더가 비어 있다
+   * (`ignore` 의 이름만 있으면 빈 것). 비어 있지 않으면 세우지 않는다 — 스캐폴더가 덮을 수 있고, 대개 스스로 거절한다.
+   */
+  private scaffoldBlocker(request: ScaffoldRequest): string | null {
+    const catalog = this.scaffolders;
+    if (this.deps.kind !== 'project') return '스크래치 세션이다 — 스캐폴딩은 비어 있는 project 폴더를 열고 한다';
+    if (!request.scaffolder) {
+      return request.candidates.length > 1
+        ? `여러 스캐폴더가 맞는다 (${request.candidates.map((c) => c.id).join('·')}) — 하나만 넣어 다시 보낸다`
+        : `어느 스캐폴더인지 모른다 — 허용 목록(${catalog.scaffolders.map((c) => c.id).join('·')}) 중 하나를 넣어 다시 보낸다`;
+    }
+    const entries = folderEntries(this.deps.dir, catalog.ignore);
+    if (entries === null) return '폴더를 읽지 못했다';
+    if (entries.length > 0) {
+      const shown = entries.slice(0, 3).join(', ');
+      return `폴더가 비어 있지 않다 (${entries.length}개: ${shown}${entries.length > 3 ? ' …' : ''}) — 스캐폴더가 덮을 수 있어 빈 폴더에서만 실행한다`;
+    }
+    return null;
   }
 
-  private async answer(text: string, notes: readonly string[], ignoreSuggest = false, write = false, general = false): Promise<TranscriptRecord[]> {
+  /** 카드를 못 세운 스캐폴딩 요청에 지휘자가 안내할 재료 (D-088) — 카드가 서는 길, 못 선 이유, 사람이 직접 돌릴 명령. */
+  private scaffoldPrompt(why: string): string {
+    return [
+      'hs-orc 는 비어 있는 project 폴더에서 아래 허용 목록의 스캐폴더를 사람이 카드에서 확인한 뒤 엔진 없이 직접 실행한다. 메시지에 프레임워크 이름을 넣어 보내면(예: "next 앱 init 해줘") 실행 카드가 선다.',
+      `지금 카드를 세우지 않은 이유: ${why}`,
+      '허용 목록:',
+      ...this.scaffolders.scaffolders.map((c) => `- ${c.label}: \`${commandLine(c.argv)}\``),
+      '카드를 세울 수 없는 폴더면 사용자가 터미널에서 위 명령을 직접 돌리게 안내한다. 기존 파일이 있는 git 아닌 폴더에서 이어서 위임하려면 git init 이 먼저다.',
+    ].join('\n');
+  }
+
+  /** 스캐폴딩 카드를 세운다 (D-088). 엔진·Jev 를 부르지 않는다. 어느 방식에서도 자동 승인하지 않는다(H7). */
+  private stageScaffold(scaffolder: Scaffolder): TranscriptRecord {
+    this.pendingScaffold = { scaffolder };
+    this.stateValue = 'blocked';
+    return this.append({ kind: 'scaffold', scaffolder: scaffolder.id, label: scaffolder.label, argv: [...scaffolder.argv], asked: [scaffoldAsk()] });
+  }
+
+  /**
+   * 사람이 확인한 스캐폴딩 카드를 실행한다 (D-088). 실행 직전에 허용 목록·빈 폴더를 다시 본다 — 카드와 승인 사이에 바뀌었을 수 있다.
+   * 셸 없이 argv 로, cwd 는 세션 폴더로 고정, 시간 초과·취소(D-066 통로)는 프로세스 그룹째 끝낸다. 엔진 비용이 없어 `spend` 는 없다.
+   */
+  private async runScaffold(): Promise<TranscriptRecord[]> {
+    this.require('blocked', '승인');
+    const pending = this.pendingScaffold;
+    if (!pending) throw new SessionStateError('승인할 스캐폴딩 카드가 없다.');
+    this.pendingScaffold = null;
+    const { dir } = this.deps;
+    const catalog = this.scaffolders;
+    const argv = pending.scaffolder.argv;
+    const out = [this.append({ kind: 'approval', approved: true, write: true, by: 'user', mode: this.modeValue, asked: ['H7'] })];
+    const refused = (reason: string): TranscriptRecord =>
+      this.append({ kind: 'scaffold-run', step: 'scaffold', commands: [argv], outcome: 'refused', exitCode: null, tail: reason, durationMs: 0 });
+    this.stateValue = 'working';
+    this.progressLog = [];
+    const controller = new AbortController();
+    this.delegation = controller;
+    try {
+      try {
+        allowedArgv(argv, catalog);
+      } catch (error) {
+        out.push(refused(why(error)));
+        return out;
+      }
+      const entries = folderEntries(dir, catalog.ignore);
+      if (entries === null || entries.length > 0) {
+        out.push(refused(entries === null ? '폴더를 읽지 못했다 — 실행하지 않았다' : `폴더가 비어 있지 않다 (${entries.slice(0, 3).join(', ')}${entries.length > 3 ? ' …' : ''}) — 덮을 수 있어 실행하지 않았다`));
+        return out;
+      }
+      const before = this.inGit;
+      this.pushProgress(`── 스캐폴딩 ${commandLine(argv)}`);
+      const run = await (this.deps.runCommand ?? runArgv)(argv, { cwd: dir, timeoutMs: catalog.timeoutMs, signal: controller.signal, onLine: (line) => this.pushProgress(line) });
+      this.delegation = null;
+      const ok = run.outcome === 'ok';
+      const git = ok ? (before ? 'existing' : this.inGit ? 'scaffolder' : 'offer') : undefined;
+      const created = folderEntries(dir, catalog.ignore) ?? [];
+      out.push(this.append({
+        kind: 'scaffold-run',
+        step: 'scaffold',
+        commands: [argv],
+        outcome: run.outcome,
+        exitCode: run.exitCode,
+        tail: run.tail,
+        durationMs: run.durationMs,
+        ...(git ? { git } : {}),
+        ...(created.length > 0 ? { created: created.slice(0, CREATED_SHOWN) } : {}),
+      }));
+    } catch (error) {
+      out.push(this.append({ kind: 'error', text: `스캐폴딩이 끝나지 못했다: ${why(error)}` }));
+    } finally {
+      this.delegation = null;
+      this.stateValue = 'waiting_input';
+    }
+    return out;
+  }
+
+  /**
+   * 스캐폴딩이 git 없이 끝난 뒤 `git init` + 첫 커밋 (D-088). 버튼·`/git-init` 이 승인이다. 사용자의 git 신원으로 커밋한다.
+   * 이 뒤로는 같은 세션의 쓰기 행이 git 폴더 규칙(D-086)으로 선다 — 카드가 설 때 폴더를 다시 본다.
+   */
+  async initGit(): Promise<TranscriptRecord[]> {
+    this.require('waiting_input', 'git init');
+    if (!this.gitInitOffered) throw new SessionStateError('git init 은 스캐폴딩이 git 없이 끝난 직후, 폴더가 아직 git 이 아닐 때만 한다 (D-088).');
+    this.stateValue = 'working';
+    this.progressLog = [];
+    try {
+      const seq = await runSequence(this.deps.runCommand ?? runArgv, GIT_INIT_COMMANDS, { cwd: this.deps.dir, timeoutMs: 60_000, onLine: (line) => this.pushProgress(line) });
+      return [this.append({
+        kind: 'scaffold-run',
+        step: 'git-init',
+        commands: GIT_INIT_COMMANDS.slice(0, seq.ran),
+        outcome: seq.last.outcome,
+        exitCode: seq.last.exitCode,
+        tail: seq.tail,
+        durationMs: seq.durationMs,
+      })];
+    } catch (error) {
+      return [this.append({ kind: 'error', text: `git init 이 끝나지 못했다: ${why(error)}` })];
+    } finally {
+      this.stateValue = 'waiting_input';
+    }
+  }
+
+  /** git 아닌 project 폴더의 쓰기 위임이면 스캐폴딩 안내 한 줄 (D-074·D-088). */
+  private scaffoldGuide(write: boolean, inGit = this.inGit): string[] {
+    return write && this.deps.kind === 'project' && !inGit ? [SCAFFOLD_GUIDE] : [];
+  }
+
+  private async answer(text: string, notes: readonly string[], ignoreSuggest = false, write = false, general = false, scaffold?: string): Promise<TranscriptRecord[]> {
     const { matrix, budget, conduct } = this.deps;
     // route() 가 이미 working 으로 바꿔 놓았을 수 있다 — 여기서도 다시 대입해 answer() 를 단독으로
     // 불러도(테스트 등) 같은 보장이 서게 하고, 모든 탈출 경로를 finally 하나로 묶는다 (final-review #2).
@@ -648,13 +833,13 @@ export class ConversationSession {
       }
       const slot = this.conductor();
       const context = buildContext(this.records(), this.contextLimits, { before: this.turn });
-      const answer = await directAnswer(conduct, slot, matrix, context.text, text, { unrouted: ignoreSuggest });
+      const answer = await directAnswer(conduct, slot, matrix, context.text, text, { unrouted: ignoreSuggest, ...(scaffold !== undefined ? { scaffold } : {}) });
       const charge = budget.charge(`${slot.label}·${slot.effort}`, answer.run.actualUsd, estimateUsd(matrix, slot), answer.run.meteredUsd, slot.plan);
       budget.countTokens(answer.run.usage);
       if (!answer.run.ok) {
         return [this.append({ kind: 'error', text: `직접 답을 받지 못했다: ${answer.run.text || '엔진이 실패했다'}` })];
       }
-      const suggest = ignoreSuggest ? null : answer.suggest;
+      const suggest = ignoreSuggest || scaffold !== undefined ? null : answer.suggest;
       const guide = this.scaffoldGuide(write);
       const direct = this.append({
         kind: 'direct',
@@ -694,7 +879,9 @@ export class ConversationSession {
     }
   }
 
+  /** 선 카드를 승인한다. 스캐폴딩 카드(D-088)는 `verify`·`write` 를 쓰지 않는다 — 허용 목록 명령을 그대로 돌린다. */
   async approve(options: { readonly verify?: readonly string[]; readonly write?: boolean } = {}): Promise<TranscriptRecord[]> {
+    if (this.pendingScaffold) return this.runScaffold();
     return this.pendingSteps ? this.runSteps(options) : this.start(options, 'user');
   }
 
@@ -706,6 +893,8 @@ export class ConversationSession {
     if (write && this.deps.kind === 'scratch') {
       throw new SessionStateError('스크래치 세션은 쓰기를 켤 수 없다 (SPEC §6.4.1).');
     }
+    // 카드는 그대로 둔다 — 쓰기를 켜거나 거절·새 메시지로 넘어갈 수 있다.
+    if (pending.readOnlyBlocked && !write) throw new SessionStateError(H6_BLOCKED);
     const { matrix, dir, budget, journal } = this.deps;
     const out = [this.append({ kind: 'approval', approved: true, write, by, mode: pending.check.mode, asked: pending.check.asks.map((a) => a.code) })];
     this.pending = null;
@@ -917,6 +1106,7 @@ export class ConversationSession {
     const steps = this.pendingSteps;
     this.pending = null;
     this.pendingSteps = null;
+    this.pendingScaffold = null;
     this.stateValue = 'waiting_input';
     const out = [this.append({ kind: 'approval', approved: false, write: false })];
     if (pending) this.logUnexecuted(pending, 'declined');
@@ -990,7 +1180,7 @@ export class ConversationSession {
       }
       // 쓰기 행 규칙은 배정 카드(`stage`)와 같다 (D-086) — git project 폴더의 쓰기 행 단계는 쓰기를 켠 채 선다.
       // 단계 카드는 늘 사람이 승인하므로(H1) H2 는 묻지 않고, H5(미커밋)·H6(git 밖 쓰기 행)은 승인 전에 보인다.
-      const inGit = this.deps.inGit ?? true;
+      const inGit = this.inGit;
       const rows = this.deps.kind === 'project' ? (this.deps.writeRows ?? loadLimits().writeRows) : [];
       const rowWrite = (n: GraphNode): boolean => rows.includes(n.plan.assignment.id);
       const writeSteps = new Set(nodes.filter((n) => rowWrite(n) && inGit).map((n) => n.id));
@@ -1001,7 +1191,8 @@ export class ConversationSession {
         dirtyWriteRisk(write, dirty),
         readOnlyWriteRow(nodes.some(rowWrite), false, inGit),
       ].filter((a): a is AskReason => a !== null);
-      const guide = this.scaffoldGuide(nodes.some(rowWrite));
+      const guide = this.scaffoldGuide(nodes.some(rowWrite), inGit);
+      const readOnlyBlocked = asked.some((a) => a.code === 'H6');
       const steps = nodes.map((n) => ({
         id: n.id,
         taskId: n.plan.assignment.id,
@@ -1013,7 +1204,7 @@ export class ConversationSession {
         estimateUsd: n.plan.cost.totalUsd,
         ...(writeSteps.has(n.id) ? { write: true as const } : {}),
       }));
-      this.pendingSteps = { title: last.text, nodes, writeSteps, asked };
+      this.pendingSteps = { title: last.text, nodes, writeSteps, asked, readOnlyBlocked };
       out.push(this.append({
         kind: 'steps',
         title: last.text,
@@ -1024,6 +1215,7 @@ export class ConversationSession {
         asked,
         ...(write ? { write: true as const } : {}),
         ...(guide.length > 0 ? { guide } : {}),
+        ...(readOnlyBlocked ? { readOnlyBlocked: true as const } : {}),
         ...(context.cut ? { cut: context.cut } : {}),
       }));
       return out;
@@ -1046,6 +1238,8 @@ export class ConversationSession {
     this.require('blocked', '승인');
     const pending = this.pendingSteps;
     if (!pending) throw new SessionStateError('승인할 단계 계획이 없다.');
+    // git 아닌 폴더의 쓰기 행 단계는 쓰기를 받을 수 없어(쓰기 단계는 git 폴더에서만 선다) 헛돈다 (H6, D-088).
+    if (pending.readOnlyBlocked) throw new SessionStateError(H6_BLOCKED);
     // 카드의 쓰기 스위치는 "쓰기 행 단계에 쓰기를 준다" 다 (D-086) — 읽기 행 단계는 켜도 읽기 전용이다.
     const write = options.write === true && pending.writeSteps.size > 0;
     if (write && this.deps.kind === 'scratch') throw new SessionStateError('스크래치 세션은 쓰기를 켤 수 없다 (SPEC §6.4.1).');

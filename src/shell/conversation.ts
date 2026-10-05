@@ -61,11 +61,13 @@ export function assembleSession(input: AssembleInput): ConversationSession {
     ...(classifier ? { classifier } : {}),
     ...(approvalMode ? { approvalMode } : {}),
     ...(autoStart === false ? { autoStart } : {}),
-    // 카드가 git 아닌 폴더의 쓰기 거절을 미리 말한다 (D-074). 실행기의 `nonGit` 과 같은 판정이다.
+    // 카드가 git 아닌 폴더의 쓰기 거절을 미리 말한다 (D-074). 실행기의 `nonGit` 과 같은 판정이다. 세션은 카드를 세울 때 `gitProbe` 로 다시 본다 (D-088) —
+    // 실행기는 조립 때 값 그대로다: git 이 된 폴더의 읽기 전용 위임에 `--skip-git-repo-check` 가 남는 것은 무해하고(D-073 사실 9), 쓰기에는 원래 붙지 않는다.
     inGit,
     // 쓰기 위임이 설 때만 부른다 (D-086 H5) — 자동 쓰기가 덮을 수 있는 미커밋 변경을 미리 알린다.
-    // git status 가 실패하면 null — 세션이 모르는 상태로 묻는다 (fail-closed).
-    ...(inGit ? { dirtyFiles: () => uncommittedFiles(dir) } : {}),
+    // git status 가 실패하면 null — 세션이 모르는 상태로 묻는다 (fail-closed). 세션은 폴더가 git 일 때만 부른다 —
+    // 스캐폴딩·git init 뒤 git 이 된 폴더도 같은 보호를 받게 git 여부와 무관하게 넘긴다 (D-088).
+    ...(kind === 'project' ? { dirtyFiles: () => uncommittedFiles(dir), gitProbe: () => repoRoot(dir) !== null } : {}),
     // 지휘자(직접 답·요약)만 격리한다 (D-032 B1) — 위임 실행기(executorFor)는 그대로 사용자 설정을 싣는다.
     conduct: execute ?? createExecutor(catalog, dir, timeout, { nonGit: skipGitCheck(kind, inGit, false), isolate: true }),
     executorFor: (write) => execute ?? createExecutor(catalog, dir, timeout, { write, nonGit: skipGitCheck(kind, inGit, write) }),

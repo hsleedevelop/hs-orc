@@ -17,6 +17,16 @@ import { findSession, interruptGuard, openingLines, parseChatArgs, parseOrchestr
 const at = { v: 1 as const, at: '2026-09-26T00:00:00.000Z', turn: 1 };
 
 describe('chat — 기록 렌더', () => {
+  it('스캐폴딩 카드·결과 (D-088) — 명령·묻는 이유·exit·git 제안을 찍는다', () => {
+    const argv = ['npx', '--yes', 'create-next-app@latest', '.'];
+    const card = renderRecord({ ...at, kind: 'scaffold', scaffolder: 'next', label: 'Next.js', argv, asked: [{ code: 'H7', text: '확인해야 돈다' }] });
+    assert.deepEqual(card, ['스캐폴딩  Next.js — hs-orc 가 엔진 없이 이 폴더에서 직접 실행한다 · 엔진 비용 0', '명령   npx --yes create-next-app@latest .', '묻는 이유  H7 확인해야 돈다']);
+    assert.deepEqual(renderRecord({ ...at, kind: 'approval', approved: true, write: true, by: 'user', asked: ['H7'] }), ['승인   스캐폴딩 실행 — 사람이 확인했다']);
+    const run = renderRecord({ ...at, kind: 'scaffold-run', step: 'scaffold', commands: [argv], outcome: 'ok', exitCode: 0, tail: 'Success!', durationMs: 41_000, git: 'offer', created: ['app', 'package.json'] });
+    assert.deepEqual(run.slice(0, 4), ['결과   스캐폴딩 · ok · exit 0 · 41.0s · 엔진 비용 0', '명령   npx --yes create-next-app@latest .', '폴더   app, package.json', 'Success!']);
+    assert.match(run.at(-1) ?? '', /\/git-init/);
+  });
+
   it('직접 답은 본문·비용을 찍고, 제안이 있으면 그 행을 알린다 — 배정 카드가 곧이어 붙는다', () => {
     const lines = renderRecord({ ...at, kind: 'direct', text: '안녕하세요', suggest: 'R01', cost: '$0.0110 actual', notes: [] });
     assert.deepEqual(lines, ['안녕하세요', '비용   $0.0110 actual', '제안   R01 (지휘자)']);

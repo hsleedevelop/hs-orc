@@ -34,6 +34,9 @@ function line(r: TranscriptRecord, records: readonly TranscriptRecord[]): string
       return r.text ? `orc(위임 결과 요약): ${r.text}${r.next ? ` · 다음 제안: ${r.next}` : ''}` : null;
     case 'result':
       return r.outcome === 'cancelled' ? cancelledLine(r, records) : null;
+    case 'scaffold-run':
+      // 다음 위임이 폴더가 어떻게 생겼는지 알게 한다 (D-088) — 출력 본문은 싣지 않는다.
+      return `orc(${r.step === 'scaffold' ? '스캐폴딩' : 'git init'} 실행): ${r.commands.map((c) => c.join(' ')).join(' && ')} → ${r.outcome}${r.exitCode !== null ? ` (exit ${r.exitCode})` : ''}${r.created ? ` · 폴더: ${r.created.join(', ')}` : ''}`;
     default:
       return null;
   }

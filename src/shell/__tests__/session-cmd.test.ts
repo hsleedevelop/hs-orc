@@ -4,7 +4,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { gitEnv } from '../../core/git-env.ts';
 import os from 'node:os';
 import path from 'node:path';
@@ -86,15 +86,39 @@ describe('session — send', () => {
 
   it('--run 없이 선 배정은 거절로 남기고, --run 이면 그 카드를 승인해 위임 결과까지 간다', async () => {
     fixture('task1');
-    const shown = await sendToSession({ cwd: process.cwd(), ref: 'task1', message: '이 타입 에러 고쳐줘', write: false, run: false, verify: [], execute: fake });
+    // 읽기 행이다 — 쓰기 행(R01)은 git 아닌 임시 폴더에서 H6 으로 읽기 전용 승인이 막힌다 (D-088).
+    const shown = await sendToSession({ cwd: process.cwd(), ref: 'task1', message: '이 아키텍처 설계 검토해줘', write: false, run: false, verify: [], execute: fake });
     assert.ok(shown.records.some((r) => r.kind === 'plan'));
     assert.ok(shown.records.some((r) => r.kind === 'approval' && !r.approved));
     assert.match(shown.lines.join('\n'), /제시만 했다/);
 
-    const ran = await sendToSession({ cwd: process.cwd(), ref: 'task1', message: '이 타입 에러 고쳐줘', write: false, run: true, verify: [], execute: fake });
+    const ran = await sendToSession({ cwd: process.cwd(), ref: 'task1', message: '이 아키텍처 설계 검토해줘', write: false, run: true, verify: [], execute: fake });
     assert.ok(ran.records.some((r) => r.kind === 'approval' && r.approved));
     assert.ok(ran.records.some((r) => r.kind === 'result'));
     assert.match(ran.lines.join('\n'), /상태 {3}완료 · /);
+  });
+
+  it('스캐폴딩 카드는 --run 으로 승인하지 않는다 (H7, D-088) — 명령은 돌지 않고 거절로 닫는다', async () => {
+    const { dir } = fixture('scaf1');
+    const out = await sendToSession({ cwd: dir, ref: 'scaf1', message: 'next 앱 init 해줘', write: false, run: true, verify: [], execute: fake });
+    assert.deepEqual(out.records.filter((r) => r.kind !== 'mode' && r.kind !== 'orchestrator').map((r) => r.kind), ['user', 'scaffold', 'approval']);
+    assert.ok(out.records.some((r) => r.kind === 'approval' && !r.approved));
+    assert.equal(out.exitCode, 1);
+    assert.match(out.lines.join('\n'), /스캐폴딩 카드는 --run 으로 승인하지 않는다/);
+    assert.match(out.lines.join('\n'), /명령 {3}npx --yes create-next-app@latest \. /);
+    assert.deepEqual(readdirSync(dir), [], '폴더는 그대로 비어 있다');
+  });
+
+  it('git 아닌 폴더의 쓰기 행 카드(H6)는 --run 으로 읽기 전용 실행하지 않는다 — 1005-2233-dc3 회귀 (D-088)', async () => {
+    const { dir } = fixture('h6');
+    writeFileSync(path.join(dir, 'main.ts'), 'let a: number = "x";');
+    calls.length = 0;
+    const out = await sendToSession({ cwd: dir, ref: 'h6', message: '이 타입 에러 고쳐줘', write: false, run: true, verify: [], execute: fake });
+    assert.ok(out.records.some((r) => r.kind === 'plan' && r.readOnlyBlocked === true));
+    assert.ok(!out.records.some((r) => r.kind === 'result'));
+    assert.deepEqual(calls, [], '엔진을 띄우지 않는다');
+    assert.equal(out.exitCode, 1);
+    assert.match(out.lines.join('\n'), /읽기 전용으로 승인하지 않는다/);
   });
 
   it('다른 곳이 쥐고 있으면 보내지 않는다', async () => {

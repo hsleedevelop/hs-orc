@@ -134,6 +134,10 @@ export interface SessionView {
   readonly orchestrator: OrchestratorChoice & { readonly engine: string; readonly line: string };
   /** 승인 대기 중인 것이 단계 계획이다 (D-087) — 카드가 '지휘자에게 묻기'·행 바꾸기 없이 선다. */
   readonly stepsPending: boolean;
+  /** 승인 대기 중인 것이 스캐폴딩 카드다 (D-088). */
+  readonly scaffoldPending: boolean;
+  /** 스캐폴딩이 git 없이 끝나 'git init + 첫 커밋' 을 누를 수 있다 (D-088). */
+  readonly gitInitOffered: boolean;
   /** 붙인 이름 (D-085). `hs-orc session send <이름>` 이 이것으로 찾는다. */
   readonly name?: string;
   /** 다른 프로세스(`chat`·`hs-orc session`)가 이 세션을 쥐고 있다 (D-085). 화면은 입력을 막고 도는 중으로 보인다. */
@@ -422,6 +426,8 @@ export class GuiService {
         }
       })(),
       stepsPending: s.stepsPending,
+      scaffoldPending: s.scaffoldPending,
+      gitInitOffered: s.gitInitOffered,
       ...(s.name ? { name: s.name } : {}),
       external: foreignHold(s.dir, s.id),
     };
@@ -463,6 +469,12 @@ export class GuiService {
   async converseCancel(): Promise<SessionView> {
     const s = this.requireConversation();
     if (s.cancel()) await this.liveCalls.get(`${s.dir}::${s.id}`)?.catch(() => undefined);
+    return this.conversation();
+  }
+
+  /** 스캐폴딩 폴더에 git init + 첫 커밋 (D-088). 명령을 돌리므로 `running` 으로 돈다 — 이 클릭이 승인이다. */
+  async converseGitInit(): Promise<SessionView> {
+    await this.running((s) => s.initGit());
     return this.conversation();
   }
 

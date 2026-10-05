@@ -342,7 +342,8 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     const empty = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'hs-empty-')));
     const service = new GuiService(fake, 20, empty);
     const view = service.startConversation('project');
-    await service.converse('이 타입 에러 고쳐줘');
+    // 읽기 행이다 — 쓰기 행은 git 아닌 폴더에서 읽기 전용 승인이 막힌다 (H6, D-088).
+    await service.converse('이 아키텍처 설계 검토해줘');
     await service.converseApprove({ verify: [], write: false });
 
     assert.deepEqual(readdirSync(empty), []);
