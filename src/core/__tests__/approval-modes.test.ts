@@ -14,6 +14,7 @@ import type { JevChoiceAnswer, RowClassifier } from '../../adapters/jev.ts';
 import { assign } from '../assign.ts';
 import { evaluateApproval, evaluateRead, isModelPick } from '../approval.ts';
 import { readerSlot } from '../reader.ts';
+import { uncommittedFiles } from '../evidence-gather.ts';
 import { Budget } from '../budget.ts';
 import { Journal } from '../journal.ts';
 import type { SlotExecutor, SlotRun, SlotRunOptions } from '../executor.ts';
@@ -63,6 +64,8 @@ interface Opts {
   /** 없으면 비운다 — 기존 조건(A·H1~H4)은 쓰기 행 기본값(D-086) 없이 본다. */
   writeRows?: readonly string[];
   dirty?: readonly string[];
+  /** 미커밋 확인 함수를 그대로 준다 — 실패하는 실제 `git status` 를 싣는다. */
+  dirtyFiles?: () => readonly string[] | null;
 }
 const make = (o: Opts = {}) => {
   const spy = delegateSpy();
@@ -77,6 +80,7 @@ const make = (o: Opts = {}) => {
     ...(o.inGit !== undefined ? { inGit: o.inGit } : {}),
     writeRows: o.writeRows ?? [],
     ...(o.dirty ? { dirtyFiles: () => o.dirty ?? [] } : {}),
+    ...(o.dirtyFiles ? { dirtyFiles: o.dirtyFiles } : {}),
   });
   return { session, spy, row, dir, budget };
 };
@@ -396,6 +400,19 @@ describe('쓰기 행 기본값 — auto 는 git 폴더에서 쓰기로 바로 �
     const manual = make({ mode: 'manual', row: 'R03', writeRows: WRITE_ROWS, inGit: true, dirty });
     await manual.session.send('기능 추가해줘');
     assert.match(guideOf(lastPlan(manual.session)).join('\n'), /미커밋 변경 4개/);
+  });
+
+  it('H5 fail-closed — git status 가 실패하면 깨끗함으로 읽지 않고 묻는다, 자동 시작하지 않는다', async () => {
+    isolate();
+    const broken = mkdtempSync(path.join(os.tmpdir(), 'hs-modes-nogit-'));
+    assert.equal(uncommittedFiles(broken), null, 'git 저장소가 아니면 종료 코드가 0 이 아니다 → null');
+    const m = make({ mode: 'auto', row: 'R03', writeRows: WRITE_ROWS, inGit: true, dirtyFiles: () => uncommittedFiles(broken) });
+    await m.session.send('기능 추가해줘');
+    assert.equal(m.session.state, 'blocked');
+    assert.equal(m.spy.roles.length, 0);
+    assert.deepEqual(codes(m.session), ['H5']);
+    const plan = lastPlan(m.session);
+    assert.match(plan?.kind === 'plan' ? (plan.asked?.[0]?.text ?? '') : '', /확인하지 못했다/);
   });
 
   it('H6 — git 아닌 폴더의 쓰기 행은 읽기 전용으로 헛돌지 않게 묻고 스캐폴더 안내를 붙인다', async () => {

@@ -60,10 +60,12 @@ const DIRTY_SHOWN = 3;
 
 /**
  * H5 — 쓰기 위임인데 폴더에 미커밋 변경이 있다 (D-086). 자동 쓰기가 덮어도 git 으로 되돌릴 수 없는 유일한 것이라
- * 어느 방식에서도 시작 전에 알린다 — 직전 위임이 남긴 변경도 여기에 걸린다.
+ * 어느 방식에서도 시작 전에 알린다 — 직전 위임이 남긴 변경도 여기에 걸린다. `null` 은 확인 실패다 — 깨끗함으로 읽지 않고 묻는다.
  */
-export function dirtyWriteRisk(write: boolean, dirty: readonly string[]): AskReason | null {
-  if (!write || dirty.length === 0) return null;
+export function dirtyWriteRisk(write: boolean, dirty: readonly string[] | null): AskReason | null {
+  if (!write) return null;
+  if (dirty === null) return { code: 'H5', text: '미커밋 변경을 확인하지 못했다 (git status 실패) — 위임이 덮을 변경이 있는지 확인하고 승인하라' };
+  if (dirty.length === 0) return null;
   const shown = dirty.slice(0, DIRTY_SHOWN).join(', ');
   const more = dirty.length > DIRTY_SHOWN ? ` 외 ${dirty.length - DIRTY_SHOWN}개` : '';
   return { code: 'H5', text: `미커밋 변경 ${dirty.length}개가 있는 폴더에 쓰기 — 위임이 덮을 수 있다 (${shown}${more}). 커밋하거나 확인하고 승인하라` };
@@ -99,8 +101,8 @@ export interface ApprovalInput {
   readonly inGit?: boolean;
   /** 쓰기가 본질인 행이고 쓰기를 켤 수 있는 세션(project)이다 (D-086, `limits.json` writeRows). */
   readonly rowWrite?: boolean;
-  /** 쓰기 위임이 설 때의 미커밋 파일 (`git status --porcelain`). 쓰기가 아니면 비어 있다. */
-  readonly dirty?: readonly string[];
+  /** 쓰기 위임이 설 때의 미커밋 파일 (`git status --porcelain`). 쓰기가 아니면 비어 있다. `null` 은 확인 실패다. */
+  readonly dirty?: readonly string[] | null;
 }
 
 /**

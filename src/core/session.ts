@@ -65,8 +65,11 @@ export interface SessionDeps {
   readonly inGit?: boolean;
   /** 쓰기가 본질인 행 (D-086). 없으면 `limits.json` 의 `writeRows`. */
   readonly writeRows?: readonly string[];
-  /** 폴더의 미커밋 파일 (D-086 H5) — 조립이 `git status --porcelain` 으로 넘긴다. 없으면 깨끗한 것으로 본다. */
-  readonly dirtyFiles?: () => readonly string[];
+  /**
+   * 폴더의 미커밋 파일 (D-086 H5) — 조립이 `git status --porcelain` 으로 넘긴다. `null`·예외는 확인 실패라 H5 로 묻는다(fail-closed).
+   * 주지 않으면(테스트) 깨끗한 것으로 본다.
+   */
+  readonly dirtyFiles?: () => readonly string[] | null;
 }
 
 /** `plan.reason` 에 남는 출처 — 행을 고른 것이 지휘자다. `수동 지정` 이면 사람이 고른 것으로 적힌다 (`pipeline.ts` reasonLabel). */
@@ -363,7 +366,7 @@ export class ConversationSession {
     const inGit = this.deps.inGit ?? true;
     const rowWrite = this.deps.kind === 'project' && (this.deps.writeRows ?? loadLimits().writeRows).includes(plan.assignment.id);
     const write = sentWrite || (!retry && rowWrite && inGit);
-    const dirty = write && inGit ? (this.deps.dirtyFiles?.() ?? []) : [];
+    const dirty = write && inGit ? this.uncommitted() : [];
     const check = evaluateApproval({ mode: this.modeValue, plan, reason, write, catalog, budget, records: this.log, inGit, rowWrite, dirty, ...(ladder ? { ladder: true } : {}), ...(retry ? { retry: true } : {}) });
     // manual 은 묻는 이유(`asked`)가 비므로 H4·H5·H6 을 안내 줄로 싣는다 — 어느 방식이든 카드가 같은 줄을 보인다 (D-074·D-086).
     const warnings = check.mode === 'manual'
@@ -412,6 +415,17 @@ export class ConversationSession {
       return suggestRows(readUnclassifiedWithLegacy(dir)).map((s) => s.message);
     } catch (error) {
       return [`미분류 로그를 남기지 못했다: ${why(error)}`];
+    }
+  }
+
+  /** 미커밋 파일. 확인하지 못했으면 `null` 이다 — 깨끗함으로 읽지 않는다 (D-086 H5 fail-closed). */
+  private uncommitted(): readonly string[] | null {
+    const probe = this.deps.dirtyFiles;
+    if (!probe) return [];
+    try {
+      return probe();
+    } catch {
+      return null;
     }
   }
 

@@ -7,7 +7,7 @@ import { loadEngines } from '../data/engines.ts';
 import { loadLimits, type ApprovalMode } from '../data/limits.ts';
 import { loadMatrix } from '../data/matrix.ts';
 import { Budget } from '../core/budget.ts';
-import { changedFiles } from '../core/evidence-gather.ts';
+import { uncommittedFiles } from '../core/evidence-gather.ts';
 import { createExecutor, type SlotExecutor } from '../core/executor.ts';
 import type { Journal } from '../core/journal.ts';
 import { ConversationSession } from '../core/session.ts';
@@ -61,7 +61,8 @@ export function assembleSession(input: AssembleInput): ConversationSession {
     // 카드가 git 아닌 폴더의 쓰기 거절을 미리 말한다 (D-074). 실행기의 `nonGit` 과 같은 판정이다.
     inGit,
     // 쓰기 위임이 설 때만 부른다 (D-086 H5) — 자동 쓰기가 덮을 수 있는 미커밋 변경을 미리 알린다.
-    ...(inGit ? { dirtyFiles: () => { const e = changedFiles(dir); return e.kind === 'changed-files' ? e.files : []; } } : {}),
+    // git status 가 실패하면 null — 세션이 모르는 상태로 묻는다 (fail-closed).
+    ...(inGit ? { dirtyFiles: () => uncommittedFiles(dir) } : {}),
     // 지휘자(직접 답·요약)만 격리한다 (D-032 B1) — 위임 실행기(executorFor)는 그대로 사용자 설정을 싣는다.
     conduct: execute ?? createExecutor(catalog, dir, timeout, { nonGit: skipGitCheck(kind, inGit, false), isolate: true }),
     executorFor: (write) => execute ?? createExecutor(catalog, dir, timeout, { write, nonGit: skipGitCheck(kind, inGit, write) }),
