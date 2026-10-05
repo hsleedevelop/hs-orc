@@ -85,7 +85,7 @@ interface Bridge {
   debug(): Promise<DebugInfo>;
   crashTest(): Promise<string>;
 }
-interface TaskRow { id: string; task: string }
+interface TaskRow { id: string; task: string; models: string }
 interface Probe<T> { rows: T[]; note: string }
 interface SessionRow { source: string; name: string; status: string; provenance: string }
 interface ReviewRow { ref: string; title: string; state: string }
@@ -576,10 +576,13 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
                   h('button', { className: 'btn accent', disabled: locked, onClick: () => act(orc.convRead()) }, '코드를 읽고 답하기'),
                   h('span', { className: 'hint' }, '읽기 전용 엔진 1슬롯(Luna·medium)이 이 폴더를 읽고 답한다 — 파일을 고치지 않고 reviewer 판정이 없다')),
                 h('div', { className: 'row', style: { whiteSpace: 'normal' } },
-                  h('select', {
-                    value: pick, disabled: locked, 'aria-label': '위임할 업무 행',
-                    onChange: (e: { target: { value: string } }) => setPick(e.target.value),
-                  }, h('option', { value: '' }, '업무 행 선택…'), ...props.rows.map((row) => h('option', { key: row.id, value: row.id }, `${row.id} · ${row.task}`))),
+                  // option 은 글자 크기를 따로 못 준다 — 고른 행의 모델은 선택기 아래 서브타이틀로 보인다.
+                  h('div', { className: 'pick' },
+                    h('select', {
+                      value: pick, disabled: locked, 'aria-label': '위임할 업무 행',
+                      onChange: (e: { target: { value: string } }) => setPick(e.target.value),
+                    }, h('option', { value: '' }, '업무 행 선택…'), ...props.rows.map((row) => h('option', { key: row.id, value: row.id }, `${row.id} · ${row.task}`))),
+                    pick ? h('span', { className: 'sub', title: 'primary · reviewer (기본 effort)' }, props.rows.find((row) => row.id === pick)?.models ?? '') : null),
                   h('button', { className: 'btn', disabled: locked || !pick, onClick: () => { setPick(''); act(orc.convPlanAs(pick)); } }, '위임하기'),
                   h('span', { className: 'hint' }, '행을 직접 골라 위임 — 배정 카드가 서고 승인은 그대로다')))
             : null);
