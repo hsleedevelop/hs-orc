@@ -20,3 +20,17 @@ export const cutLine = (cut: Cut | undefined): string[] => (cut ? [`맥락   앞
 
 export const compactLines = (compacted: readonly Compaction[] | undefined): string[] =>
   (compacted ?? []).map((c) => `압축   엔진이 앞 맥락을 요약으로 바꿨다 (${c.trigger}${c.preTokens !== undefined && c.postTokens !== undefined ? ` ${c.preTokens}→${c.postTokens} 토큰` : ''})`);
+
+interface Status { readonly state: 'working' | 'blocked' | 'done' | 'interrupted' | 'idle'; readonly outcome?: string; readonly holder?: { readonly pid: number; readonly by: string } }
+
+/** 세션 상태 한 마디 (D-085). chat·`hs-orc session`·GUI 사이드바가 같은 말을 쓴다. */
+export function statusLabel(status: Status | undefined): string {
+  switch (status?.state) {
+    case 'working': return '진행 중';
+    case 'blocked': return '승인 대기';
+    case 'done': return status.outcome ? `완료 · ${status.outcome}` : '완료';
+    case 'interrupted': return '끊김';
+    case 'idle': return 'idle';
+    case undefined: return '?';
+  }
+}

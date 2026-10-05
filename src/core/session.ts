@@ -23,9 +23,11 @@ import { LadderError, planLadder, requestStage, type EscalationStage } from './l
 import { route as routeTask, routeWithFallback } from './pipeline.ts';
 import { buildReadPrompt, readerSlot, slotLine } from './reader.ts';
 import { readUnclassifiedWithLegacy, recordUnclassified, suggestRows, unclassifiedLogPath } from './unclassified.ts';
+import { markStateOrigin } from './project-state.ts';
 import {
   appendRecord,
   readSessionLog,
+  sessionName,
   transcriptPath,
   type LadderRecord,
   type SessionKind,
@@ -33,6 +35,12 @@ import {
   type TranscriptEntry,
   type TranscriptRecord,
 } from './transcript.ts';
+
+/**
+ * 세션 이름 모양 (D-085). 영문자로 시작해 id(`MMDD-HHMM-xxx`, 숫자로 시작)와 겹칠 수 없다 —
+ * `hs-orc session send <id|이름>` 이 같은 자리에서 둘을 받는다.
+ */
+export const SESSION_NAME = /^[A-Za-z][A-Za-z0-9._-]{0,31}$/;
 
 export class SessionStateError extends Error {
   override name = 'SessionStateError';
@@ -118,6 +126,7 @@ export class ConversationSession {
   private readonly log: TranscriptRecord[];
   /** 지금 승인 방식 (D-064). 마지막 `mode` 기록을 재생한다 — 없으면 새 세션은 `limits.json` 기본값, 옛 세션은 `manual`. */
   private modeValue: ApprovalMode;
+  private originMarked = false;
 
   constructor(deps: SessionDeps) {
     this.deps = deps;
@@ -131,7 +140,7 @@ export class ConversationSession {
     this.modeValue =
       recorded?.kind === 'mode' && isApprovalMode(recorded.mode)
         ? recorded.mode
-        : this.log.length === 0
+        : this.log.every((r) => r.kind === 'name') // 첫 메시지 전에 이름만 붙인 세션도 새 세션이다 (D-085).
           ? (deps.approvalMode ?? loadLimits().approvalMode)
           : 'manual';
   }
@@ -223,7 +232,7 @@ export class ConversationSession {
    */
   get interrupted(): boolean {
     if (this.stateValue === 'working') return false;
-    const last = this.log.at(-1);
+    const last = this.lastEvent();
     return last?.kind === 'approval' && last.approved;
   }
 
@@ -266,7 +275,7 @@ export class ConversationSession {
     const last = this.records().findLast((r) => r.kind === 'user');
     if (last?.kind !== 'user') throw new SessionStateError('배정할 메시지가 없다.');
     // 마지막 기록이 그 행을 제안한 직접 답이면 고른 것은 지휘자다 — 카드 합치기(D-064) 전 기록을 다시 열었을 때의 경로다.
-    const tail = this.log.at(-1);
+    const tail = this.lastEvent();
     const suggested = tail?.kind === 'direct' && tail.suggest === taskId;
     // send() 와 같은 이유로 첫 await 전에 바로 바꾼다 (final-review #2).
     this.stateValue = 'working';
@@ -285,8 +294,44 @@ export class ConversationSession {
     return [...rejected, ...(await this.planAs(taskId, { write }))];
   }
 
+  /** 마지막 기록 — 이름 줄(D-085)은 대화의 흐름이 아니라 건너뛴다. 끊김·제안 판정이 이름을 붙였다고 바뀌면 안 된다. */
+  private lastEvent(): TranscriptRecord | undefined {
+    return this.log.findLast((r) => r.kind !== 'name');
+  }
+
+  /**
+   * 다른 프로세스가 이 세션의 기록에 덧붙였다 (D-085) — 들고 있는 기록·턴 번호·Budget 이 낡았다. 이대로 쓰면 턴이 겹친다.
+   * 셸은 새로 조립하거나(GUI) 다시 열라고 알린다(chat). 엔진이 도는 동안은 우리가 쓰는 중이라 보지 않는다.
+   */
+  isStale(): boolean {
+    return this.stateValue !== 'working' && readSessionLog(this.deps.dir, this.deps.id).records.length !== this.log.length;
+  }
+
+  /** 붙인 이름 (D-085). 없으면 undefined. */
+  get name(): string | undefined {
+    return sessionName(this.log);
+  }
+
+  /**
+   * 이름을 붙인다 (D-085). 빈 문자열은 지운다. 다른 세션과 겹치는지는 모든 세션을 아는 셸이 먼저 본다 —
+   * Core 는 모양만 본다. 입력 대기·승인 대기 어디서든 붙일 수 있다(대화를 진행시키지 않는다).
+   */
+  rename(name: string): TranscriptRecord[] {
+    const next = name.trim();
+    if (next && !SESSION_NAME.test(next)) {
+      throw new SessionStateError(`이름은 영문자로 시작하고 영문·숫자·. _ - 만 쓴다 (최대 32자): ${next}`);
+    }
+    if (next === (this.name ?? '')) return [];
+    return [this.append({ kind: 'name', name: next })];
+  }
+
   private append(entry: TranscriptEntry): TranscriptRecord {
     const record = { ...entry, v: 1, at: (this.deps.now?.() ?? new Date()).toISOString(), turn: this.turn } as TranscriptRecord;
+    // id 로 세션을 찾는 `hs-orc session` 이 이 폴더를 알게 한다 (D-085). 객체마다 한 번 — 이 결정 전 세션도 다음 기록에서 남는다.
+    if (!this.originMarked) {
+      markStateOrigin(this.deps.dir);
+      this.originMarked = true;
+    }
     appendRecord(this.file, record);
     this.log.push(record);
     return record;

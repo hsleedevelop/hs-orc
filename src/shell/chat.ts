@@ -6,7 +6,9 @@ import { createInterface } from 'node:readline';
 import { APPROVAL_MODES, isApprovalMode, type ApprovalMode } from '../data/limits.ts';
 import type { Budget } from '../core/budget.ts';
 import type { ConversationSession } from '../core/session.ts';
-import { listScratchSessions, listSessions, readSessionLog, type SessionSummary, type TranscriptRecord } from '../core/transcript.ts';
+import { readSessionLog, type SessionSummary, type TranscriptRecord } from '../core/transcript.ts';
+import { busyMessage, claimSession, foreignHold, lockPath, releaseSession, syncHold } from '../core/session-lock.ts';
+import { ambiguous, matchSessions } from './session-registry.ts';
 import { compactLines, cutLine, ladderLines, retryLines } from './transcript-lines.ts';
 
 export function renderRecord(r: TranscriptRecord): string[] {
@@ -47,6 +49,8 @@ export function renderRecord(r: TranscriptRecord): string[] {
       return [r.approved ? `승인   ${r.write ? '쓰기 켬 — primary 가 파일을 고칠 수 있다' : '읽기 전용'}` : '거절'];
     case 'mode':
       return [`방식   승인 방식 → ${r.mode}`];
+    case 'name':
+      return [r.name ? `이름   → ${r.name}` : '이름   지움'];
     case 'result':
       // 취소는 결과가 아니라 멈춤이다 (D-066) — reviewer 판정·검증이 없다. 받은 출력은 남겨 보여준다.
       if (r.outcome === 'cancelled') return [`결과   취소됨 · 결정 ${r.decisionId}`, `증거   ${r.evidence}`, ...(r.text ? [r.text] : [])];
@@ -111,6 +115,28 @@ export async function runChat(
   try {
     for await (const raw of rl) {
       const line = raw.trim();
+      // 줄 하나를 처리하는 동안 세션을 쥔다 (D-085) — `hs-orc session send` 나 GUI 가 같은 기록에 끼어 쓰지 않게.
+      // 다른 곳이 쥐었거나 그 사이 기록이 붙었으면 이 객체는 낡았다 — 쓰지 않고 다시 열라고 알린다.
+      if (line && line !== '/quit' && line !== '/exit' && line !== '/help') {
+        const other = foreignHold(session.dir, session.id);
+        const refusal =
+          other ? busyMessage(other, lockPath(session.dir, session.id))
+          : session.isStale() ? `다른 곳에서 이 세션에 기록이 붙었다 — /quit 하고 hs-orc chat --resume ${session.id} 로 다시 연다.`
+          : '';
+        if (!refusal) {
+          try {
+            claimSession(session.dir, session.id, 'working', 'chat');
+          } catch (error) {
+            say(`오류   ${why(error)}`); // 확인과 쥐기 사이에 다른 곳이 먼저 쥐었다.
+            ask();
+            continue;
+          }
+        } else {
+          say(`오류   ${refusal}`);
+          ask();
+          continue;
+        }
+      }
       try {
         // /quit·/help 는 승인 대기 중에도 먼저 본다 — 도움말이 약속한 명령이 y·w·n·a 안내에 막히면 안 된다.
         // 대기 중 /quit 은 Ctrl-D 와 같다: 승인하지 않고 나간다(배정은 기록에 plan 으로만 남는다).
@@ -162,10 +188,13 @@ export async function runChat(
         // 세션 규칙 위반(스크래치 쓰기 등)은 상태를 바꾸지 않고 던진다 — 알리고 같은 자리에서 다시 묻는다.
         say(`오류   ${why(error)}`);
       }
+      // 카드가 섰으면 승인 대기로 쥐고 있는다 — 다른 곳이 보내면 그 카드가 말없이 사라진다.
+      syncHold(session.dir, session.id, session.state === 'blocked' ? 'blocked' : null, 'chat');
       ask();
     }
   } finally {
     rl.close();
+    releaseSession(session.dir, session.id);
   }
 }
 
@@ -179,7 +208,7 @@ export interface ChatArgs {
   readonly approval?: ApprovalMode;
 }
 
-export const CHAT_USAGE = '사용법: hs-orc chat [--scratch | --resume <id>] [--list] [--approval manual|auto-ask|auto] [--verify "<명령>"]...';
+export const CHAT_USAGE = '사용법: hs-orc chat [--scratch | --resume <id|이름>] [--list] [--approval manual|auto-ask|auto] [--verify "<명령>"]...';
 
 export function parseChatArgs(argv: readonly string[]): ChatArgs {
   let scratch = false;
@@ -216,9 +245,14 @@ export function parseChatArgs(argv: readonly string[]): ChatArgs {
   return { scratch, list, help, verify, ...(resume !== undefined ? { resume } : {}), ...(approval ? { approval } : {}) };
 }
 
-/** 이 폴더의 project 세션을 먼저, 다음에 스크래치를 본다. 스크래치 폴더는 목록에서 오므로 뿌리 안이다. */
-export function findSession(cwd: string, id: string): SessionSummary | undefined {
-  return [...listSessions(cwd, 'project'), ...listScratchSessions()].find((s) => s.id === id);
+/**
+ * id 나 이름(D-085)으로 찾는다 — 이 폴더만이 아니라 아는 폴더·스크래치 전부다. 스크래치 폴더는 목록에서 오므로 뿌리 안이다.
+ * 둘 이상 맞으면 던진다 — 짐작해서 남의 세션을 열지 않는다.
+ */
+export function findSession(cwd: string, ref: string): SessionSummary | undefined {
+  const hits = matchSessions(cwd, ref);
+  if (hits.length > 1) throw ambiguous(ref, hits);
+  return hits[0];
 }
 
 export function openingLines(session: ConversationSession, budget: Budget, tail = 10): string[] {

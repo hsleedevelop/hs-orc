@@ -6,7 +6,7 @@
  * 옛 자리(`<폴더>/.hs-orc/`)는 읽기 폴백으로만 남는다 — 옮기지도 지우지도 않는다.
  */
 import { createHash } from 'node:crypto';
-import { realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -37,3 +37,32 @@ export function projectStateDir(dir: string, env: NodeJS.ProcessEnv = process.en
 
 /** D-071 이전 자리. **읽기만 한다.** */
 export const legacyStateDir = (dir: string): string => path.join(dir, '.hs-orc');
+
+/**
+ * 상태 폴더가 어느 작업 폴더의 것인지 남긴다 (D-085) — 키는 해시라 거꾸로 풀 수 없다. id 로 세션을 찾는
+ * `hs-orc session` 이 최근 목록에 없는 폴더의 세션도 찾게 한다. 이미 있으면 쓰지 않는다.
+ */
+export function markStateOrigin(dir: string, env: NodeJS.ProcessEnv = process.env): void {
+  const file = path.join(projectStateDir(dir, env), 'origin.json');
+  if (existsSync(file)) return;
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify({ dir: path.resolve(dir) })}\n`, 'utf8');
+}
+
+/** 표식이 남은 작업 폴더 전부. 표식 이전(D-085 전)의 상태 폴더는 여기 없다 — 최근 목록·현재 폴더가 메운다. */
+export function stateOrigins(env: NodeJS.ProcessEnv = process.env): string[] {
+  let keys: string[];
+  try {
+    keys = readdirSync(projectStateRoot(env));
+  } catch {
+    return [];
+  }
+  return keys.flatMap((key) => {
+    try {
+      const parsed = JSON.parse(readFileSync(path.join(projectStateRoot(env), key, 'origin.json'), 'utf8')) as { dir?: unknown };
+      return typeof parsed.dir === 'string' ? [parsed.dir] : [];
+    } catch {
+      return [];
+    }
+  });
+}

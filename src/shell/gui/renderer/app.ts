@@ -12,7 +12,7 @@
  */
 import { createElement as h, useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { compactLines, cutLine, ladderLines, retryLines } from '../../transcript-lines.ts';
+import { compactLines, cutLine, ladderLines, retryLines, statusLabel } from '../../transcript-lines.ts';
 
 const SCREENS = ['Session', 'Dashboard', 'Agents', 'Reviews', 'Debug'] as const;
 type Screen = (typeof SCREENS)[number];
@@ -42,12 +42,16 @@ type Rec =
   | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; reviewer2?: string; estimateUsd: number; notes: string[]; guide?: string[]; mode?: ApprovalMode; asked?: { code: string; text: string }[]; write?: boolean; ladder?: { stage: string; label: string; from: string; changes: string[] }; retry?: true }
   | { kind: 'approval'; turn: number; approved: boolean; write: boolean; by?: 'user' | 'auto'; mode?: ApprovalMode }
   | { kind: 'mode'; turn: number; mode: ApprovalMode }
+  | { kind: 'name'; turn: number; name: string }
   | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string; cut?: Cut; compacted?: Compaction[] }
   | { kind: 'summary'; turn: number; text: string; next: string }
   | { kind: 'error'; turn: number; text: string };
-interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; progress: string[]; mode: ApprovalMode; ladder: { stage: string; label: string; changes: string[] } | null }
+interface Hold { pid: number; by: string; state: 'working' | 'blocked' }
+interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; progress: string[]; mode: ApprovalMode; ladder: { stage: string; label: string; changes: string[] } | null; name?: string; external: Hold | null }
 interface SessionUsage { tokens: number; cacheReadTokens: number; cacheReadPartial?: true; billedUsd: number; convertedUsd: number }
-interface SessionSummary { id: string; dir: string; kind: SessionKind; lastAt: string; preview: string; usage?: SessionUsage }
+type Activity = 'working' | 'blocked' | 'done' | 'interrupted' | 'idle';
+interface SessionStatus { state: Activity; outcome?: string; holder?: { pid: number; by: string } }
+interface SessionSummary { id: string; dir: string; kind: SessionKind; lastAt: string; preview: string; usage?: SessionUsage; name?: string; status?: SessionStatus }
 interface ConversationTree { projects: { project: ProjectInfo; sessions: SessionSummary[] }[]; scratch: SessionSummary[] }
 
 interface Bridge {
@@ -66,6 +70,7 @@ interface Bridge {
   convReject(): Promise<SessionView>;
   convAsk(): Promise<SessionView>;
   convTerminal(): Promise<string>;
+  convRename(name: string): Promise<SessionView>;
   convClose(): Promise<void>;
   tasks(): Promise<TaskRow[]>;
   projects(): Promise<ProjectState>;
@@ -333,7 +338,13 @@ function Sidebar(props: {
   onError: (m: string) => void;
 }): ReactElement {
   const { current, open, onOpen, onProject, onError } = props;
-  const tree = useAsync(() => orc.convList(), [props.refresh]);
+  // 다른 세션의 상태(D-085)는 다른 프로세스·도는 위임이 바꾼다 — 화면 밖 변화라 주기적으로 다시 읽는다.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 4000);
+    return () => clearInterval(t);
+  }, []);
+  const tree = useAsync(() => orc.convList(), [props.refresh, tick]);
   const [busy, setBusy] = useState(false);
   // 접힌 묶음 키. 기본은 펼침 — 처음 보는 사람이 세션이 없다고 오해하지 않게.
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
@@ -363,6 +374,13 @@ function Sidebar(props: {
       'aria-current': sameSession(open, s), onClick: () => openSession(s),
     },
     h('span', { className: 'p' }, s.preview || '(빈 세션)'),
+    // 상태와 부르는 이름 (D-085) — 다른 세션·오케스트레이터가 `hs-orc session send <이 값>` 으로 부른다.
+    h('span', { className: 's' },
+      h('span', {
+        className: `st ${s.status?.state ?? ''}${s.status?.state === 'done' && s.status.outcome !== 'ok' && s.status.outcome !== undefined ? ' bad' : ''}`,
+        title: s.status?.holder ? `${s.status.holder.by} · pid ${s.status.holder.pid}` : '',
+      }, statusLabel(s.status)),
+      h('span', { className: 'ref', title: `id ${s.id}${s.name ? ` · 이름 ${s.name}` : ''}` }, s.name ? `${s.name} · ${s.id}` : s.id)),
     h('span', { className: 't' }, s.lastAt ? s.lastAt.slice(0, 16).replace('T', ' ') : '—'),
     usage ? h('span', { className: 'u', title: usage.title }, usage.line) : null);
   };
@@ -370,7 +388,7 @@ function Sidebar(props: {
   // 첫 메시지 전의 세션은 기록 파일이 없어 목록에 안 잡힌다 — 열려 있는 동안은 자리를 보여 준다.
   const withOpen = (dir: string | null, sessions: SessionSummary[]): SessionSummary[] =>
     open && (dir === null ? open.kind === 'scratch' : open.kind === 'project' && open.dir === dir) && !sessions.some((s) => sameSession(open, s))
-      ? [{ id: open.id, dir: open.dir, kind: open.kind, lastAt: '', preview: '(새 세션)' }, ...sessions]
+      ? [{ id: open.id, dir: open.dir, kind: open.kind, lastAt: '', preview: '(새 세션)', status: { state: 'idle' as const } }, ...sessions]
       : sessions;
 
   const group = (key: string, head: ReactNode, addTitle: string, addDir: string | null, sessions: SessionSummary[], extra = ''): ReactElement => {
@@ -418,6 +436,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
   // 승인한 위임이 도는 동안의 화면 쪽 표시 (D-066). 요청이 안 끝났으니 `view.cancellable` 은 아직 갱신 전이다.
   const [delegation, setDelegation] = useState<'' | 'running' | 'cancelling'>('');
   const [error, setError] = useState('');
+  // 이름 편집 중이면 입력값 (D-085). null = 편집 안 함.
+  const [naming, setNaming] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   // 요청이 도는 동안 뷰를 다시 읽는다 — 서비스의 뷰는 읽기뿐이라 도는 실행을 건드리지 않는다. 끝나면 요청이 돌려준 뷰가 이긴다.
@@ -427,6 +447,22 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     const t = setInterval(() => { orc.convView().then((v) => { if (live) setPeek(v); }, () => undefined); }, 400);
     return () => { live = false; clearInterval(t); };
   }, [busy]);
+
+  // 쉬는 동안에도 뷰를 다시 읽는다 (D-085) — 다른 프로세스(`hs-orc session send`·`chat`)가 이 세션에 보내거나 쥐면 화면이 따라간다.
+  // 서비스가 낡은 세션을 디스크로 다시 조립한다. 바뀐 것이 있을 때만 받는다 — 매번 받으면 입력 중 화면이 다시 그려진다.
+  useEffect(() => {
+    if (busy) return;
+    let live = true;
+    const cur = props.view;
+    const t = setInterval(() => {
+      orc.convView().then((v) => {
+        const changed = v.records.length !== cur.records.length || v.state !== cur.state || v.name !== cur.name
+          || v.external?.pid !== cur.external?.pid || v.external?.state !== cur.external?.state;
+        if (live && changed) onChange(v);
+      }, () => undefined);
+    }, 2000);
+    return () => { live = false; clearInterval(t); };
+  }, [busy, props.view, onChange]);
 
   // 새 기록·진행 표시가 뜨면 그 자리로 간다 — 입력 아래에 가려 "아무 일 없음"으로 보이지 않게.
   // 'start' 는 맨 끝 표식에선 바닥까지 내린다. 'nearest' 는 main 아래 padding 만큼 덜 내려가 떠 있는 입력창이 최신 기록을 덮는다.
@@ -450,8 +486,10 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
   };
 
   const last = view.records.at(-1);
+  // 다른 프로세스가 쥐었으면(D-085) 이 화면의 모든 조작을 막는다 — 눌러도 서비스가 거절한다.
+  const locked = busy || !!view.external;
   // 배정 카드가 선 채 보내면 그 배정은 거절로 남는다 (D-064) — 제안 카드가 대화를 막지 않는다.
-  const canType = (view.state === 'waiting_input' || view.state === 'blocked') && !busy;
+  const canType = (view.state === 'waiting_input' || view.state === 'blocked') && !busy && !view.external;
 
   const planCard = (r: Extract<Rec, { kind: 'plan' }>, i: number, active: boolean): ReactNode =>
     h('section', { key: i, className: 'card' },
@@ -480,7 +518,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
               // 고른 값은 핸들러 안에서 바로 넘긴다 — controlled select 라 핸들러가 끝나면 React 가 DOM 값을 옛 행으로 되돌린다.
               h('select', {
                 value: r.taskId,
-                disabled: busy,
+                disabled: locked,
                 onChange: (e: { target: { value: string } }) => act(orc.convReplan(e.target.value)),
               }, ...props.rows.map((row) => h('option', { key: row.id, value: row.id }, `${row.id} · ${row.task}`))),
               h('span', { className: 'hint' }, '업무 행 직접 지정')),
@@ -501,12 +539,12 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
                 h('span', { className: 'dim' }, ' · reviewer 는 언제나 읽기 전용'))),
             h('div', { className: 'row' },
               h('button', {
-                className: 'btn accent', disabled: busy,
+                className: 'btn accent', disabled: locked,
                 onClick: () => { setDelegation('running'); act(orc.convApprove({ verify: lines(verify), write: (write ?? r.write === true) && view.kind !== 'scratch' })); },
               }, busy ? '실행 중…' : `승인하고 실행 · ${r.reviewer2 ? '세' : '두'} 슬롯${(write ?? r.write === true) && view.kind !== 'scratch' ? ' · 쓰기 켜짐' : ''}`),
-              h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convReject()) }, '거절'),
+              h('button', { className: 'btn', disabled: locked, onClick: () => act(orc.convReject()) }, '거절'),
               // 규칙이 대화성 후속을 작업 행으로 잡았을 때 — 거절하고 같은 메시지를 지휘자가 답한다 (D-038).
-              h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convAsk()) }, '지휘자에게 묻기')))
+              h('button', { className: 'btn', disabled: locked, onClick: () => act(orc.convAsk()) }, '지휘자에게 묻기')))
         : null);
 
   const record = (r: Rec, i: number): ReactNode => {
@@ -525,7 +563,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
             : `직접 답 · 지휘자 Haiku·low · ${r.cost}`),
           ...cutLine(r.cut).map((l, j) => h('div', { key: `c${j}`, className: 'hint' }, l)),
           suggest && r === last && view.state === 'waiting_input'
-            ? h('button', { className: 'btn accent', disabled: busy, onClick: () => act(orc.convPlanAs(suggest)) }, `${suggest} 로 위임`)
+            ? h('button', { className: 'btn accent', disabled: locked, onClick: () => act(orc.convPlanAs(suggest)) }, `${suggest} 로 위임`)
             : null,
           // 제안이 없으면(Jev NONE·확신도 미만이면 지휘자 제안을 버린다, D-065) 사람이 행을 고른다 — CLI `/task Rxx` 와 같은 경로다 (D-079).
           // 카드만 선다 — 쓰기 스위치·승인은 그 카드에서 한다.
@@ -535,14 +573,14 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
                 r.general ? h('div', { className: 'hint warn' }, '행에 안 맞는 작업 (Jev GENERAL) — 업무 행 어디에도 맞지 않는다. 위임하려면 가장 가까운 행을 고른다') : null,
                 // 지휘자는 파일을 못 읽는다(D-080) — 코드를 읽어야 답할 질문이면 읽기 전용 1슬롯이 답한다 (D-083). 이 클릭이 승인이다(카드 없음).
                 r.read ? null : h('div', { className: 'row', style: { whiteSpace: 'normal', marginBottom: 6 } },
-                  h('button', { className: 'btn accent', disabled: busy, onClick: () => act(orc.convRead()) }, '코드를 읽고 답하기'),
+                  h('button', { className: 'btn accent', disabled: locked, onClick: () => act(orc.convRead()) }, '코드를 읽고 답하기'),
                   h('span', { className: 'hint' }, '읽기 전용 엔진 1슬롯(Luna·medium)이 이 폴더를 읽고 답한다 — 파일을 고치지 않고 reviewer 판정이 없다')),
                 h('div', { className: 'row', style: { whiteSpace: 'normal' } },
                   h('select', {
-                    value: pick, disabled: busy, 'aria-label': '위임할 업무 행',
+                    value: pick, disabled: locked, 'aria-label': '위임할 업무 행',
                     onChange: (e: { target: { value: string } }) => setPick(e.target.value),
                   }, h('option', { value: '' }, '업무 행 선택…'), ...props.rows.map((row) => h('option', { key: row.id, value: row.id }, `${row.id} · ${row.task}`))),
-                  h('button', { className: 'btn', disabled: busy || !pick, onClick: () => { setPick(''); act(orc.convPlanAs(pick)); } }, '위임하기'),
+                  h('button', { className: 'btn', disabled: locked || !pick, onClick: () => { setPick(''); act(orc.convPlanAs(pick)); } }, '위임하기'),
                   h('span', { className: 'hint' }, '행을 직접 골라 위임 — 배정 카드가 서고 승인은 그대로다')))
             : null);
       }
@@ -553,6 +591,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
         return h('div', { key: i, className: 'hint' }, r.approved && r.by === 'auto' ? `자동 승인 · ${r.mode ?? ''} · 묻는 조건 없음` : r.approved ? `승인${r.write ? ' · 쓰기 켜짐' : ''}` : '거절');
       case 'mode':
         return h('div', { key: i, className: 'hint' }, `승인 방식 → ${r.mode}`);
+      case 'name':
+        return h('div', { key: i, className: 'hint' }, r.name ? `이름 → ${r.name}` : '이름 지움');
       case 'result':
         return h('section', { key: i, className: 'card' },
           h('span', { className: 'label' }, `위임 결과 · ${r.decisionId}`),
@@ -579,10 +619,30 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     h('div', { className: 'row' },
       // 경로는 줄바꿈하지 않는다 — `hs-` 에서 끊기면 없는 경로처럼 읽힌다. 길면 `elide` 가 앞을 자르고 전체는 title 로 본다.
       h('span', { className: 'mono dim', title: view.dir, style: { whiteSpace: 'nowrap' } }, view.kind === 'scratch' ? `스크래치 · ${elide(view.dir, 36)}` : elide(view.dir, 44)),
+      // 이 세션을 부르는 값 (D-085) — 누르면 복사한다. 다른 세션·오케스트레이터가 `hs-orc session send <id|이름>` 으로 쓴다.
+      h('button', {
+        className: 'btn mono', title: `id ${view.id} — 눌러서 복사`,
+        onClick: () => { void navigator.clipboard?.writeText(view.id); },
+      }, view.id),
+      naming === null
+        ? h('button', {
+            className: 'btn', disabled: locked, title: '이름을 붙이면 id 대신 이름으로 부를 수 있다',
+            onClick: () => setNaming(view.name ?? ''),
+          }, view.name ? `이름 ${view.name}` : '이름 붙이기')
+        : h('input', {
+            type: 'text', className: 'code', autoFocus: true, value: naming, style: { width: 160 },
+            placeholder: '영문자로 시작 · 영문·숫자·. _ - · 비우면 지움',
+            onChange: (e: { target: { value: string } }) => setNaming(e.target.value),
+            onBlur: () => setNaming(null),
+            onKeyDown: (e: { key: string; preventDefault: () => void }) => {
+              if (e.key === 'Enter') { e.preventDefault(); act(orc.convRename(naming)); setNaming(null); }
+              if (e.key === 'Escape') setNaming(null);
+            },
+          }),
       h('div', { className: 'spacer' }),
       // 방식은 세션 값이다 (D-064). 바꿔도 이미 선 카드는 자동 승인하지 않는다 — 다음 배정부터다.
       h('select', {
-        value: view.mode, disabled: busy, title: MODES.find((m) => m.id === view.mode)?.hint ?? '',
+        value: view.mode, disabled: locked, title: MODES.find((m) => m.id === view.mode)?.hint ?? '',
         onChange: (e: { target: { value: string } }) => act(orc.convMode(e.target.value as ApprovalMode)),
       }, ...MODES.map((m) => h('option', { key: m.id, value: m.id, title: m.hint }, `승인 · ${m.label}`))),
       h('span', { className: 'dim mono' }, view.budget),
@@ -603,6 +663,13 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     sending && !(peek && peek.records.length > props.view.records.length) ? h('div', { className: 'bubble user dim' }, sending) : null,
     // 다시 연 화면은 `busy` 를 모른다 — 서비스가 working 이면 도는 실행에 붙은 것이다 (D-063). 결과는 앞 화면이 건 요청이 돌아오며 싣는다.
     // key 를 고정한다 — 도는 중 기록 줄이 늘면(승인·방식 줄) 자리가 밀려 다시 마운트되고 경과 초가 0 으로 돌아간다.
+    // 다른 프로세스가 쥐었다 (D-085) — 이 화면은 그 실행을 멈출 수 없다. 끝나면 쉬는 동안의 다시 읽기가 결과를 싣는다.
+    view.external && !busy
+      ? h('div', { key: 'external', className: 'row' },
+          view.external.state === 'working'
+            ? h(Running, { label: `다른 곳에서 도는 중 · ${view.external.by} · pid ${view.external.pid}` })
+            : h('div', { className: 'hint warn' }, `다른 곳(${view.external.by} · pid ${view.external.pid})에 배정 카드가 승인을 기다린다 — 거기서 답한다`))
+      : null,
     busy || view.state === 'working'
       ? h('div', { key: 'running', className: 'row' },
           h(Running, { label: delegation === 'cancelling' ? '취소하는 중…' : (view.state === 'blocked' || last?.kind === 'plan' || last?.kind === 'approval') ? '실행 중…' : '생각 중…' }),

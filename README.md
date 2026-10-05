@@ -43,7 +43,8 @@ npm link            # 또는: ln -s "$PWD/bin/hs-orc.mjs" ~/.local/bin/hs-orc
 hs-orc "<작업>"                      # 배정·비용 제시까지. 여기서 멈춘다
 hs-orc "<작업>" --run                # 두 슬롯 실행 (읽기 전용)
 hs-orc "<작업>" --write --run        # primary 가 파일을 고칠 수 있다
-hs-orc chat [--scratch|--resume <id>] [--approval manual|auto-ask|auto]   # 대화 세션 (줄 입력, /mode 로 승인 방식)
+hs-orc chat [--scratch|--resume <id|이름>] [--approval manual|auto-ask|auto]   # 대화 세션 (줄 입력, /mode 로 승인 방식)
+hs-orc session ls|show|send|name     # id·이름으로 세션 보기·보내기 — 다른 세션·오케스트레이터용 (D-085)
 hs-orc gui                           # GUI (Electron)
 hs-orc --help
 ```
@@ -70,6 +71,22 @@ v1 의 TUI(`hs-orc tui`)는 제거했다 (D-077). 치면 위 대체 명령을 �
 ```bash
 hs-orc "<작업>" --mode graph --graph examples/graph-nodes.json --run
 ```
+
+## 세션을 id·이름으로 다루기 (D-085)
+
+대화 세션은 id(`MMDD-HHMM-xxx`)를 갖고, 이름을 붙일 수 있다(GUI 세션 머리의 "이름 붙이기" · `hs-orc session name`). 다른 터미널·에이전트·오케스트레이터가 그 값으로 세션을 부른다.
+
+```bash
+hs-orc session ls                          # 아는 세션 전부 — id · 이름 · 상태(진행 중·승인 대기·완료·idle·끊김) · 폴더
+hs-orc session show web --tail 5           # 상태와 끝 기록
+hs-orc session send web "이 타입 에러 고쳐줘"          # 1턴. 배정 카드가 서면 거절로 남긴다(제시만)
+hs-orc session send web "이 타입 에러 고쳐줘" --run    # 선 카드를 승인해 위임까지 (--write · --verify 가능)
+hs-orc session name 1005-1512-cf1 web       # 이름 붙이기 ("" 은 지운다)
+```
+
+- `send` 는 그 세션의 승인 방식을 따른다 — `auto-ask`·`auto` 세션은 조건이 없으면 `--run` 없이도 읽기 전용 위임이 돈다.
+- 한 세션은 한 프로세스만 쥔다. GUI·`chat`·`session send` 중 하나가 엔진을 돌리거나 배정 카드를 세워 둔 동안 다른 곳은 거절된다. 쥔 프로세스가 죽으면 풀린다.
+- GUI 는 열린 세션에 다른 곳이 덧붙인 기록을 2초 안에 다시 읽고, 사이드바 상태는 4초마다 다시 읽는다.
 
 ## 외부 전송 — Jev 분류 (D-065)
 

@@ -3245,6 +3245,37 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 - codex `file_change` 의 칸 모양은 이 결정에서 캡처하지 못했다(D-051 근거에 `file_change completed` 가 있을 뿐) — 경로를 못 읽으면 `▸ 파일 변경` 만 낸다. cursor 의 `assistant` 줄은 fixture 상 claude 와 같지만 `tool_use` 는 미실측이다.
 - `hs-orc chat`(줄 입력)은 진행 줄을 찍지 않는다 — 같은 `session.progress` 를 쓰면 되지만 이번 범위가 아니다.
 
+## D-085 — 세션 목록에 상태를 보이고, id·이름으로 다른 세션·오케스트레이터가 세션을 다룬다
+
+**배경** 2026-10-05 전하 요청: "세션 목록에서 진행 중·완료·idle 같은 상태를 알 수 있고, 세션을 지칭할 id 를 부여해 다른 세션이나 오케스트레이터에서 id 로 직접 대화·핸들링". 그때까지(사실): 목록에는 상태 열이 없었다(SPEC §7.1, 2026-09-24 — 상태는 저장되지 않고 다시 열면 늘 `waiting_input`). 세션 상태는 GUI 프로세스의 메모리에만 있고, id 는 폴더별 기록 안에서만 찾을 수 있었다(`chat --resume` 은 부른 폴더 + 스크래치만). 프로세스 사이에 같은 기록을 두 곳이 쓰지 못하게 막는 장치도 없었다 — `ConversationSession` 은 기록을 열 때 한 번 읽고 들고 있어, 다른 프로세스가 덧붙이면 턴 번호가 겹치고 Budget 재생(D-054)이 어긋난다.
+
+**결정**
+1. **점유 표식** `~/.hs-orc/projects/<키>/sessions/<id>.lock` = `{pid, by: gui|chat|cli, state: working|blocked, at}` (`core/session-lock.ts`). 엔진이 도는 동안(`working`)과 배정 카드가 메모리에 선 동안(`blocked`) 그 프로세스가 쥔다. 다른 살아 있는 pid 가 쥐었으면 쓰기를 거절하고, 죽은 pid 는 없는 것으로 본다(앱이 끊겨도 영영 잠기지 않게). 거절 문구가 lock 파일 경로를 말한다 — pid 재사용으로 남은 표식을 사람이 지울 수 있게.
+   - 카드도 쥐는 이유: 기록에만 남은 카드는 되살리지 않는다(session.ts 생성자). 다른 곳이 보내면 GUI 의 카드가 말없이 사라진다.
+2. **목록 상태** (`SessionSummary.status`) — 점유가 있으면 `working`(진행 중)·`blocked`(승인 대기), 없으면 기록 끝으로 `done`(완료 · 마지막 결과 outcome — 결과·요약으로 끝남)·`interrupted`(끊김 — 승인 뒤 결과 없음)·`idle`(그 밖의 입력 대기). 비용·방식·이름 줄은 턴의 끝을 가리지 않는다. "완료" 와 "idle" 의 경계는 **위임 결과로 끝났나**다 — 직접 답·읽기 답 뒤는 idle 이다.
+3. **이름** — `kind: 'name'` 기록, 마지막 것이 이긴다, 빈 문자열은 지운다. 모양 `^[A-Za-z][A-Za-z0-9._-]{0,31}$` — 영문자로 시작해 id(숫자로 시작)와 한 자리에서 받을 수 있다. 아는 세션끼리 겹치면 거절한다(셸이 본다, Core 는 모양만). 이름만 붙은 첫 메시지 전 세션은 새 세션으로 연다(기본 승인 방식 — 옛 세션의 manual 로 오인하지 않게).
+4. **찾기** (`shell/session-registry.ts`) — 부른 폴더 · GUI 최근 목록 · 상태 폴더의 `origin.json`(세션 객체가 첫 기록 때 남긴다) · 스크래치를 모아 id 나 이름이 **정확히** 같은 것. 둘 이상이면 던진다(짐작해서 남의 세션에 보내지 않는다). `chat --resume` 도 이것을 쓴다.
+5. **`hs-orc session ls|show|send|name`** — 표준 입력을 읽지 않는다(부르는 쪽이 에이전트일 수 있다). `send` 는 세션을 쥐고 디스크에서 새로 조립해 1턴을 돈다. 세션의 승인 방식을 그대로 따른다. 카드가 서면 `--run` 이 그 카드를 승인(`--write`·`--verify`), 없으면 **거절로 남긴다** — 단발 CLI 의 "제시만 했다 · 실행은 --run" 과 같은 게이트다. exit 1 = 오류 기록이나 wrong·rework·cancelled. 첫 Ctrl-C 는 `chat` 과 같이 위임만 취소한다.
+6. **낡은 객체** — `ConversationSession.isStale()`(디스크 기록 수 ≠ 들고 있는 수, 도는 중 제외). GUI 는 열린 세션이 낡았으면 디스크로 다시 조립하고 Budget 도 기록에서 다시 되살린다. `chat` 은 줄마다 보고 낡았거나 남이 쥐었으면 쓰지 않고 다시 열라고 알린다.
+7. **GUI** — 사이드바 행에 상태 칩·이름 · id, 4초마다 다시 읽는다. 세션 머리에 id(누르면 복사)·"이름 붙이기". 쉬는 동안 2초마다 뷰를 다시 읽어 바뀐 것만 받는다. 다른 프로세스가 쥐었으면 "다른 곳에서 도는 중 · by · pid" 를 보이고 입력·버튼을 막는다.
+
+**버린 것** 다른 프로세스의 위임 **취소**(`session cancel`) — 쥔 pid 에 신호를 보내면 GUI 앱 전체가 죽는다. 취소 요청 파일을 두고 쥔 쪽이 읽게 하는 방식이 후보다. 새 세션 만들기(`session new`) — 이번 요청은 이미 있는 세션을 지칭하는 일이라 넣지 않았다.
+
+**검증**
+- `npm run gate` 통과 — 테스트 655 → 674 (`session-lock.test.ts` 7 · `session-cmd.test.ts` 7 · `service.test.ts` 4 · `chat.test.ts` 1).
+- 실제 진입점 스모크(격리 상태 폴더): `hs-orc session ls` → `세션 없음`, `show nope` → exit 1 `그런 세션이 없다`, 인자·옵션 오류 → exit 1 + 사용법.
+- 렌더러 번들을 가짜 `window.orc` 로 브라우저(Playwright)에 띄워 사이드바 상태 칩 6종·이름 · id·"다른 곳에서 도는 중" 표시·입력 잠금을 눈으로 확인했다. 콘솔 오류 0.
+
+**미검증·위험**
+- Electron 으로 띄운 실제 GUI 에서 `hs-orc session send` 를 섞어 본 적이 없다 — 프로세스 간 경로는 단위 테스트(두 프로세스 대신 같은 프로세스 + 남의 pid 흉내)뿐이다.
+- 사이드바 4초 다시 읽기는 아는 세션의 기록 전체를 읽는다. 세션이 수백 개로 늘면 무거워진다 — 그때 목록 캐시(mtime)를 둔다.
+- 쥐기는 확인 → 쓰기 사이에 틈이 있다('wx' 로 빈 자리 경합만 막는다). 죽은 표식을 둘이 동시에 넘겨받는 경합은 막지 않는다.
+- `send` 는 `auto-ask`·`auto` 세션에서 `--run` 없이도 읽기 전용 위임을 돌린다(세션 방식을 따른다) — 오케스트레이터가 반복 호출하면 그만큼 과금된다. 세션 Budget 상한이 막는다.
+
+**영향** `core/session-lock.ts`(신규) · `transcript.ts`(`name`·`status`) · `session.ts`(`rename`·`isStale`·`origin`) · `project-state.ts`(`origin.json`) · `shell/session-registry.ts`·`session-cmd.ts`·`session-main.ts`(신규) · `chat.ts`(찾기·점유) · GUI `service.ts`·`main.ts`·`preload.cjs`·`renderer/*` · `bin/hs-orc.mjs` · SPEC §6.4.1·§7.1 · README.
+
+**상태** 구현됨 — 같은 PR. 머지로 확정한다(전하 직접 머지).
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |

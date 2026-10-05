@@ -48,6 +48,8 @@ import {
 import type { RowClassifier } from '../../adapters/jev.ts';
 import { openTerminal } from './terminal.ts';
 import { assembleSession, restoreBudget } from '../conversation.ts';
+import { busyMessage, claimSession, foreignHold, lockPath, releaseSession, syncHold, type SessionHold } from '../../core/session-lock.ts';
+import { assertNameFree } from '../session-registry.ts';
 
 export { skipGitCheck } from '../conversation.ts';
 
@@ -126,6 +128,10 @@ export interface SessionView {
   readonly mode: ApprovalMode;
   /** 지금 '사다리 다음 단계로 다시 위임' 을 누를 수 있으면 그 단계 (D-068). 입력 대기 중이고 올릴 단계가 있을 때만 있다. */
   readonly ladder: LadderOffer | null;
+  /** 붙인 이름 (D-085). `hs-orc session send <이름>` 이 이것으로 찾는다. */
+  readonly name?: string;
+  /** 다른 프로세스(`chat`·`hs-orc session`)가 이 세션을 쥐고 있다 (D-085). 화면은 입력을 막고 도는 중으로 보인다. */
+  readonly external: SessionHold | null;
 }
 
 export interface WorktreeState {
@@ -210,7 +216,10 @@ export class GuiService {
   useProject(dir: string): ProjectState {
     this.workdir = validateProject(dir);
     // 화면의 폴더와 세션의 폴더가 갈리면 안 된다 (D-029) — 다른 폴더의 project 세션은 닫는다.
-    if (this.session?.kind === 'project' && !samePath(this.session.dir, this.workdir)) this.session = null;
+    if (this.session?.kind === 'project' && !samePath(this.session.dir, this.workdir)) {
+      this.leave();
+      this.session = null;
+    }
     try {
       rememberProject(this.workdir);
     } catch (error) {
@@ -391,6 +400,8 @@ export class GuiService {
       progress: s.state === 'working' ? [...s.progress] : [],
       mode: s.mode,
       ladder: s.state === 'waiting_input' ? s.ladderOffer() : null,
+      ...(s.name ? { name: s.name } : {}),
+      external: foreignHold(s.dir, s.id),
     };
   }
 
@@ -435,19 +446,39 @@ export class GuiService {
 
   /** 승인 방식을 바꾼다 (D-064). 엔진을 부르지 않으므로 `live` 에 두지 않는다 — 도는 세션에도 바로 붙는다. */
   converseMode(mode: ApprovalMode): SessionView {
-    this.requireConversation().setMode(mode);
+    this.recording((s) => s.setMode(mode));
     return this.conversation();
   }
 
   /** 사다리 다음 단계로 배정 카드를 세운다 (D-068). 엔진을 부르지 않고 시작하지도 않으므로 `live` 에 두지 않는다 — 승인은 카드에서다. */
   converseEscalate(): SessionView {
-    this.requireConversation().escalate();
+    this.recording((s) => s.escalate());
     return this.conversation();
   }
 
   converseReject(): SessionView {
-    this.requireConversation().reject();
+    this.recording((s) => s.reject());
     return this.conversation();
+  }
+
+  /** 이름을 붙인다 (D-085). 빈 문자열은 지운다. 아는 다른 세션과 겹치면 던진다 — 이름으로 찾을 때 둘이 나오면 안 된다. */
+  converseRename(name: string): SessionView {
+    const s = this.requireConversation();
+    assertNameFree(this.workdir, name.trim(), s);
+    this.recording((t) => t.rename(name));
+    return this.conversation();
+  }
+
+  /**
+   * 엔진을 부르지 않고 기록만 붙이는 호출 (D-085). 다른 프로세스가 쥐었으면 거절한다 — 그쪽이 같은 파일에 쓰는 중이다.
+   * 도는 우리 위임(`live`)에는 그대로 붙는다(방식 변경은 도는 중에도 된다, D-064). 끝나면 카드가 섰는지에 맞춰 점유를 맞춘다.
+   */
+  private recording(op: (s: ConversationSession) => unknown): void {
+    const s = this.requireConversation();
+    const other = foreignHold(s.dir, s.id);
+    if (other) throw new Error(busyMessage(other, lockPath(s.dir, s.id)));
+    op(s);
+    if (!this.live.has(`${s.dir}::${s.id}`)) syncHold(s.dir, s.id, s.state === 'blocked' ? 'blocked' : null, 'gui');
   }
 
   async converseAsk(): Promise<SessionView> {
@@ -459,14 +490,25 @@ export class GuiService {
   private async running(op: (s: ConversationSession) => Promise<unknown>): Promise<void> {
     const s = this.requireConversation();
     const key = `${s.dir}::${s.id}`;
+    // 도는 동안 세션을 쥔다 (D-085) — `chat`·`hs-orc session send` 가 같은 기록에 끼어 쓰지 않게. 다른 곳이 쥐었으면 여기서 던진다.
+    claimSession(s.dir, s.id, 'working', 'gui');
     this.live.set(key, s);
-    const call = op(s);
+    let call: Promise<unknown>;
+    try {
+      call = op(s);
+    } catch (error) {
+      this.live.delete(key);
+      syncHold(s.dir, s.id, s.state === 'blocked' ? 'blocked' : null, 'gui');
+      throw error;
+    }
     this.liveCalls.set(key, call);
     try {
       await call;
     } finally {
       if (this.live.get(key) === s) this.live.delete(key);
       if (this.liveCalls.get(key) === call) this.liveCalls.delete(key);
+      // 카드가 섰으면 승인 대기로 계속 쥔다 — 다른 곳이 보내면 그 카드가 말없이 사라진다.
+      syncHold(s.dir, s.id, s.state === 'blocked' ? 'blocked' : null, 'gui');
     }
   }
 
@@ -482,16 +524,41 @@ export class GuiService {
   }
 
   closeConversation(): void {
+    this.leave();
     this.session = null;
   }
 
+  /**
+   * 화면에서 내려놓는 세션의 점유를 놓는다 (D-085). 도는 것(`live`)은 그대로 — 끝날 때 `running` 이 놓는다.
+   * 선 카드는 메모리에만 있어 다시 열면 되살리지 않으므로(session.ts 생성자) 승인 대기 점유도 여기서 끝난다.
+   */
+  private leave(): void {
+    const s = this.session;
+    if (s && !this.live.has(`${s.dir}::${s.id}`)) releaseSession(s.dir, s.id);
+  }
+
+  /**
+   * 열린 세션. 다른 프로세스가 그 사이 기록을 붙였으면(D-085 — `hs-orc session send` 등) 들고 있던 객체는 턴 번호·Budget 이 낡았다 —
+   * 디스크로 새로 조립한다. 도는 중인 우리 세션은 우리가 쓰는 중이라 보지 않는다.
+   */
   private requireConversation(): ConversationSession {
-    if (!this.session) throw new Error('열린 세션이 없다.');
+    const s = this.session;
+    if (!s) throw new Error('열린 세션이 없다.');
+    const key = `${s.dir}::${s.id}`;
+    if (this.live.has(key) || !s.isStale()) return s;
+    this.sessionBudgets.delete(key);
+    this.session = this.assemble(s.kind, s.dir, s.id);
     return this.session;
   }
 
   private attach(kind: SessionKind, dir: string, id: string): SessionView {
-    this.session = this.live.get(`${dir}::${id}`) ?? assembleSession({
+    if (this.session && !(this.session.dir === dir && this.session.id === id)) this.leave();
+    this.session = this.live.get(`${dir}::${id}`) ?? this.assemble(kind, dir, id);
+    return this.conversation();
+  }
+
+  private assemble(kind: SessionKind, dir: string, id: string): ConversationSession {
+    return assembleSession({
       kind,
       dir,
       id,
@@ -500,6 +567,5 @@ export class GuiService {
       ...(this.jev ? { classifier: this.jev } : {}),
       ...(this.execute ? { execute: this.execute } : {}),
     });
-    return this.conversation();
   }
 }

@@ -4,6 +4,7 @@
  *
  *   hs-orc "<작업>" [옵션…]        → src/shell/cli.ts
  *   hs-orc chat [옵션…]            → src/shell/chat-main.ts
+ *   hs-orc session <명령>          → src/shell/session-main.ts
  *   hs-orc gui                      → 렌더러 번들 → electron src/shell/gui/main.ts
  *
  * **빌드 산출물(dist/)을 만들지 않는다** (D-019). `.ts` 를 Node 타입 스트리핑으로 그대로 실행한다.
@@ -28,7 +29,8 @@ const version = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')
 const USAGE = `hs-orc ${version} — 작업 1건을 분류·배정하고 두 슬롯(primary·reviewer)으로 실행한다.
 
   hs-orc "<작업>" [옵션…]        배정·비용 제시. 실제 실행은 --run 이다 (승인 게이트).
-  hs-orc chat [--scratch|--resume <id>|--list]  대화 세션 (줄 입력)
+  hs-orc chat [--scratch|--resume <id|이름>|--list]  대화 세션 (줄 입력)
+  hs-orc session ls|show|send|name  id·이름으로 세션 보기·보내기 (다른 세션·오케스트레이터용)
   hs-orc gui                      GUI (Electron)
   hs-orc -- "<작업>"              첫 인자를 하위명령으로 해석하지 않는다
   hs-orc --help | --version
@@ -126,6 +128,8 @@ if (first === '--help' || first === '-h' || first === 'help') {
   process.exit(1);
 } else if (first === 'chat') {
   await runShell('src/shell/chat-main.ts', argv.slice(1));
+} else if (first === 'session') {
+  await runShell('src/shell/session-main.ts', argv.slice(1));
 } else if (first === 'gui') {
   runGui(argv.slice(1));
 } else if (first === 'build-gui') {

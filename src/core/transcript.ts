@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { newDecisionId } from './decision-log.ts';
 import { legacyStateDir, projectStateDir } from './project-state.ts';
+import { sessionHold, type HoldBy } from './session-lock.ts';
 import type { Budget, Spend } from './budget.ts';
 import type { ContextCut } from './context.ts';
 import type { SettledOutcome } from './evidence.ts';
@@ -102,6 +103,8 @@ export type TranscriptEntry =
     }
   /** 승인 방식 변경 (D-064 결정 8). 세션을 열면 마지막 것을 재생한다 — 화면에 한 줄로 보인다(감사용). */
   | { readonly kind: 'mode'; readonly mode: ApprovalMode }
+  /** 세션 이름 (D-085). 마지막 것이 이긴다 — 빈 문자열은 이름을 지운다. id 와 함께 `hs-orc session` 이 세션을 찾는 열쇠다. */
+  | { readonly kind: 'name'; readonly name: string }
   | {
       readonly kind: 'result';
       /** `cancelled` — 사용자가 실행 중에 멈췄다 (D-066). 실패가 아니라 끊김도 아니다 — 잇지 않는다. */
@@ -221,6 +224,52 @@ export interface SessionSummary {
   readonly preview: string;
   /** 쓴 것이 있으면 그 합. 유료 호출이 없던 세션에는 없다. */
   readonly usage?: SessionUsage;
+  /** 붙인 이름 (D-085). 없으면 없다. */
+  readonly name?: string;
+  /** 목록 한 칸의 상태 (D-085). 기록을 못 읽은 세션에는 없다. */
+  readonly status?: SessionStatus;
+}
+
+/**
+ * 목록에 보이는 세션 상태 (D-085). `working`·`blocked` 는 점유 표식(`session-lock.ts`)에서, 나머지는 기록 끝에서 온다.
+ * - `working` 진행 중 — 어느 프로세스에서 엔진이 돈다.
+ * - `blocked` 승인 대기 — 어느 프로세스의 메모리에 배정 카드가 서 있다. 기록에만 남은 카드는 되살리지 않으므로(session.ts 생성자) `idle` 이다.
+ * - `done` 완료 — 마지막 턴이 위임 결과(·요약)로 끝났다. `outcome` 이 그 결과다.
+ * - `interrupted` 끊김 — 승인 뒤 결과가 없고 쥔 프로세스도 없다.
+ * - `idle` — 그 밖의 입력 대기(직접 답·거절·오류 뒤, 빈 세션).
+ */
+export type SessionActivity = 'working' | 'blocked' | 'done' | 'interrupted' | 'idle';
+
+export interface SessionStatus {
+  readonly state: SessionActivity;
+  /** `done` 일 때 마지막 위임 결과. */
+  readonly outcome?: string;
+  /** `working`·`blocked` 일 때 쥔 프로세스. */
+  readonly holder?: { readonly pid: number; readonly by: HoldBy };
+}
+
+/** 마지막 `name` 기록. 빈 문자열(지움)이면 없다. */
+export function sessionName(records: readonly TranscriptRecord[]): string | undefined {
+  const last = records.findLast((r) => r.kind === 'name');
+  return last?.kind === 'name' && last.name ? last.name : undefined;
+}
+
+/** 기록만으로 본 상태 — 점유 표식이 없을 때다. 비용·방식·이름 줄은 턴의 끝을 가리지 않는다. */
+export function recordedStatus(records: readonly TranscriptRecord[]): SessionStatus {
+  const last = records.findLast((r) => r.kind !== 'spend' && r.kind !== 'mode' && r.kind !== 'name');
+  if (last?.kind === 'approval' && last.approved) return { state: 'interrupted' };
+  if (last?.kind === 'result' || last?.kind === 'summary') {
+    // 요약은 결과 뒤에만 붙는다 — 결과는 그 앞 줄이다.
+    const result = records.findLast((r) => r.kind === 'result');
+    return { state: 'done', ...(result?.kind === 'result' ? { outcome: result.outcome } : {}) };
+  }
+  return { state: 'idle' };
+}
+
+/** 점유 표식이 기록보다 앞선다 — 도는 위임의 결과는 아직 기록에 없다. */
+export function sessionStatus(dir: string, id: string, records: readonly TranscriptRecord[], env: NodeJS.ProcessEnv = process.env): SessionStatus {
+  const hold = sessionHold(dir, id, env);
+  return hold ? { state: hold.state, holder: { pid: hold.pid, by: hold.by } } : recordedStatus(records);
 }
 
 /**
@@ -291,6 +340,7 @@ export function listSessions(dir: string, kind: SessionKind): SessionSummary[] {
       }
       const first = records.find((r) => r.kind === 'user');
       const usage = sessionUsage(records);
+      const name = sessionName(records);
       return {
         id,
         dir,
@@ -298,6 +348,8 @@ export function listSessions(dir: string, kind: SessionKind): SessionSummary[] {
         lastAt: records.at(-1)?.at ?? '',
         preview: first?.kind === 'user' ? first.text.slice(0, 60) : '',
         ...(usage ? { usage } : {}),
+        ...(name ? { name } : {}),
+        status: sessionStatus(dir, id, records),
       };
     })
     .sort((a, b) => b.lastAt.localeCompare(a.lastAt));
