@@ -119,6 +119,8 @@ export interface SessionView {
   readonly interrupted: boolean;
   /** primary·reviewer 가 도는 중이라 지금 취소할 수 있다 (D-066). 화면의 '취소' 버튼이 이것을 본다. */
   readonly cancellable: boolean;
+  /** 도는 엔진 실행의 진행 줄 (D-084) — 중간 답 글·도구 호출. 돌 때만 싣는다. 화면이 "실행 중…" 아래에 끝부분을 보여준다. */
+  readonly progress: readonly string[];
   /** 이 세션의 승인 방식 (D-064). 세션 머리의 선택이 이것을 본다. */
   readonly mode: ApprovalMode;
   /** 지금 '사다리 다음 단계로 다시 위임' 을 누를 수 있으면 그 단계 (D-068). 입력 대기 중이고 올릴 단계가 있을 때만 있다. */
@@ -385,6 +387,7 @@ export class GuiService {
       appBudget: this.appBudgetSummary(),
       interrupted: s.interrupted,
       cancellable: s.cancellable,
+      progress: s.state === 'working' ? [...s.progress] : [],
       mode: s.mode,
       ladder: s.state === 'waiting_input' ? s.ladderOffer() : null,
     };

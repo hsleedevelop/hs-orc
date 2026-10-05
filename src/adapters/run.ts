@@ -137,6 +137,7 @@ export function runProcess(spec: SpawnSpec, onEvent?: (event: RunEvent) => void)
         compactions.push(event.compaction);
         break;
       case 'notice':
+      case 'progress':
         break;
     }
     onEvent?.(event);

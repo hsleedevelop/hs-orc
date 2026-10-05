@@ -45,7 +45,7 @@ type Rec =
   | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string; cut?: Cut; compacted?: Compaction[] }
   | { kind: 'summary'; turn: number; text: string; next: string }
   | { kind: 'error'; turn: number; text: string };
-interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; mode: ApprovalMode; ladder: { stage: string; label: string; changes: string[] } | null }
+interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; progress: string[]; mode: ApprovalMode; ladder: { stage: string; label: string; changes: string[] } | null }
 interface SessionSummary { id: string; dir: string; kind: SessionKind; lastAt: string; preview: string }
 interface ConversationTree { projects: { project: ProjectInfo; sessions: SessionSummary[] }[]; scratch: SessionSummary[] }
 
@@ -563,6 +563,11 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
           delegation === 'running' || (delegation === '' && view.cancellable)
             ? h('button', { className: 'btn danger', onClick: () => { setDelegation('cancelling'); act(orc.convCancel()); } }, '취소')
             : null)
+      : null,
+    // 엔진이 도는 중 한 일 (D-084) — 중간 답 글·도구 호출. column-reverse 라 스크롤이 늘 끝(최신 줄)에 붙는다.
+    (busy || view.state === 'working') && view.progress.length > 0
+      ? h('div', { style: { maxHeight: 240, overflow: 'auto', display: 'flex', flexDirection: 'column-reverse' } },
+          h('pre', { className: 'plain mono' }, view.progress.slice(-60).join('\n')))
       : null,
     error ? h('div', { className: 'banner error' }, error) : null,
     h('div', { ref: endRef }),

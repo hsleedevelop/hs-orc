@@ -7,7 +7,7 @@
 import type { Matrix } from '../data/matrix.ts';
 import type { Engines, ResumeCumulative } from '../data/engines.ts';
 import { createAdapter } from '../adapters/engine.ts';
-import type { CacheWrite, EngineCompaction } from '../adapters/types.ts';
+import type { CacheWrite, EngineCompaction, RunEvent } from '../adapters/types.ts';
 import { meteredUsd, type TokenCounts } from '../data/pricing.ts';
 import type { ResolvedSlot } from './assign.ts';
 
@@ -63,6 +63,21 @@ export interface SlotRunOptions {
   readonly baseline?: EngineReport;
   /** 신호가 서면 엔진 프로세스 그룹을 종료한다 (D-066, SPEC §3.7). 이미 서 있으면 시작하지 않는다. */
   readonly signal?: AbortSignal;
+  /** 엔진이 도는 중 한 일을 한 줄씩 받는다 (D-084) — 중간 답 글·도구 호출·경고. 화면 표시 전용이고 결과에 들지 않는다. */
+  readonly onProgress?: (line: string) => void;
+}
+
+/** 진행 표시 한 줄 (D-084). codex 는 중간 답을 `text` 로, claude·cursor 는 `progress` 로 낸다. */
+function progressLine(event: RunEvent): string | undefined {
+  switch (event.kind) {
+    case 'progress':
+    case 'text':
+      return event.text;
+    case 'notice':
+      return `⚠ ${event.message}`;
+    default:
+      return undefined;
+  }
 }
 
 /**
@@ -126,6 +141,11 @@ export function createExecutor(
       return { ok: false, cancelled: true, text: '', rawStdout: '', rawStderr: '', durationMs: 0 };
     }
     const write = options.write === true && slot.role === 'primary';
+    const onProgress = runOptions?.onProgress;
+    const onEvent = onProgress && ((event: RunEvent): void => {
+      const line = progressLine(event);
+      if (line !== undefined) onProgress(line);
+    });
     const handle = createAdapter(slot.engine, catalog).start({
       model: slot.model,
       effort: slot.effort,
@@ -136,7 +156,7 @@ export function createExecutor(
       ...(options.nonGit === true ? { nonGit: true } : {}),
       ...(options.isolate === true ? { isolate: true } : {}),
       ...(runOptions?.resume !== undefined ? { resume: runOptions.resume } : {}),
-    });
+    }, onEvent);
     const onAbort = (): void => handle.cancel();
     signal?.addEventListener('abort', onAbort, { once: true });
     const result = await handle.result.finally(() => signal?.removeEventListener('abort', onAbort));

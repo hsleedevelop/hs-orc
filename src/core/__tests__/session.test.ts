@@ -966,3 +966,26 @@ describe('대화 세션 — Jev 분류 (D-065)', () => {
     assert.ok(out[0]?.kind === 'plan' && out[0].reason === '수동 지정 R02');
   });
 });
+
+describe('대화 세션 — 엔진 진행 줄 (D-084)', () => {
+  it('슬롯마다 머리줄을 달고 엔진이 보낸 줄을 모은다 — 다음 실행이 시작하면 비운다', async () => {
+    isolate();
+    const exec: SlotExecutor = (slot, _prompt, options) => {
+      options?.onProgress?.(`${slot.role} 일하는 중`);
+      return Promise.resolve(reply(slot.role === 'reviewer' ? 'PASS' : 'ran'));
+    };
+    const { session } = make(conductSpy().exec, undefined, exec);
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    const lines = [...session.progress];
+    assert.equal(lines.length, 4);
+    assert.match(lines[0] ?? '', /^── primary /);
+    assert.equal(lines[1], 'primary 일하는 중');
+    assert.match(lines[2] ?? '', /^── reviewer /);
+    assert.equal(lines[3], 'reviewer 일하는 중');
+
+    await session.send('넌 누구니');
+    await session.readAnswer();
+    assert.deepEqual(session.progress.map((l) => l.replace(/^── .*/, '머리')), ['머리', 'reviewer 일하는 중']);
+  });
+});

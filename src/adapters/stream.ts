@@ -23,8 +23,44 @@ const cacheReadMissing = (...values: unknown[]): { cachedInputUnreported?: true 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 
+/** 진행 표시 한 줄로 접는다 — 줄바꿈·연속 공백을 하나로, 길면 자른다. */
+const oneLine = (value: string, max = 160): string => {
+  const flat = value.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+};
+
+/** 도구 입력에서 사람이 알아볼 한 조각을 고르는 순서. 어느 것도 없으면 도구 이름만 낸다. */
+const TOOL_HINT_KEYS = ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'description'] as const;
+
+function toolLine(name: string, input: unknown): string {
+  const args = asRecord(input) ?? {};
+  const hint = TOOL_HINT_KEYS.map((key) => args[key]).find((v): v is string => typeof v === 'string' && v.trim() !== '');
+  return hint ? `▸ ${name} ${oneLine(hint)}` : `▸ ${name}`;
+}
+
+/**
+ * D-084: claude·cursor 의 `assistant` 줄 — 중간 답 글과 도구 호출을 진행 표시로 낸다 (2026-10-05 claude 2.1.289 실측).
+ * 최종 텍스트는 여전히 `result.result` 다. 여기서 `text` 를 내면 결과 글이 중간 글로 바뀔 수 있어 `progress` 로만 낸다.
+ * thinking 블록은 claude 가 빈 문자열로 내므로 보이지 않는다.
+ */
+function assistantProgress(event: Record<string, unknown>): RunEvent[] {
+  const content = asRecord(event['message'])?.['content'];
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((value): RunEvent[] => {
+    const block = asRecord(value);
+    if (block?.['type'] === 'text' && typeof block['text'] === 'string' && block['text'].trim()) {
+      return [{ kind: 'progress', text: block['text'].trim() }];
+    }
+    if (block?.['type'] === 'tool_use' && typeof block['name'] === 'string') {
+      return [{ kind: 'progress', text: toolLine(block['name'], block['input']) }];
+    }
+    return [];
+  });
+}
+
 function claudeEvents(event: Record<string, unknown>): RunEvent[] {
   if (event['type'] === 'system' && event['subtype'] === 'compact_boundary') return [compactEvent(event)];
+  if (event['type'] === 'assistant') return assistantProgress(event);
   if (event['type'] !== 'result') return [];
 
   const out: RunEvent[] = [];
@@ -113,11 +149,27 @@ function codexEvents(event: Record<string, unknown>): RunEvent[] {
   switch (event['type']) {
     case 'thread.started':
       return typeof event['thread_id'] === 'string' ? [{ kind: 'session', id: event['thread_id'] }] : [];
+    case 'item.started': {
+      // D-084: 셸 명령은 시작할 때 낸다 — 오래 도는 명령이 끝나야 보이면 진행 표시가 아니다 (2026-10-05 codex 0.160.0 실측).
+      const item = asRecord(event['item']);
+      return item?.['type'] === 'command_execution' && typeof item['command'] === 'string'
+        ? [{ kind: 'progress', text: `▸ $ ${oneLine(item['command'])}` }]
+        : [];
+    }
     case 'item.completed': {
       const item = asRecord(event['item']);
       if (!item) return [];
       if (item['type'] === 'agent_message' && typeof item['text'] === 'string') {
         return [{ kind: 'text', text: item['text'] }];
+      }
+      if (item['type'] === 'command_execution' && typeof item['exit_code'] === 'number' && item['exit_code'] !== 0) {
+        return [{ kind: 'progress', text: `  exit ${item['exit_code']}` }];
+      }
+      if (item['type'] === 'file_change') {
+        // 칸 모양은 이 세션에서 캡처하지 못했다 — 경로를 못 읽으면 종류만 낸다.
+        const changes = Array.isArray(item['changes']) ? item['changes'] : [];
+        const paths = changes.map((c) => asRecord(c)?.['path']).filter((p): p is string => typeof p === 'string');
+        return [{ kind: 'progress', text: paths.length > 0 ? `▸ 파일 변경 ${oneLine(paths.join(', '))}` : '▸ 파일 변경' }];
       }
       if (item['type'] === 'error' && typeof item['message'] === 'string') {
         // codex 는 경고성 안내도 item.type='error' 로 흘린다 — 실행 실패와 구분해 notice 로 둔다.

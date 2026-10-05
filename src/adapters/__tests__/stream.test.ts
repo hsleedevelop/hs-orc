@@ -251,3 +251,28 @@ describe('cursor resume 실측 캡처 (PLAN S10 후속)', () => {
     assert.deepEqual(turn2.find((e) => e.kind === 'done'), { kind: 'done', ok: true, text: 'ORC-189937' });
   });
 });
+
+describe('진행 줄 (D-084, 2026-10-05 실측 줄)', () => {
+  it('claude assistant 의 도구 호출·중간 글을 progress 로 낸다 — thinking 은 내지 않는다', () => {
+    const line = (content: unknown[]) => JSON.stringify({ type: 'assistant', message: { content } });
+    assert.deepEqual(parseLine('claude', line([{ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: '/private/tmp/orc-stream/a.txt' } }])),
+      [{ kind: 'progress', text: '▸ Read /private/tmp/orc-stream/a.txt' }]);
+    assert.deepEqual(parseLine('claude', line([{ type: 'tool_use', id: 't2', name: 'Bash', input: { command: 'wc -l a.txt', description: 'Count lines' } }])),
+      [{ kind: 'progress', text: '▸ Bash wc -l a.txt' }]);
+    assert.deepEqual(parseLine('claude', line([{ type: 'thinking', thinking: '', signature: 'x' }, { type: 'text', text: '두 줄이다.' }])),
+      [{ kind: 'progress', text: '두 줄이다.' }]);
+  });
+
+  it('claude 결과 글은 여전히 result 줄이 정한다 — progress 는 text 가 아니다', () => {
+    const events = parseLine('claude', JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: '중간' }] } }));
+    assert.equal(events.some((e) => e.kind === 'text' || e.kind === 'done'), false);
+  });
+
+  it('codex 는 셸 명령을 시작할 때 내고, 0 이 아닌 종료 코드만 덧붙인다', () => {
+    const started = JSON.stringify({ type: 'item.started', item: { id: 'item_1', type: 'command_execution', command: "/bin/zsh -lc 'cat a.txt && wc -l a.txt'", aggregated_output: '', exit_code: null, status: 'in_progress' } });
+    const done = (code: number) => JSON.stringify({ type: 'item.completed', item: { id: 'item_1', type: 'command_execution', command: 'x', aggregated_output: '', exit_code: code, status: 'completed' } });
+    assert.deepEqual(parseLine('codex', started), [{ kind: 'progress', text: "▸ $ /bin/zsh -lc 'cat a.txt && wc -l a.txt'" }]);
+    assert.deepEqual(parseLine('codex', done(0)), []);
+    assert.deepEqual(parseLine('codex', done(2)), [{ kind: 'progress', text: '  exit 2' }]);
+  });
+});
