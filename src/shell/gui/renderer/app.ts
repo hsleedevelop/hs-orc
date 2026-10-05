@@ -58,6 +58,7 @@ interface Bridge {
   convSend(text: string, write?: boolean): Promise<SessionView>;
   convMode(mode: ApprovalMode): Promise<SessionView>;
   convPlanAs(taskId: string): Promise<SessionView>;
+  convReplan(taskId: string): Promise<SessionView>;
   convRead(): Promise<SessionView>;
   convApprove(payload: { verify: string[]; write: boolean }): Promise<SessionView>;
   convCancel(): Promise<SessionView>;
@@ -88,6 +89,24 @@ interface DebugInfo { title: { text: string }; node: string; electron: string; p
 const orc = (window as unknown as { orc: Bridge }).orc;
 
 const text = (s: string, className?: string) => h('div', className ? { className } : null, s);
+
+/**
+ * 도는 중 표시 — 스피너와 경과 초. 글자만 있으면 도는지 멈췄는지 눈으로 가릴 수 없다.
+ * 초는 이 표시가 뜬 때부터 센다 — 다시 연 화면(D-063)은 실행 시작 시각을 모르므로 그 화면이 본 시간이다.
+ */
+function Running(props: { label: string }): ReactElement {
+  const [start] = useState(() => Date.now());
+  const [now, setNow] = useState(start);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const s = Math.floor((now - start) / 1000);
+  return h('div', { className: 'running dim', role: 'status' },
+    h('span', { className: 'spinner', 'aria-hidden': true }),
+    h('span', null, props.label),
+    h('span', { className: 'mono' }, s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`));
+}
 const card = (label: string | null, ...children: ReactNode[]) =>
   h('section', { className: 'card' }, label ? h('span', { className: 'label' }, label) : null, ...children);
 
@@ -409,7 +428,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
   }, [busy]);
 
   // 새 기록·진행 표시가 뜨면 그 자리로 간다 — 입력 아래에 가려 "아무 일 없음"으로 보이지 않게.
-  useEffect(() => { endRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [view.records.length, busy]);
+  // 'start' 는 맨 끝 표식에선 바닥까지 내린다. 'nearest' 는 main 아래 padding 만큼 덜 내려가 떠 있는 입력창이 최신 기록을 덮는다.
+  useEffect(() => { endRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, [view.records.length, busy]);
 
   const act = (p: Promise<SessionView>) => {
     setBusy(true);
@@ -456,10 +476,11 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
         ? h('div', { className: 'stack', style: { padding: 0, width: '100%', marginTop: 10 } },
             h('div', { className: 'row' },
               // 행을 바꾸면 이 배정을 거절하고 새 행으로 다시 받는다 — 승인은 화면에 찍힌 그 배정으로만 간다.
+              // 고른 값은 핸들러 안에서 바로 넘긴다 — controlled select 라 핸들러가 끝나면 React 가 DOM 값을 옛 행으로 되돌린다.
               h('select', {
                 value: r.taskId,
                 disabled: busy,
-                onChange: (e: { target: { value: string } }) => act(orc.convReject().then(() => orc.convPlanAs(e.target.value))),
+                onChange: (e: { target: { value: string } }) => act(orc.convReplan(e.target.value)),
               }, ...props.rows.map((row) => h('option', { key: row.id, value: row.id }, `${row.id} · ${row.task}`))),
               h('span', { className: 'hint' }, '업무 행 직접 지정')),
             h('textarea', {
@@ -578,9 +599,10 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     // 도는 중 받은 뷰에 이미 그 메시지가 실려 있으면 임시 말풍선을 또 띄우지 않는다.
     sending && !(peek && peek.records.length > props.view.records.length) ? h('div', { className: 'bubble user dim' }, sending) : null,
     // 다시 연 화면은 `busy` 를 모른다 — 서비스가 working 이면 도는 실행에 붙은 것이다 (D-063). 결과는 앞 화면이 건 요청이 돌아오며 싣는다.
+    // key 를 고정한다 — 도는 중 기록 줄이 늘면(승인·방식 줄) 자리가 밀려 다시 마운트되고 경과 초가 0 으로 돌아간다.
     busy || view.state === 'working'
-      ? h('div', { className: 'row' },
-          text(delegation === 'cancelling' ? '취소하는 중…' : (view.state === 'blocked' || last?.kind === 'plan' || last?.kind === 'approval') ? '실행 중…' : '생각 중…', 'dim'),
+      ? h('div', { key: 'running', className: 'row' },
+          h(Running, { label: delegation === 'cancelling' ? '취소하는 중…' : (view.state === 'blocked' || last?.kind === 'plan' || last?.kind === 'approval') ? '실행 중…' : '생각 중…' }),
           // 위임(primary·reviewer)이 도는 동안만 뜬다 (D-066). 다시 연 화면(D-063)은 서비스가 준 `cancellable` 로 같이 뜬다.
           // 취소는 그 위임만 멈춘다 — 세션은 남고, 돌아오는 뷰가 취소 결과 카드를 싣는다.
           delegation === 'running' || (delegation === '' && view.cancellable)
@@ -593,8 +615,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
           h('pre', { className: 'plain mono' }, view.progress.slice(-60).join('\n')))
       : null,
     error ? h('div', { className: 'banner error' }, error) : null,
-    h('div', { ref: endRef }),
-    card(null,
+    h('section', { className: 'card composer' },
       h('textarea', {
         rows: 3, value: draft, disabled: !canType,
         placeholder: view.state === 'blocked' ? '배정을 승인·거절하거나, 메시지를 보내면 이 배정은 거절로 남는다 · ⌘↵ 전송' : '메시지 · ⌘↵ 전송',
@@ -610,7 +631,9 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
             onChange: (e: { target: { checked: boolean } }) => setSendWrite(e.target.checked),
           }), ' 쓰기 위임으로 보내기'),
         h('div', { className: 'spacer' }),
-        h('button', { className: 'btn accent', disabled: !canType || !draft.trim(), onClick: send }, '전송'))));
+        h('button', { className: 'btn accent', disabled: !canType || !draft.trim(), onClick: send }, '전송'))),
+    // 끝 표식은 떠 있는 입력창 뒤에 둔다 — 앞에 두면 그 자리로 가도 입력창이 최신 기록을 덮는다.
+    h('div', { ref: endRef }));
 }
 
 // ── 나머지 화면 ────────────────────────────────────────────
