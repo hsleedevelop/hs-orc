@@ -29,6 +29,15 @@ interface WorktreeState { repo: string | null; items: WorktreeInfo[]; current: s
 type SessionKind = 'project' | 'scratch';
 type SessionState = 'waiting_input' | 'working' | 'blocked';
 type ApprovalMode = 'manual' | 'auto-ask' | 'auto';
+// `terminal.ts` 의 TERMINALS 와 같은 id — 렌더러는 node 모듈을 못 싣는다. 모르는 id 는 서비스가 거절한다.
+const TERMINALS: { id: string; label: string }[] = [
+  { id: 'default', label: '기본' },
+  { id: 'ghostty', label: 'Ghostty' },
+  { id: 'otty', label: 'Otty' },
+];
+// 고른 터미널은 이 기기의 화면 선호라 세션·프로젝트 상태에 두지 않는다.
+const TERMINAL_KEY = 'hs-orc.terminal';
+
 const MODES: { id: ApprovalMode; label: string; hint: string }[] = [
   { id: 'manual', label: 'manual', hint: '모든 배정을 묻는다' },
   { id: 'auto-ask', label: 'auto-ask', hint: '쓰기·모델이 고른 행·$10 이상·상한 근접·첫 위임만 묻는다' },
@@ -69,7 +78,7 @@ interface Bridge {
   convEscalate(): Promise<SessionView>;
   convReject(): Promise<SessionView>;
   convAsk(): Promise<SessionView>;
-  convTerminal(): Promise<string>;
+  convTerminal(terminal: string): Promise<string>;
   convRename(name: string): Promise<SessionView>;
   convClose(): Promise<void>;
   tasks(): Promise<TaskRow[]>;
@@ -432,6 +441,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
   const [sendWrite, setSendWrite] = useState(false);
   // 제안 없는 직접 답 아래의 행 선택 (D-079). 빈 값 = 아직 안 골랐다.
   const [pick, setPick] = useState('');
+  const [terminal, setTerminal] = useState(() => localStorage.getItem(TERMINAL_KEY) ?? 'default');
   const [busy, setBusy] = useState(false);
   // 승인한 위임이 도는 동안의 화면 쪽 표시 (D-066). 요청이 안 끝났으니 `view.cancellable` 은 아직 갱신 전이다.
   const [delegation, setDelegation] = useState<'' | 'running' | 'cancelling'>('');
@@ -652,7 +662,11 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       h('span', { className: 'dim mono' }, view.budget),
       h('span', { className: 'dim mono' }, view.appBudget),
       // 엔진이 도는 중에도 연다 — 세션 상태를 건드리지 않고 그 폴더를 사람 손에 넘길 뿐이다.
-      h('button', { className: 'btn', title: `${view.dir} 에서 터미널 열기`, onClick: () => { orc.convTerminal().catch((e: unknown) => setError(why(e))); } }, '터미널'),
+      h('select', {
+        value: terminal, title: '터미널 버튼이 여는 앱',
+        onChange: (e: { target: { value: string } }) => { setTerminal(e.target.value); localStorage.setItem(TERMINAL_KEY, e.target.value); },
+      }, ...TERMINALS.map((t) => h('option', { key: t.id, value: t.id }, t.label))),
+      h('button', { className: 'btn', title: `${view.dir} 에서 터미널 열기`, onClick: () => { orc.convTerminal(terminal).catch((e: unknown) => setError(why(e))); } }, '터미널'),
       h('button', { className: 'btn', onClick: props.onClose }, '세션 닫기')),
     view.broken > 0 ? h('div', { className: 'banner error' }, `기록에 깨진 줄 ${view.broken}개 — 건너뛰고 보여준다`) : null,
     view.interrupted ? h('div', { className: 'banner error' }, '승인한 위임의 결과가 기록되지 않았다 — 실행 중 앱이 끊겼다. 결정 로그 1차 줄만 남아 있을 수 있다.') : null,
@@ -699,7 +713,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
         },
       }),
       h('div', { className: 'row', style: { marginTop: 10 } },
-        h('label', { className: 'hint', title: '자동 승인은 읽기 전용만 시작한다 — 쓰기 위임은 늘 카드가 서고 쓰기가 켜진 채다' },
+        h('label', { className: 'hint', title: '쓰기 행(구현·수정)은 git 폴더에서 이미 쓰기가 켜진다 — 이 체크는 그 밖의 메시지를 쓰기로 보낼 때 쓴다. auto 가 아니면 카드가 선다 (D-086)' },
           h('input', {
             type: 'checkbox', checked: sendWrite && view.kind !== 'scratch', disabled: view.kind === 'scratch',
             onChange: (e: { target: { checked: boolean } }) => setSendWrite(e.target.checked),

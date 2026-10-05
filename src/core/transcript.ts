@@ -98,7 +98,7 @@ export type TranscriptEntry =
       /** 누가 승인했나 (D-064 결정 7). 이 결정 전 기록·거절에는 없다. */
       readonly by?: 'user' | 'auto';
       readonly mode?: ApprovalMode;
-      /** 그 배정에서 걸린 조건 코드(`H1`…`A4`). 자동 승인은 비어 있다. */
+      /** 그 배정에서 걸린 조건 코드(`H1`…`H6`·`A1`…`A4`). 자동 승인은 비어 있다. */
       readonly asked?: readonly string[];
     }
   /** 승인 방식 변경 (D-064 결정 8). 세션을 열면 마지막 것을 재생한다 — 화면에 한 줄로 보인다(감사용). */

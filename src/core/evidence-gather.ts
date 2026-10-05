@@ -31,6 +31,16 @@ export function changedFiles(cwd = process.cwd()): Evidence {
   return { kind: 'changed-files', files };
 }
 
+/**
+ * 자동 쓰기 전 미커밋 파일 (D-086 H5). `changedFiles` 와 달리 **실패를 깨끗함으로 읽지 않는다** — git 이 없거나
+ * 종료 코드가 0 이 아니면 `null` 이고, 호출자는 모르는 상태로 묻는다(fail-closed).
+ */
+export function uncommittedFiles(cwd: string): string[] | null {
+  const r = spawnSync('git', ['status', '--porcelain'], { cwd, encoding: 'utf8', env: gitEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+  if (r.error || r.status !== 0) return null;
+  return (r.stdout ?? '').split('\n').map((l) => l.slice(3).trim()).filter(Boolean);
+}
+
 /** 선언된 테스트 파일의 작업 전 내용 (D-047). 키는 cwd 기준 상대 경로다. */
 export type TestSnapshot = ReadonlyMap<string, string>;
 

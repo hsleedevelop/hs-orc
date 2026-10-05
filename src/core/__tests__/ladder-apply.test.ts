@@ -62,7 +62,7 @@ const make = (mode: ApprovalMode = 'manual', dir = mkdtempSync(path.join(os.tmpd
   const open = () =>
     new ConversationSession({
       matrix, catalog, kind: 'project', dir, id: '0930-1300-lll', budget: new Budget(50, 5_000_000), journal: new Journal(),
-      conduct, executorFor: () => x.exec, approvalMode: mode,
+      conduct, executorFor: () => x.exec, approvalMode: mode, writeRows: [], // 쓰기 행 기본값(D-086)은 approval-modes 가 본다
     });
   return { ...x, dir, open, session: open() };
 };
