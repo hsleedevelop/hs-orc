@@ -12,7 +12,8 @@ import { loadEngines, type Engines } from '../../data/engines.ts';
 import { loadLimits, type ApprovalMode } from '../../data/limits.ts';
 import type { JevChoiceAnswer, RowClassifier } from '../../adapters/jev.ts';
 import { assign } from '../assign.ts';
-import { evaluateApproval, isModelPick } from '../approval.ts';
+import { evaluateApproval, evaluateRead, isModelPick } from '../approval.ts';
+import { readerSlot } from '../reader.ts';
 import { Budget } from '../budget.ts';
 import { Journal } from '../journal.ts';
 import type { SlotExecutor, SlotRun, SlotRunOptions } from '../executor.ts';
@@ -492,5 +493,68 @@ describe('승인 방식 — 자동 실행 중 취소 (D-066 호환)', () => {
     assert.ok(result?.kind === 'result' && result.outcome === 'cancelled');
     assert.equal(m.session.state, 'waiting_input');
     assert.equal(m.session.interrupted, false);
+  });
+});
+
+/**
+ * 질문형 경로 (D-083) — Jev GENERAL 은 방식이 허락하면 읽기 전용 1슬롯이 클릭 없이 답하고, 사람이 누르면 어느 방식에서도 바로 돈다.
+ * 실행기는 가짜다 — 무엇이 어떤 쓰기 스위치·슬롯 자리로 시작됐는지만 센다.
+ */
+describe('질문형 경로 — 읽기 전용 1슬롯 (D-083)', () => {
+  const readSpy = () => {
+    const runs: { label: string; role: string; write: boolean }[] = [];
+    const conducted: string[] = [];
+    const conductor: SlotExecutor = (_slot, prompt) => (conducted.push(prompt), Promise.resolve(done('지휘자 답\nSUGGEST: NONE')));
+    const executorFor = (write: boolean): SlotExecutor => (slot) => (runs.push({ label: slot.label, role: slot.role, write }), Promise.resolve(done('src/core/session.ts:206 에서 send() 가 받는다.', { actualUsd: 0.03 })));
+    return { runs, conducted, conductor, executorFor };
+  };
+  const session = (mode: ApprovalMode, spy: ReturnType<typeof readSpy>, budget = new Budget(20, 2_000_000)) =>
+    new ConversationSession({
+      matrix, catalog, kind: 'project', dir: mkdtempSync(path.join(os.tmpdir(), 'hs-read-')), id: '1005-1200-rrr', budget, journal: new Journal(),
+      conduct: spy.conductor, executorFor: spy.executorFor, classifier: jev({ current: 'GENERAL' }), approvalMode: mode,
+    });
+
+  it('auto-ask 의 GENERAL 은 첫 메시지에도 클릭 없이 답하고 끝난다 — 카드·승인·reviewer·지휘자 없이, 쓰기 꺼진 reviewer 자리 1슬롯', async () => {
+    isolate();
+    const spy = readSpy();
+    const s = session('auto-ask', spy);
+    const out = await s.send('hs-orc 앱이 동작하는 방식이 궁금해');
+    assert.deepEqual(kinds(out), ['user', 'direct']);
+    const direct = out[1];
+    assert.ok(direct?.kind === 'direct' && direct.read?.by === 'auto' && direct.general === true && direct.suggest === null);
+    assert.match(direct.read.slot, /^읽기·Luna·medium → codex\//);
+    assert.equal(direct.cost, '$0.0300 actual');
+    assert.deepEqual(spy.runs, [{ label: '읽기·Luna', role: 'reviewer', write: false }]);
+    assert.equal(spy.conducted.length, 0);
+    assert.equal(s.state, 'waiting_input');
+    assert.equal(readDecisions().length, 0, '위임이 아니다 — 결정 로그에 남지 않는다');
+  });
+
+  it('manual 의 GENERAL 은 돌리지 않고 지휘자가 답하며 이유를 남긴다 — 이어 readAnswer() 한 번이면 바로 돈다(by user)', async () => {
+    const spy = readSpy();
+    const s = session('manual', spy);
+    const first = await s.send('src/core 구조를 설명해줘');
+    const direct = first[1];
+    assert.ok(direct?.kind === 'direct' && direct.read === undefined);
+    assert.match(direct.notes.join('\n'), /코드를 읽고 답하기는 manual 이라 묻는다/);
+    assert.equal(spy.runs.length, 0);
+    const out = await s.readAnswer();
+    assert.deepEqual(kinds(out), ['direct']);
+    assert.ok(out[0]?.kind === 'direct' && out[0].read?.by === 'user');
+    assert.deepEqual(spy.runs.map((r) => r.write), [false]);
+    assert.ok(!s.records().some((r) => r.kind === 'plan' || r.kind === 'approval'));
+  });
+
+  it('auto-ask 에서 상한 근접(A2)이거나 쓰기로 보낸 GENERAL 은 클릭 없이 돌리지 않는다 — auto 는 A 를 보지 않는다', async () => {
+    const spy = readSpy();
+    const near = new Budget(20, 1000);
+    near.countTokens({ inputTokens: 900, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0 });
+    const slot = readerSlot(catalog);
+    assert.deepEqual(evaluateRead({ mode: 'auto-ask', slot, catalog, budget: near, estimateUsd: 0.18 }).asks.map((a) => a.code), ['A2']);
+    assert.equal(evaluateRead({ mode: 'auto', slot, catalog, budget: near, estimateUsd: 0.18 }).auto, true);
+    const out = await session('auto-ask', spy, near).send('모듈 의존 관계를 mermaid 로 그려줘');
+    assert.ok(out[1]?.kind === 'direct' && out[1].read === undefined && /A2 남은 토큰/.test(out[1].notes.join('\n')));
+    await session('auto', spy).send('README 에 설치 절차 절을 써줘', { write: true });
+    assert.equal(spy.runs.length, 0);
   });
 });

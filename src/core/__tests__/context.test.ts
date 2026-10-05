@@ -26,6 +26,16 @@ describe('맥락 자르기 (SPEC §6.4.3)', () => {
     assert.equal(cut, null);
   });
 
+  it('읽기 답(D-083)은 앞부분만 싣는다 — 긴 엔진 출력이 그 앞의 질문을 밀어내지 않는다', () => {
+    const long: TranscriptRecord[] = [
+      { v: 1, at, turn: 1, kind: 'user', text: '동작 방식이 궁금해' },
+      { v: 1, at, turn: 1, kind: 'direct', text: 'ㄱ'.repeat(5000), suggest: null, cost: '$0', notes: [], read: { slot: 's', by: 'auto' } },
+    ];
+    const { text, cut } = buildContext(long, wide, { before: 2 });
+    assert.match(text, /^사용자: 동작 방식이 궁금해\norc\(코드를 읽고 답함\): ㄱ{1500}…$/);
+    assert.equal(cut, null);
+  });
+
   it('최근 N턴만 싣는다', () => {
     const { text, cut } = buildContext(records, { contextTurns: 1, contextChars: 6000 }, { before: 3 });
     assert.doesNotMatch(text, /넌 누구니/);

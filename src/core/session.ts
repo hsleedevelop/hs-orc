@@ -10,7 +10,7 @@ import type { Engines } from '../data/engines.ts';
 import type { Matrix } from '../data/matrix.ts';
 import { isApprovalMode, loadLimits, type ApprovalMode } from '../data/limits.ts';
 import type { AssignmentPlan } from './assign.ts';
-import { evaluateApproval, nonGitWriteRefusal, type ApprovalCheck } from './approval.ts';
+import { evaluateApproval, evaluateRead, nonGitWriteRefusal, type ApprovalCheck } from './approval.ts';
 import type { Budget, BudgetMark } from './budget.ts';
 import { buildSummaryPrompt, conductorSlot, directAnswer, nextSuggestion } from './conductor.ts';
 import { buildContext, type ContextLimits } from './context.ts';
@@ -21,6 +21,7 @@ import { estimateUsd, type EngineReport, type SlotExecutor } from './executor.ts
 import type { Journal } from './journal.ts';
 import { LadderError, planLadder, requestStage, type EscalationStage } from './ladder.ts';
 import { route as routeTask, routeWithFallback } from './pipeline.ts';
+import { buildReadPrompt, readerSlot, slotLine } from './reader.ts';
 import { readUnclassifiedWithLegacy, recordUnclassified, suggestRows, unclassifiedLogPath } from './unclassified.ts';
 import {
   appendRecord,
@@ -105,7 +106,7 @@ export class ConversationSession {
   private turn: number;
   private stateValue: SessionState = 'waiting_input';
   private pending: Pending | null = null;
-  /** 도는 위임의 취소 신호 (D-066). primary·reviewer 실행 동안만 있다 — 요약·직접 답은 취소 대상이 아니다. */
+  /** 도는 위임의 취소 신호 (D-066). primary·reviewer·읽기 답(D-083) 실행 동안만 있다 — 지휘자의 요약·직접 답은 취소 대상이 아니다. */
   private delegation: AbortController | null = null;
   /** 기록은 열 때 한 번 읽고 이후엔 append 와 함께 들고 있는다 — 메시지마다 JSONL 을 다시 읽지 않는다. */
   private readonly log: TranscriptRecord[];
@@ -289,8 +290,17 @@ export class ConversationSession {
       const result = routed.result;
       const general = routed.jev === 'general';
       if (general) notes.push(...this.countGeneral(text));
-      // Jev 가 답했는데 행을 확정하지 않았으면(NONE·GENERAL·확신도 미만) 지휘자의 SUGGEST 가 그 판정을 뒤집지 못하게 한다.
-      if (result.stage !== 'assigned') return this.answer(text, notes, general || routed.jev === 'none' || routed.jev === 'unsure', write, general);
+      if (result.stage !== 'assigned') {
+        // GENERAL(코드를 읽어야 답하는 설명·조사)은 방식이 허락하면 읽기 전용 1슬롯이 클릭 없이 답한다 (D-083).
+        // 쓰기로 보낸 메시지는 고치는 작업이다 — 읽기 답으로 돌리지 않고 행을 고르게 둔다.
+        if (general && !write) {
+          const check = this.readCheck();
+          if (check.auto) return await this.read(text, notes, 'auto', true);
+          notes.push(check.mode === 'manual' ? '코드를 읽고 답하기는 manual 이라 묻는다 — 아래 버튼 · /read' : `코드를 읽고 답하기는 묻는다 — ${check.asks.map((a) => `${a.code} ${a.text}`).join(' · ')}`);
+        }
+        // Jev 가 답했는데 행을 확정하지 않았으면(NONE·GENERAL·확신도 미만) 지휘자의 SUGGEST 가 그 판정을 뒤집지 못하게 한다.
+        return await this.answer(text, notes, general || routed.jev === 'none' || routed.jev === 'unsure', write, general);
+      }
       const card = this.stage(text, result.plan, result.reason, notes, write);
       // 방식이 허락하면 승인 클릭 없이 시작한다 — 이 메시지가 만든 이 배정 1건만이다 (D-064 결정 2). 카드는 위에 그대로 남는다.
       return [card, ...(await this.autoApprove())];
@@ -350,6 +360,71 @@ export class ConversationSession {
       return suggestRows(readUnclassifiedWithLegacy(dir)).map((s) => s.message);
     } catch (error) {
       return [`미분류 로그를 남기지 못했다: ${why(error)}`];
+    }
+  }
+
+  /** 질문형 경로를 클릭 없이 돌릴지 (D-083). 판정은 `approval.ts` 한 곳이다. */
+  private readCheck(): ApprovalCheck {
+    const { matrix, catalog, budget } = this.deps;
+    const slot = readerSlot(catalog);
+    return evaluateRead({ mode: this.modeValue, slot, catalog, budget, estimateUsd: estimateUsd(matrix, slot) });
+  }
+
+  /**
+   * **마지막 메시지**를 읽기 전용 1슬롯이 코드를 읽고 답한다 (D-083) — GUI "코드를 읽고 답하기" · chat `/read`. 새 메시지를 만들지 않는다.
+   * 사람이 누른 것이라 방식과 무관하게 바로 돈다 — 그 클릭이 승인이다(배정 카드의 승인과 같다). 상한 도달은 막는다 (D-030).
+   */
+  async readAnswer(): Promise<TranscriptRecord[]> {
+    this.require('waiting_input', '읽고 답하기');
+    const last = this.records().findLast((r) => r.kind === 'user');
+    if (last?.kind !== 'user') throw new SessionStateError('답할 메시지가 없다.');
+    // send() 와 같은 이유로 첫 await 전에 바로 바꾼다 (final-review #2).
+    this.stateValue = 'working';
+    this.recordModeOnce();
+    return this.read(last.text, [], 'user');
+  }
+
+  /**
+   * 질문형 경로 실행 (D-083). 위임이 아니다 — 배정·reviewer·증거·결정 로그 없이 답 하나를 `direct`(`read`)로 남긴다.
+   * 읽기 전용은 실행기가 보장한다: 쓰기 꺼진 위임 실행기(`readOnlyArgv`) + reviewer 자리 슬롯(쓰기를 받지 못한다).
+   * 위임처럼 취소할 수 있다 (D-066) — 받은 만큼만 과금한다.
+   */
+  private async read(text: string, notes: readonly string[], by: 'auto' | 'user', general = false): Promise<TranscriptRecord[]> {
+    const { matrix, catalog, budget } = this.deps;
+    this.stateValue = 'working';
+    const mark = budget.mark();
+    const controller = new AbortController();
+    try {
+      if (budget.limitReached()) {
+        return [this.append({ kind: 'error', text: `누적 상한에 닿아 읽고 답하기를 시작하지 않는다 (${budget.summary()}).` })];
+      }
+      const slot = readerSlot(catalog);
+      const context = buildContext(this.records(), this.contextLimits, { before: this.turn });
+      this.delegation = controller;
+      const run = await this.deps.executorFor(false)(slot, buildReadPrompt(context.text, text), { signal: controller.signal });
+      this.delegation = null;
+      const charge = budget.charge(`${slot.label}·${slot.effort}`, run.actualUsd, estimateUsd(matrix, slot), run.meteredUsd, slot.plan);
+      budget.countTokens(run.usage, run.compactionUncounted);
+      if (!run.ok) {
+        return [this.append({ kind: 'error', text: run.cancelled ? '읽고 답하기를 취소했다 — 받은 만큼만 과금했다.' : `읽고 답하지 못했다: ${run.text || '엔진이 실패했다'}` })];
+      }
+      return [this.append({
+        kind: 'direct',
+        text: run.text.trim(),
+        suggest: null,
+        cost: `$${charge.usd.toFixed(4)} ${charge.source}`,
+        notes,
+        ...(general ? { general: true as const } : {}),
+        read: { slot: slotLine(slot), by },
+        ...(context.cut ? { cut: context.cut } : {}),
+        ...(run.cacheWrite ? { cacheWrite: run.cacheWrite } : {}),
+      })];
+    } catch (error) {
+      return [this.append({ kind: 'error', text: `읽고 답하지 못했다: ${why(error)}` })];
+    } finally {
+      this.delegation = null;
+      this.stateValue = 'waiting_input';
+      this.recordSpend(mark);
     }
   }
 

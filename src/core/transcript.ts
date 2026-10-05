@@ -56,6 +56,11 @@ export type TranscriptEntry =
       readonly guide?: readonly string[];
       /** Jev 가 GENERAL(행에 안 맞는 작업)로 판정한 턴 (D-082) — 셸이 행 선택 앞에 그 사실을 말한다. 옛 기록에는 없다. */
       readonly general?: true;
+      /**
+       * 지휘자가 아니라 읽기 전용 엔진 1슬롯이 코드를 읽고 낸 답이다 (D-083 질문형 경로). `slot` 은 `plan.primary` 와 같은 모양,
+       * `by` 는 누가 시작했나 — `auto` 는 Jev GENERAL 에서 클릭 없이, `user` 는 "코드를 읽고 답하기"·`/read`. reviewer 판정은 없다. 옛 기록에는 없다.
+       */
+      readonly read?: { readonly slot: string; readonly by: 'auto' | 'user' };
       /** 맥락을 잘랐으면 버린 양. 안 잘랐으면 없다 (D-053). */
       readonly cut?: ContextCut;
       /** 이 답 실행의 캐시 쓰기 TTL 내역 (D-062). 관측 전용 — 엔진이 안 줬으면 없다. 직접 답은 원시 로그가 없어 여기에 남긴다. */

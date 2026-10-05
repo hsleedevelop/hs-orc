@@ -38,7 +38,7 @@ interface Cut { turns: number; chars: number }
 interface Compaction { trigger: string; preTokens?: number; postTokens?: number }
 type Rec =
   | { kind: 'user'; turn: number; text: string }
-  | { kind: 'direct'; turn: number; text: string; suggest: string | null; cost: string; notes: string[]; guide?: string[]; general?: true; cut?: Cut }
+  | { kind: 'direct'; turn: number; text: string; suggest: string | null; cost: string; notes: string[]; guide?: string[]; general?: true; read?: { slot: string; by: 'auto' | 'user' }; cut?: Cut }
   | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; reviewer2?: string; estimateUsd: number; notes: string[]; guide?: string[]; mode?: ApprovalMode; asked?: { code: string; text: string }[]; write?: boolean; ladder?: { stage: string; label: string; from: string; changes: string[] }; retry?: true }
   | { kind: 'approval'; turn: number; approved: boolean; write: boolean; by?: 'user' | 'auto'; mode?: ApprovalMode }
   | { kind: 'mode'; turn: number; mode: ApprovalMode }
@@ -56,6 +56,7 @@ interface Bridge {
   convSend(text: string, write?: boolean): Promise<SessionView>;
   convMode(mode: ApprovalMode): Promise<SessionView>;
   convPlanAs(taskId: string): Promise<SessionView>;
+  convRead(): Promise<SessionView>;
   convApprove(payload: { verify: string[]; write: boolean }): Promise<SessionView>;
   convCancel(): Promise<SessionView>;
   convEscalate(): Promise<SessionView>;
@@ -404,7 +405,10 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
           ...r.notes.map((n, j) => h('div', { key: `n${j}`, className: 'hint' }, n)),
           ...(r.guide ?? []).map((g, j) => h('div', { key: `g${j}`, className: 'hint warn' }, g)),
           h('div', null, r.text),
-          h('div', { className: 'hint' }, `직접 답 · 지휘자 Haiku·low · ${r.cost}`),
+          // 읽기 답(D-083)은 지휘자가 아니라 읽기 전용 엔진 1슬롯이 낸 답이다 — reviewer 판정이 없다는 것을 같이 말한다.
+          h('div', { className: 'hint' }, r.read
+            ? `코드를 읽고 답함 · ${r.read.slot} · 읽기 전용 · reviewer 없음 · ${r.read.by === 'auto' ? 'Jev GENERAL 자동' : '요청'} · ${r.cost}`
+            : `직접 답 · 지휘자 Haiku·low · ${r.cost}`),
           ...cutLine(r.cut).map((l, j) => h('div', { key: `c${j}`, className: 'hint' }, l)),
           suggest && r === last && view.state === 'waiting_input'
             ? h('button', { className: 'btn accent', disabled: busy, onClick: () => act(orc.convPlanAs(suggest)) }, `${suggest} 로 위임`)
@@ -415,6 +419,10 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
             ? h('div', { style: { marginTop: 8 } },
                 // GENERAL 이면 선택기 앞에서 행에 안 맞는 작업이라고 말한다 — 고르는 행은 가장 가까운 것일 뿐이다 (D-082).
                 r.general ? h('div', { className: 'hint warn' }, '행에 안 맞는 작업 (Jev GENERAL) — 업무 행 어디에도 맞지 않는다. 위임하려면 가장 가까운 행을 고른다') : null,
+                // 지휘자는 파일을 못 읽는다(D-080) — 코드를 읽어야 답할 질문이면 읽기 전용 1슬롯이 답한다 (D-083). 이 클릭이 승인이다(카드 없음).
+                r.read ? null : h('div', { className: 'row', style: { whiteSpace: 'normal', marginBottom: 6 } },
+                  h('button', { className: 'btn accent', disabled: busy, onClick: () => act(orc.convRead()) }, '코드를 읽고 답하기'),
+                  h('span', { className: 'hint' }, '읽기 전용 엔진 1슬롯(Luna·medium)이 이 폴더를 읽고 답한다 — 파일을 고치지 않고 reviewer 판정이 없다')),
                 h('div', { className: 'row', style: { whiteSpace: 'normal' } },
                   h('select', {
                     value: pick, disabled: busy, 'aria-label': '위임할 업무 행',
