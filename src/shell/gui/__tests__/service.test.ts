@@ -582,12 +582,13 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     assert.deepEqual(h.roles, ['primary']);
   });
 
-  it('승인 방식 — 쓰기 위임으로 보내면 auto 에서도 카드가 선다', async () => {
+  it('승인 방식 — 읽기 행을 쓰기 위임으로 보내면 auto 에서도 카드가 선다 (쓰기 행은 D-086 이 따로 본다)', async () => {
     isolated();
     const service = new GuiService(fake, 20, process.cwd());
     service.startConversation('project');
     service.converseMode('auto');
-    const view = await service.converse('이 타입 에러 고쳐줘', true);
+    // R02(읽기 행) — 쓰기 행(R01 등)은 git 폴더가 깨끗하면 auto 가 바로 시작하므로 작업 트리 상태에 따라 갈린다.
+    const view = await service.converse('두 라이브러리 기술 비교해줘', true);
     assert.equal(view.state, 'blocked');
     const plan = view.records.findLast((r) => r.kind === 'plan');
     assert.ok(plan?.kind === 'plan' && plan.write === true);
