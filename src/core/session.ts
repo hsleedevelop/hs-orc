@@ -11,7 +11,7 @@ import type { Engines } from '../data/engines.ts';
 import type { Matrix } from '../data/matrix.ts';
 import { isApprovalMode, loadLimits, type ApprovalMode, type OrchestratorChoice } from '../data/limits.ts';
 import type { AssignmentPlan } from './assign.ts';
-import { dirtyWriteRisk, evaluateApproval, evaluateRead, nonGitWriteRefusal, readOnlyWriteRow, type ApprovalCheck } from './approval.ts';
+import { dirtyWriteRisk, evaluateApproval, evaluateRead, nonGitWriteRefusal, readOnlyWriteRow, type ApprovalCheck, type AskReason } from './approval.ts';
 import type { Budget, BudgetMark } from './budget.ts';
 import {
   LEGACY_ORCHESTRATOR,
@@ -120,6 +120,10 @@ interface Pending {
 interface StepsPending {
   readonly title: string;
   readonly nodes: readonly GraphNode[];
+  /** 쓰기 행 · git project 폴더라 쓰기로 돌 단계 (D-086). 카드의 쓰기 스위치를 켜면 이 단계들만 쓴다 — 읽기 행 단계는 끝까지 읽기 전용이다. */
+  readonly writeSteps: ReadonlySet<string>;
+  /** 카드가 물은 조건 — 승인 기록에 코드로 남는다. */
+  readonly asked: readonly AskReason[];
 }
 
 /** 사다리가 다음에 올릴 단계 (D-068). 화면의 버튼과 chat `/ladder` 가 이것을 본다. */
@@ -911,6 +915,20 @@ export class ConversationSession {
         out.push(this.append({ kind: 'error', text: `지휘자 계획을 쓸 수 없다: ${error.message} — 받은 답: ${run.text.trim().slice(0, 300)}` }));
         return out;
       }
+      // 쓰기 행 규칙은 배정 카드(`stage`)와 같다 (D-086) — git project 폴더의 쓰기 행 단계는 쓰기를 켠 채 선다.
+      // 단계 카드는 늘 사람이 승인하므로(H1) H2 는 묻지 않고, H5(미커밋)·H6(git 밖 쓰기 행)은 승인 전에 보인다.
+      const inGit = this.deps.inGit ?? true;
+      const rows = this.deps.kind === 'project' ? (this.deps.writeRows ?? loadLimits().writeRows) : [];
+      const rowWrite = (n: GraphNode): boolean => rows.includes(n.plan.assignment.id);
+      const writeSteps = new Set(nodes.filter((n) => rowWrite(n) && inGit).map((n) => n.id));
+      const write = writeSteps.size > 0;
+      const dirty = write ? this.uncommitted() : [];
+      const asked = [
+        { code: 'H1' as const, text: '단계의 행을 지휘자(모델)가 골랐다' },
+        dirtyWriteRisk(write, dirty),
+        readOnlyWriteRow(nodes.some(rowWrite), false, inGit),
+      ].filter((a): a is AskReason => a !== null);
+      const guide = this.scaffoldGuide(nodes.some(rowWrite));
       const steps = nodes.map((n) => ({
         id: n.id,
         taskId: n.plan.assignment.id,
@@ -920,8 +938,9 @@ export class ConversationSession {
         primary: slotLine(n.plan.slots.primary),
         reviewer: slotLine(n.plan.slots.reviewer),
         estimateUsd: n.plan.cost.totalUsd,
+        ...(writeSteps.has(n.id) ? { write: true as const } : {}),
       }));
-      this.pendingSteps = { title: last.text, nodes };
+      this.pendingSteps = { title: last.text, nodes, writeSteps, asked };
       out.push(this.append({
         kind: 'steps',
         title: last.text,
@@ -929,6 +948,9 @@ export class ConversationSession {
         estimateUsd: Number(steps.reduce((sum, st) => sum + st.estimateUsd, 0).toFixed(4)),
         by: slotLine(slot),
         cost: `$${charge.usd.toFixed(4)} ${charge.source}`,
+        asked,
+        ...(write ? { write: true as const } : {}),
+        ...(guide.length > 0 ? { guide } : {}),
         ...(context.cut ? { cut: context.cut } : {}),
       }));
       return out;
@@ -951,10 +973,11 @@ export class ConversationSession {
     this.require('blocked', '승인');
     const pending = this.pendingSteps;
     if (!pending) throw new SessionStateError('승인할 단계 계획이 없다.');
-    const write = options.write === true;
+    // 카드의 쓰기 스위치는 "쓰기 행 단계에 쓰기를 준다" 다 (D-086) — 읽기 행 단계는 켜도 읽기 전용이다.
+    const write = options.write === true && pending.writeSteps.size > 0;
     if (write && this.deps.kind === 'scratch') throw new SessionStateError('스크래치 세션은 쓰기를 켤 수 없다 (SPEC §6.4.1).');
     const { matrix, dir, budget, journal } = this.deps;
-    const out = [this.append({ kind: 'approval', approved: true, write, by: 'user', mode: this.modeValue, asked: ['H1'] })];
+    const out = [this.append({ kind: 'approval', approved: true, write, by: 'user', mode: this.modeValue, asked: pending.asked.map((a) => a.code) })];
     this.pendingSteps = null;
     if (budget.limitReached()) {
       this.stateValue = 'waiting_input';
@@ -996,7 +1019,7 @@ export class ConversationSession {
           prompt: buildStepPrompt(pending.title, node, before, context.text),
           verify: options.verify ?? [],
           cwd: dir,
-          execute: this.tapProgress(this.deps.executorFor(write), true),
+          execute: this.tapProgress(this.deps.executorFor(write && pending.writeSteps.has(node.id)), true),
           budget,
           journal,
           note: `session ${this.deps.id} · 승인 user · 단계 계획 ${node.id}`,

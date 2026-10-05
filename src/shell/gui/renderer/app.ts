@@ -44,7 +44,7 @@ const MODES: { id: ApprovalMode; label: string; hint: string }[] = [
   { id: 'auto', label: 'auto', hint: '쓰기·모델이 고른 행만 묻는다' },
 ];
 interface Cut { turns: number; chars: number }
-interface Step { id: string; taskId: string; task: string; prompt: string; dependsOn: string[]; primary: string; reviewer: string; estimateUsd: number }
+interface Step { id: string; taskId: string; task: string; prompt: string; dependsOn: string[]; primary: string; reviewer: string; estimateUsd: number; write?: true }
 interface OrchestratorChoice { model: string; effort: string }
 // `conductor.ts` 의 OrchestratorOption 과 같은 모양 — 렌더러는 node 모듈을 못 싣는다.
 interface OrchestratorOption { engine: string; defaults: OrchestratorChoice; models: { model: string; label: string; efforts: string[]; longContext: boolean }[] }
@@ -56,7 +56,7 @@ type Rec =
   | { kind: 'approval'; turn: number; approved: boolean; write: boolean; by?: 'user' | 'auto'; mode?: ApprovalMode }
   | { kind: 'mode'; turn: number; mode: ApprovalMode }
   | { kind: 'orchestrator'; turn: number; model: string; effort: string }
-  | { kind: 'steps'; turn: number; title: string; steps: Step[]; estimateUsd: number; by: string; cost: string; cut?: Cut }
+  | { kind: 'steps'; turn: number; title: string; steps: Step[]; estimateUsd: number; by: string; cost: string; cut?: Cut; write?: true; asked?: { code: string; text: string }[]; guide?: string[] }
   | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string; cut?: Cut; compacted?: Compaction[]; step?: string }
   | { kind: 'summary'; turn: number; text: string; next: string; by?: string }
   | { kind: 'error'; turn: number; text: string };
@@ -575,36 +575,40 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       h('span', { className: 'label' }, `단계 계획 · ${r.steps.length}단계`),
       h('div', { className: 'hint' }, `계획 · ${r.by} · ${r.cost}`),
       ...r.steps.flatMap((st, j) => [
-        planLine(`분류 ${st.id} · ${st.taskId} ${st.task}${st.dependsOn.length > 0 ? `  (← ${st.dependsOn.join(', ')})` : ''}`, j * 4),
+        planLine(`분류 ${st.id} · ${st.taskId} ${st.task}${st.write ? ' · 쓰기 행' : ''}${st.dependsOn.length > 0 ? `  (← ${st.dependsOn.join(', ')})` : ''}`, j * 4),
         h('div', { key: j * 4 + 1, className: 'hint', style: { whiteSpace: 'pre-wrap' } }, st.prompt),
         planLine(`primary  ${st.primary}`, j * 4 + 2),
         planLine(`reviewer ${st.reviewer}  · $${st.estimateUsd}`, j * 4 + 3),
       ]),
       planLine(`비용 예상 $${r.estimateUsd} · 단계 합 · 순서대로 하나씩 돈다`, r.steps.length * 4),
+      // 다음 행동 안내 (D-074·D-086) — git 아닌 폴더의 쓰기 행 스캐폴더.
+      ...(r.guide ?? []).map((g, j) => h('div', { key: `g${j}`, className: 'hint warn' }, g)),
       ...cutLine(r.cut).map((l, j) => h('div', { key: `c${j}`, className: 'hint' }, l)),
       active
         ? h('div', { className: 'stack', style: { padding: 0, width: '100%', marginTop: 10 } },
-            h('div', { className: 'hint warn' }, '묻는 이유: 행을 모델(지휘자)이 골랐다 — 어느 방식에서도 사람이 승인한다'),
+            // 묻는 조건 (D-086) — 늘 H1(지휘자가 고른 행), 쓰기면 H5(미커밋), git 밖 쓰기 행이면 H6. 옛 기록은 H1 문구만 있다.
+            h('div', { className: 'hint warn' }, `묻는 이유: ${(r.asked ?? [{ code: 'H1', text: '단계의 행을 지휘자(모델)가 골랐다' }]).map((a) => a.text).join(' · ')}`),
             h('textarea', {
               className: 'code', rows: 2, value: verify, placeholder: '검증 명령 · 단계마다 돈다 · 한 줄에 하나 (예: npm test)',
               onChange: (e: { target: { value: string } }) => setVerify(e.target.value),
             }),
-            h('label', { className: 'toggle' },
-              h('input', {
-                type: 'checkbox', checked: (write ?? false) && view.kind !== 'scratch', disabled: view.kind === 'scratch',
-                onChange: (e: { target: { checked: boolean } }) => setWrite(e.target.checked),
-              }),
-              h('span', { className: 'track' }),
-              h('span', { className: 'text' },
-                view.kind === 'scratch' ? '스크래치는 쓰기를 켤 수 없다'
-                : write ? h('b', null, '단계마다 primary 슬롯이 이 폴더의 파일을 고칠 수 있다')
-                : 'primary 슬롯 파일 쓰기 (--write)',
-                h('span', { className: 'dim' }, ' · reviewer 는 언제나 읽기 전용'))),
+            // 쓰기 행 단계가 있을 때만 선다 (D-086) — 켜면 그 단계들만 쓴다. 읽기 행 단계는 켜도 읽기 전용이다.
+            r.steps.some((st) => st.write)
+              ? h('label', { className: 'toggle' },
+                  h('input', {
+                    type: 'checkbox', checked: (write ?? r.write === true) && view.kind !== 'scratch', disabled: view.kind === 'scratch',
+                    onChange: (e: { target: { checked: boolean } }) => setWrite(e.target.checked),
+                  }),
+                  h('span', { className: 'track' }),
+                  h('span', { className: 'text' },
+                    (write ?? r.write === true) ? h('b', null, '쓰기 행 단계의 primary 슬롯이 이 폴더의 파일을 고칠 수 있다') : '쓰기 행 단계 파일 쓰기 (--write)',
+                    h('span', { className: 'dim' }, ' · 읽기 행 단계와 reviewer 는 언제나 읽기 전용')))
+              : h('div', { className: 'hint' }, '쓰기 행 단계가 없다 — 모든 단계가 읽기 전용으로 돈다'),
             h('div', { className: 'row' },
               h('button', {
                 className: 'btn accent', disabled: busy,
-                onClick: () => { setDelegation('running'); act(orc.convApprove({ verify: lines(verify), write: (write ?? false) && view.kind !== 'scratch' })); },
-              }, busy ? '실행 중…' : `승인하고 실행 · ${r.steps.length}단계${write && view.kind !== 'scratch' ? ' · 쓰기 켜짐' : ''}`),
+                onClick: () => { setDelegation('running'); act(orc.convApprove({ verify: lines(verify), write: (write ?? r.write === true) && view.kind !== 'scratch' })); },
+              }, busy ? '실행 중…' : `승인하고 실행 · ${r.steps.length}단계${(write ?? r.write === true) && view.kind !== 'scratch' ? ' · 쓰기 행 쓰기 켜짐' : ''}`),
               h('button', { className: 'btn', disabled: busy, onClick: () => act(orc.convReject()) }, '거절')))
         : null);
 

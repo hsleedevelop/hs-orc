@@ -1069,6 +1069,58 @@ describe('지휘자 선택·단계 계획 (D-087)', () => {
     assert.match(summary.next, /건너뜀 s2/);
   });
 
+  /** 읽기 행(R02) → 쓰기 행(R01) 두 단계. 쓰기 행 규칙(D-086)은 단계마다 갈린다. */
+  const mixedSteps = JSON.stringify({ steps: [
+    { id: 's1', task: 'R02', prompt: '요구사항을 정리한다', dependsOn: [] },
+    { id: 's2', task: 'R01', prompt: '고친다', dependsOn: ['s1'] },
+  ] });
+  const writeSession = (opts: { readonly inGit?: boolean; readonly dirty?: () => readonly string[] | null; readonly kind?: 'project' | 'scratch' } = {}) => {
+    isolate();
+    const writes: boolean[] = [];
+    // reviewer 판정을 role 로 가른다 — R02 의 reviewer 는 Haiku 가 아니다.
+    const exec: SlotExecutor = (slot, prompt) => Promise.resolve(reply(slot.role === 'reviewer' ? 'PASS' : `ran:${prompt}`));
+    const session = new ConversationSession({
+      approvalMode: 'auto', matrix, catalog, kind: opts.kind ?? 'project', dir: mkdtempSync(path.join(os.tmpdir(), 'hs-session-')), id: '0923-1200-aaa',
+      budget: new Budget(20, 2_000_000), journal: new Journal(), conduct: orcSpy(mixedSteps).exec, writeRows: ['R01'],
+      inGit: opts.inGit ?? true, ...(opts.dirty ? { dirtyFiles: opts.dirty } : {}),
+      executorFor: (write) => { writes.push(write); return exec; },
+    });
+    return { session, writes };
+  };
+
+  it('쓰기 행 단계는 git 폴더에서 쓰기를 켠 채 서고, 승인하면 그 단계만 쓴다 — 읽기 행 단계는 읽기 전용이다 (D-086 회귀)', async () => {
+    const { session, writes } = writeSession({ dirty: () => [] });
+    await session.send('넌 누구니');
+    const [card] = await session.planSteps();
+    assert.ok(card?.kind === 'steps');
+    assert.deepEqual(card.steps.map((st) => [st.id, st.write === true]), [['s1', false], ['s2', true]]);
+    assert.equal(card.write, true, '카드의 쓰기 스위치가 켜진 채 선다');
+    assert.deepEqual(card.asked?.map((a) => a.code), ['H1'], 'auto 여도 단계 카드는 사람이 승인한다');
+    const out = await session.approve({ write: true });
+    assert.deepEqual(writes, [false, true], 's1(R02) 은 읽기 전용, s2(R01) 만 쓰기');
+    const approval = out[0];
+    assert.ok(approval?.kind === 'approval' && approval.write);
+  });
+
+  it('미커밋 변경이 있거나 확인에 실패하면 H5 를, git 밖 쓰기 행이면 H6 과 스캐폴더 안내를 승인 전에 보인다 (D-086)', async () => {
+    for (const dirty of [() => ['a.ts'], () => null]) {
+      const { session } = writeSession({ dirty });
+      await session.send('넌 누구니');
+      const [card] = await session.planSteps();
+      assert.ok(card?.kind === 'steps');
+      assert.deepEqual(card.asked?.map((a) => a.code), ['H1', 'H5']);
+    }
+    const { session, writes } = writeSession({ inGit: false });
+    await session.send('넌 누구니');
+    const [card] = await session.planSteps();
+    assert.ok(card?.kind === 'steps');
+    assert.deepEqual(card.asked?.map((a) => a.code), ['H1', 'H6']);
+    assert.equal(card.write, undefined, 'git 밖에서는 쓰기로 서지 않는다');
+    assert.ok(card.guide?.some((g) => /스캐폴더/.test(g)));
+    await session.approve({ write: true });
+    assert.deepEqual(writes, [false, false], '쓰기 단계가 없으면 스위치를 켜도 쓰지 않는다');
+  });
+
   it('계획을 못 읽으면 받은 답과 함께 오류를 남기고 입력 대기다 · 거절한 계획은 단계마다 미실행으로 남는다', async () => {
     const log = isolate();
     const bad = make(orcSpy('계획은 이렇습니다').exec);

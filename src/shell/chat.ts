@@ -57,11 +57,13 @@ export function renderRecord(r: TranscriptRecord): string[] {
       return [
         `계획   지휘자 단계 계획 ${r.steps.length}단계 · ${r.by} · ${r.cost}`,
         ...r.steps.flatMap((st) => [
-          `단계   ${st.id} ${st.taskId} ${st.task}${st.dependsOn.length > 0 ? `  (← ${st.dependsOn.join(', ')})` : ''}`,
+          `단계   ${st.id} ${st.taskId} ${st.task}${st.write ? ' · 쓰기 행' : ''}${st.dependsOn.length > 0 ? `  (← ${st.dependsOn.join(', ')})` : ''}`,
           `       ${st.prompt.slice(0, 200)}`,
           `       primary ${st.primary} · reviewer ${st.reviewer} · $${st.estimateUsd}`,
         ]),
         `비용   $${r.estimateUsd} (추정, 단계 합 · 단계는 순서대로 하나씩 돈다)`,
+        ...(r.guide ?? []).map((g) => `안내   ${g}`),
+        ...(r.asked && r.asked.length > 0 ? [`묻는 이유  ${r.asked.map((a) => `${a.code} ${a.text}`).join(' · ')}`] : []),
         ...cutLine(r.cut),
       ];
     case 'result':
@@ -136,7 +138,7 @@ export async function runChat(
   });
   const ask = (): void => {
     if (closed) return;
-    if (session.state === 'blocked') say(session.stepsPending ? '승인?  y 읽기 전용 · w 쓰기 · n 거절 — 단계마다 차례로 위임한다' : '승인?  y 읽기 전용 · w 쓰기 · n 거절 · a 지휘자에게 묻기');
+    if (session.state === 'blocked') say(session.stepsPending ? '승인?  y 읽기 전용 · w 쓰기 행 단계에 쓰기 · n 거절 — 단계마다 차례로 위임한다' : '승인?  y 읽기 전용 · w 쓰기 · n 거절 · a 지휘자에게 묻기');
     rl.setPrompt('> ');
     rl.prompt();
   };

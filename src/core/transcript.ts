@@ -123,8 +123,16 @@ export type TranscriptEntry =
         readonly primary: string;
         readonly reviewer: string;
         readonly estimateUsd: number;
+        /** 쓰기 행 · git project 폴더라 승인 때 쓰기를 받는 단계 (D-086). 옛 기록에는 없다. */
+        readonly write?: true;
       }[];
       readonly estimateUsd: number;
+      /** 쓰기로 돌 단계가 있다 — 카드의 쓰기 스위치가 켜진 채 선다 (D-086). */
+      readonly write?: true;
+      /** 승인 전에 보이는 조건 — 늘 H1, 그리고 H5(미커밋)·H6(git 밖 쓰기 행). 옛 기록에는 없다. */
+      readonly asked?: readonly AskReason[];
+      /** 다음 행동 안내 — git 아닌 폴더의 쓰기 행 스캐폴더 (D-074·D-086). */
+      readonly guide?: readonly string[];
       /** 계획한 지휘자 슬롯 한 줄과 그 실행 비용. */
       readonly by: string;
       readonly cost: string;
