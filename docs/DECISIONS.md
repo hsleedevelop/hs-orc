@@ -3867,6 +3867,7 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 **검증**
 - `npm run gate` 통과 — 테스트 793 → 800 (`context.test.ts` 1 · `session.test.ts` 3 · `ladder-apply.test.ts` 1 · `chat.test.ts` 1 · `service.test.ts` 1). `buildContext` 의 `clear` 컷을 빼면 context·session 테스트 3개가, `resumable` 의 `clear` 검사를 빼면 resume 테스트 1개가 실패함을 확인했다.
+- **Electron 실기 (2026-10-09, 격리 HOME·상태 폴더 · `HS_ORC_JEV=off`, CDP 로 조작·캡처, 엔진 호출 0)**: 직접 답 2턴을 심은 세션을 사이드바에서 열었다. (a) "대화 비우기" → 말풍선 4개가 접히고 구분선 "여기서 대화를 비웠다 …" + "앞 대화 2턴 펼치기", 버튼이 꺼지고 기록 끝에 `{kind:'clear', turn:2}`. (b) 펼치기 → 4개가 다시 보이고 "앞 대화 접기". (c) "이 타입 에러 고쳐줘" → 규칙 분류 R01 카드(승인 대기) → "대화 비우기" → 기록 끝 `approval{approved:false}` · `clear{turn:3}`, 카드가 사라지고 "앞 대화 3턴 펼치기", 점유 파일(`.lock`)이 없다. 캡처 5장은 세션 산출물 폴더에 있다(PR 본문에 경로).
 
 **미검증·위험**
 - 비운 뒤에도 같은 폴더의 파일·git 상태는 그대로다 — 엔진은 새 실행에서 폴더를 다시 읽는다. 비우기는 대화 맥락만 끊는다.
