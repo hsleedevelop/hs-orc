@@ -929,6 +929,37 @@ describe('GUI — 세션 역할 (D-090)', () => {
     service.converseRole('worker');
     assert.doesNotThrow(() => service.reopenSession(ref));
   });
+
+  it('보관한 오케스트레이터는 세지 않아 새로 지정할 수 있고, 그 뒤 옛 오케스트레이터를 복원하면 거절한다', () => {
+    const { service } = project();
+    const old = service.startConversation('project');
+    service.converseRole('orchestrator');
+    const ref = { kind: old.kind, dir: old.dir, id: old.id };
+    service.archiveSession(ref, true);
+    service.startConversation('project');
+    assert.equal(service.converseRole('orchestrator').role, 'orchestrator');
+    assert.throws(() => service.archiveSession(ref, false), /오케스트레이터는 프로젝트당 하나다/);
+    const archived = () => service.conversations().projects[0]?.sessions.find((s) => s.id === old.id)?.archived;
+    assert.equal(archived(), true, '거절하면 보관함에 남는다');
+    service.converseRole('worker');
+    service.archiveSession(ref, false);
+    assert.equal(archived(), undefined);
+  });
+
+  it('종료하고 보관한 오케스트레이터는 복원해도 다시 열어도 아직 숨어 있어 다른 오케스트레이터가 있어도 거절하지 않는다', async () => {
+    const { service } = project();
+    const old = service.startConversation('project');
+    service.converseRole('orchestrator');
+    const ref = { kind: old.kind, dir: old.dir, id: old.id };
+    await service.endSession(ref);
+    service.archiveSession(ref, true);
+    service.startConversation('project');
+    service.converseRole('orchestrator');
+    assert.doesNotThrow(() => service.reopenSession(ref), '다시 열어도 보관이라 세지 않는다');
+    service.archiveSession(ref, true);
+    await service.endSession(ref);
+    assert.doesNotThrow(() => service.archiveSession(ref, false), '복원해도 종료라 세지 않는다');
+  });
 });
 
 describe('GUI — 오케스트레이터 0~1 경쟁 (PR #126 리뷰)', () => {
@@ -959,7 +990,7 @@ describe('GUI — 오케스트레이터 0~1 경쟁 (PR #126 리뷰)', () => {
   };
 
   const orchestrators = (service: GuiService) =>
-    (service.conversations().projects[0]?.sessions ?? []).filter((s) => s.role === 'orchestrator' && s.status?.state !== 'ended');
+    (service.conversations().projects[0]?.sessions ?? []).filter((s) => s.role === 'orchestrator' && s.status?.state !== 'ended' && !s.archived);
 
   it('지정 — 검사를 지나 쓰기 직전에 다른 프로세스가 만들려 해도 하나만 선다', () => {
     isolated();
@@ -982,6 +1013,20 @@ describe('GUI — 오케스트레이터 0~1 경쟁 (PR #126 리뷰)', () => {
     await service.endSession(ref);
     const race = raceAt('renameSync', (f) => f.endsWith(`${view.id}.meta.json`), dir, () => service.reopenSession(ref));
     assert.notEqual(race?.status, 0, '잠금 없이 검사만 하면 경쟁자는 아직 종료된 것으로 보고 새로 만든다');
+    assert.match(String(race?.stderr), /이 폴더의 역할을 바꾸는 중이다/);
+    assert.deepEqual(orchestrators(service).map((s) => s.id), [view.id]);
+  });
+
+  it('보관한 오케스트레이터 복원 — 표식을 지우기 직전에 다른 프로세스가 만들려 해도 하나만 선다', () => {
+    isolated();
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-gui-race-'));
+    const service = new GuiService(fake, 20, dir);
+    const view = service.startConversation('project');
+    service.converseRole('orchestrator');
+    const ref = { kind: view.kind, dir: view.dir, id: view.id };
+    service.archiveSession(ref, true);
+    const race = raceAt('renameSync', (f) => f.endsWith(`${view.id}.meta.json`), dir, () => service.archiveSession(ref, false));
+    assert.notEqual(race?.status, 0, '잠금 없이 검사만 하면 경쟁자는 아직 보관된 것으로 보고 새로 만든다');
     assert.match(String(race?.stderr), /이 폴더의 역할을 바꾸는 중이다/);
     assert.deepEqual(orchestrators(service).map((s) => s.id), [view.id]);
   });

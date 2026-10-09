@@ -323,12 +323,12 @@ describe('session new — 역할 (D-090)', () => {
     assert.doesNotThrow(() => newSession(folder(), 'orchestrator', ''));
   });
 
-  it('보관한 오케스트레이터는 세고, 종료한 오케스트레이터는 세지 않는다', () => {
+  it('보관한 오케스트레이터도 종료한 오케스트레이터도 세지 않는다', () => {
     const dir = folder();
-    const first = newSession(dir, 'orchestrator', '');
-    setArchived(dir, first.target.id, true);
-    assert.throws(() => newSession(dir, 'orchestrator', ''), /보관됨/);
-    setEnded(dir, first.target.id, true);
+    const archived = newSession(dir, 'orchestrator', '');
+    setArchived(dir, archived.target.id, true);
+    const ended = newSession(dir, 'orchestrator', '');
+    setEnded(dir, ended.target.id, true);
     assert.doesNotThrow(() => newSession(dir, 'orchestrator', ''));
   });
 

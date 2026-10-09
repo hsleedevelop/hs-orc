@@ -73,3 +73,9 @@ export const SETTING_KINDS: ReadonlySet<string> = new Set(['name', 'mode', 'orch
  */
 export const lastEvent = <T extends { readonly kind: string }>(records: readonly T[]): T | undefined =>
   records.findLast((r) => !SETTING_KINDS.has(r.kind));
+
+/**
+ * GUI 의 IPC 거절 문구 — Electron 은 main 쪽 예외를 `Error invoking remote method '<채널>': <예외 이름>: <문구>` 로 감싸 넘긴다.
+ * 사람에게는 문구만 보인다. 그 모양이 아니면 그대로 둔다.
+ */
+export const ipcErrorText = (message: string): string => message.replace(/^Error invoking remote method '[^']*': (?:[A-Za-z_$][\w$]*: )?/, '');

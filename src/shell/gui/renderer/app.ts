@@ -12,7 +12,7 @@
  */
 import { createElement as h, useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { askedNote, cardAsked, compactLines, cutLine, lastEvent, ladderLines, retryLines, roleLabel, SETTING_KINDS, statusLabel } from '../../transcript-lines.ts';
+import { askedNote, cardAsked, compactLines, cutLine, ipcErrorText, lastEvent, ladderLines, retryLines, roleLabel, SETTING_KINDS, statusLabel } from '../../transcript-lines.ts';
 
 const SCREENS = ['Session', 'Dashboard', 'Agents', 'Reviews', 'Debug'] as const;
 type Screen = (typeof SCREENS)[number];
@@ -164,7 +164,7 @@ const card = (label: string | null, ...children: ReactNode[]) =>
 const elide = (s: string, max = 58): string => (s.length <= max ? s : `…${s.slice(-(max - 1))}`);
 
 /** IPC 거절을 화면에 올린다. 조용히 삼키면 폴더 전환 실패가 "아무 일도 없음"으로 보인다. */
-const why = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+const why = (error: unknown): string => (error instanceof Error ? ipcErrorText(error.message) : String(error));
 
 // ── 배정 줄 ────────────────────────────────────────────────
 // 뷰모델(`shell/view-model.ts`)이 만든 문자열을 **다시 해석하지 않는다.** 앞 라벨만 떼어 정렬·색만 준다.
