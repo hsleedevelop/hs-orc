@@ -58,6 +58,13 @@ describe('맥락 자르기 (SPEC §6.4.3)', () => {
     assert.equal(cut, null, 'resume 으로 엔진이 가진 턴은 버린 것이 아니다');
   });
 
+  it('비운 대화(D-092) 앞은 싣지 않고 버린 양에도 세지 않는다', () => {
+    const cleared: TranscriptRecord[] = [...records.slice(0, -1), { v: 1, at, turn: 2, kind: 'clear' }, records.at(-1)!];
+    const { text, cut } = buildContext(cleared, { contextTurns: 1, contextChars: 6000 }, { before: 4 });
+    assert.equal(text, '사용자: 지금 메시지');
+    assert.equal(cut, null);
+  });
+
   it('취소된 위임은 행·단계와 함께 한 줄로 싣는다 — 단계가 없는 옛 기록도 싣는다 (D-066)', () => {
     const cancelled = (evidence: string): TranscriptRecord[] => [
       { v: 1, at, turn: 1, kind: 'user', text: '리팩터링해줘' },

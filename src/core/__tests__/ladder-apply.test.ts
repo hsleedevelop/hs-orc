@@ -183,6 +183,16 @@ describe('사다리 — 세션 (D-068)', () => {
     assert.equal(session.ladderOffer(), null, '새 요청이 이전 사다리를 끝낸다');
   });
 
+  it('대화를 비우면 사다리도 끝난다 — 화면에 없는 앞 요청을 다시 위임하지 않는다 (D-092)', async () => {
+    isolate();
+    const { session } = make();
+    await session.send(REQUEST);
+    await session.approve();
+    assert.ok(session.ladderOffer());
+    session.clear();
+    assert.equal(session.ladderOffer(), null);
+  });
+
   it('누르면 같은 요청으로 상향 카드 1장만 선다 — 시작하지 않고 카드에 올라간 것이 적힌다', async () => {
     isolate();
     const { session, primaries } = make();

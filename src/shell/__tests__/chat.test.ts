@@ -192,6 +192,14 @@ describe('chat — 입력 루프', () => {
     assert.ok(!session.records().some((r) => r.kind === 'plan' || r.kind === 'approval'));
   });
 
+  it('/clear 는 대화를 비운다 — 선 카드는 거절로 남고, 비울 것이 없으면 그렇다고 말한다 (D-092)', async () => {
+    const { out, calls, session } = await drive(['이 타입 에러 고쳐줘', '/clear', '/clear']);
+    assert.deepEqual(calls, []);
+    assert.match(out, /비움 {3}── 여기서 대화를 비웠다/);
+    assert.match(out, /비움 {3}비울 대화가 없다/);
+    assert.deepEqual(session.records().filter((r) => r.kind === 'approval' || r.kind === 'clear').map((r) => r.kind), ['approval', 'clear']);
+  });
+
   it('/task Rxx 는 마지막 메시지를 그 행으로 배정한다', async () => {
     const { session } = await drive(['넌 누구니', '/task R02']);
     const plan = session.records().findLast((r) => r.kind === 'plan');

@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('orc', {
   convCancel: () => ipcRenderer.invoke('conv-cancel'),
   convEscalate: () => ipcRenderer.invoke('conv-escalate'),
   convReject: () => ipcRenderer.invoke('conv-reject'),
+  convClear: () => ipcRenderer.invoke('conv-clear'),
   convAsk: () => ipcRenderer.invoke('conv-ask'),
   convGitInit: () => ipcRenderer.invoke('conv-git-init'),
   convRun: (terminal) => ipcRenderer.invoke('conv-run', terminal),

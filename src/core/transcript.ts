@@ -212,6 +212,11 @@ export type TranscriptEntry =
   | { readonly kind: 'name'; readonly name: string }
   /** 세션 역할 (D-090). 마지막 것이 이긴다 — 없으면 `worker` 다(이 결정 전 세션이 하던 일이 워커 일이다). 표시·만들기뿐이고 메시지 경로의 입력이 아니다. */
   | { readonly kind: 'role'; readonly role: SessionRole }
+  /**
+   * 대화 비우기 (D-092). 이 줄 뒤만 대화다 — 맥락(`buildContext`)·엔진 resume·사다리·"마지막 메시지" 가 앞을 보지 않는다.
+   * 설정 줄이 아니라 흐름의 사건이다(`lastEvent` 가 이것이면 살아 있는 카드·제안이 없다). 앞 기록은 지우지 않는다 — 화면이 접을 뿐이다. 옛 기록에는 없다.
+   */
+  | { readonly kind: 'clear' }
   | {
       readonly kind: 'result';
       /** `cancelled` — 사용자가 실행 중에 멈췄다 (D-066). 실패가 아니라 끊김도 아니다 — 잇지 않는다. */
