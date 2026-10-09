@@ -33,13 +33,13 @@ const app = (scripts: Record<string, string>, o: { deps?: boolean; lock?: string
 
 describe('앱 실행 감지 — 결정론 (D-091)', () => {
   it('실행을 부탁하는 문장을 잡는다 — 1009-1733-a12 의 문장 그대로', () => {
-    for (const text of ['현재 앱 실행해줘', 'dev 서버 띄워줘', '서버 좀 켜줘', '앱 돌려줘', 'npm run dev 해줘', 'hs-orc-test 앱 실행해줘', 'run the app', 'start the dev server please']) {
+    for (const text of ['현재 앱 실행해줘', 'dev 서버 띄워줘', '서버 좀 켜줘', '앱 돌려줘', 'npm run dev 해줘', 'hs-orc-test 앱 실행해줘', 'run the app', 'start the dev server please', '서버 시작해줘', '앱을 다시 실행해줘']) {
       assert.equal(detectRun(text), true, text);
     }
   });
 
   it('테스트·빌드 실행, 버그 보고, 질문, 고치는 일은 잡지 않는다 — 종전 경로 그대로', () => {
-    for (const text of ['테스트 실행해줘', '빌드 실행해줘', '앱을 실행하면 흰 화면이 나와', '서버 실행이 안 돼', '앱 실행 방법 알려줘', '서버 띄워서 로그인 버그 고쳐줘', '이 함수 실행 흐름 설명해줘', 'run the tests', 'how do I run the app', '이 타입 에러 고쳐줘', '로그인 기능 구현해줘']) {
+    for (const text of ['테스트 실행해줘', '빌드 실행해줘', '앱을 실행하면 흰 화면이 나와', '서버 실행이 안 돼', '앱 실행 방법 알려줘', '서버 띄워서 로그인 버그 고쳐줘', '이 함수 실행 흐름 설명해줘', 'run the tests', 'how do I run the app', '이 타입 에러 고쳐줘', '로그인 기능 구현해줘', '앱에 다크모드 켜줘', '이 프로젝트 시작해줘', 'run it', 'start working on the app']) {
       assert.equal(detectRun(text), false, text);
     }
   });

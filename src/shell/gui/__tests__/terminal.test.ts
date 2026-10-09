@@ -1,7 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, rmSync, statSync } from 'node:fs';
+import os from 'node:os';
 import { openTerminal, runInTerminal, runScript, shellQuote, terminalCommand, type TerminalCommand } from '../terminal.ts';
 
 describe('세션 폴더 터미널', () => {
@@ -38,6 +39,18 @@ describe('터미널에서 앱 실행 (D-091)', () => {
     assert.equal(spawnSync('/bin/sh', ['-n'], { input: script }).status, 0, '문법이 맞다');
     assert.ok(script.includes(`cd ${shellQuote(evil)} || exit 1`));
     assert.ok(script.includes("'npm' 'run' 'dev'"));
+  });
+
+  it('Ctrl-C(그룹 SIGINT)는 명령만 멈추고 스크립트는 살아 끝난 안내를 찍는다 — 창이 폴더의 셸로 남는다', async () => {
+    // 마지막 줄의 로그인 셸은 SHELL 로 바꿔 바로 끝나게 한다.
+    const child = spawn('/bin/sh', ['-c', runScript(os.tmpdir(), ['sleep', '30'])], { detached: true, stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, SHELL: '/usr/bin/true' } });
+    let out = '';
+    child.stdout.on('data', (d: Buffer) => { out += d.toString(); });
+    await new Promise((r) => setTimeout(r, 300));
+    process.kill(-(child.pid ?? 0), 'SIGINT');
+    const code = await new Promise((r) => child.on('close', r));
+    assert.equal(code, 0);
+    assert.match(out, /끝났다 \(exit 130\)/);
   });
 
   it('macOS 는 실행 비트를 준 .command 파일을 고른 앱으로 연다 — 연 앱 이름을 돌려준다', async () => {

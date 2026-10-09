@@ -86,6 +86,9 @@ export function runScript(dir: string, argv: readonly string[]): string {
   return [
     '#!/bin/sh',
     '# hs-orc 앱 실행 (D-091) — 사람이 실행 카드에서 확인한 명령이다.',
+    // Ctrl-C 는 포그라운드 그룹 전체에 간다 — 잡지 않으면 이 sh 도 죽어 아래 안내·셸로 남기가 돌지 않는다. 잡은(무시가 아닌) 신호는
+    // 자식에게 기본 동작으로 넘어가므로 서버는 그대로 멈춘다.
+    "trap ':' INT",
     `cd ${shellQuote(dir)} || exit 1`,
     `printf '%s\\n' ${shellQuote(`[hs-orc] ${dir} 에서 ${argv.join(' ')} — Ctrl-C 로 멈춘다`)}`,
     command,

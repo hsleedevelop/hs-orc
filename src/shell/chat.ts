@@ -395,6 +395,7 @@ export function openingLines(session: ConversationSession, budget: Budget, tail 
     // 카드 합치기(D-064) 이전 기록 — 제안만 있고 배정이 없다.
     ...(last?.kind === 'direct' && last.suggest ? [`안내   ${last.suggest} 로 위임하려면 /task ${last.suggest}.`] : []),
     ...(last?.kind === 'scaffold' ? ['안내   승인 안 된 스캐폴딩 카드는 되살리지 않는다 — 같은 메시지를 다시 보낸다.'] : []),
+    ...(last?.kind === 'run' ? ['안내   승인 안 된 앱 실행 카드는 되살리지 않는다 — 실행 카드는 GUI 에서 같은 메시지를 다시 보낸다.'] : []),
     ...(session.gitInitOffered ? ['안내   /git-init — 스캐폴딩 폴더에 git init + 첫 커밋을 한다.'] : []),
     CHAT_HELP,
   ];

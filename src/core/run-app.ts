@@ -10,10 +10,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-/** 실행을 부탁하는 말 — 대상(앱·서버…)과 함께일 때만 본다. "실행하면"·"실행이 안 돼" 같은 서술은 맞지 않는다. */
-const ASK_KO = /(실행|구동|기동)\s*(해|시켜|좀)|띄워|켜\s*(줘|봐|주)|돌려\s*(줘|봐|주)|시작\s*해\s*(줘|봐|주)/;
-const TARGET_KO = /(앱|어플|서버|사이트|웹|프론트|프로젝트|개발\s*모드)/;
-const ASK_EN = /\b(run|start|launch|serve|boot|spin\s+up|fire\s+up)\b[\w\s'-]{0,24}?\b(app|server|site|project|frontend|it)\b/i;
+/**
+ * 실행을 부탁하는 말 — 대상(앱·서버…)이 동사 **바로 앞**에 와야 한다(조사 을·를·좀 정도만 끼인다). "앱에 다크모드 켜줘" 처럼
+ * 대상이 장소·수식이면 맞지 않는다. "시작해" 는 서버·앱에만 — "이 프로젝트 시작해줘" 는 일을 시작하라는 뜻일 수 있다.
+ */
+const ASK_KO = /(앱|어플|서버|사이트|웹|프론트|프로젝트|개발\s*모드)\s*(을|를)?\s*(좀|다시|한\s*번)?\s*((실행|구동|기동)\s*(해|시켜|좀)|띄워|켜\s*(줘|봐|주)|돌려\s*(줘|봐|주))|(서버|앱)\s*(을|를)?\s*(좀|다시)?\s*시작\s*해\s*(줘|봐|주)/;
+/** 영어 — 동사와 대상 사이에 관사·dev 정도만 둔다. "run it"·"start working on the app" 은 맞지 않는다. */
+const ASK_EN = /\b(run|start|launch|serve|boot|spin\s+up|fire\s+up)\s+(the\s+|my\s+|this\s+)?(dev\s+|local\s+|development\s+)?(app|server|site|frontend)\b/i;
 /** 명령을 직접 짚은 말 — "npm run dev 해줘". */
 const EXPLICIT = /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(dev|start)\b/i;
 /**
@@ -28,7 +31,7 @@ const NOT_RUN_EN = /(?<![\w-])(tests?|build|lint|deploy|typecheck|errors?|crash(
 export function detectRun(text: string): boolean {
   if (NOT_RUN_KO.test(text) || NOT_RUN_EN.test(text)) return false;
   if (EXPLICIT.test(text)) return true;
-  return (ASK_KO.test(text) && TARGET_KO.test(text)) || ASK_EN.test(text);
+  return ASK_KO.test(text) || ASK_EN.test(text);
 }
 
 export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun';
