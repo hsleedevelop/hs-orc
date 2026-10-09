@@ -106,7 +106,7 @@ export type TranscriptEntry =
       /** 누가 승인했나 (D-064 결정 7). 이 결정 전 기록·거절에는 없다. */
       readonly by?: 'user' | 'auto';
       readonly mode?: ApprovalMode;
-      /** 그 배정에서 걸린 조건 코드(`H1`…`H7`·`A1`…`A4`). 자동 승인은 비어 있다. 스캐폴딩 승인은 `H7` 이다 (D-088). */
+      /** 그 배정에서 걸린 조건 코드(`H1`…`H8`·`A1`…`A4`). 자동 승인은 비어 있다. 스캐폴딩 승인은 `H7`(D-088), 앱 실행 승인은 `H8`(D-091) 이다. */
       readonly asked?: readonly string[];
     }
   /** 승인 방식 변경 (D-064 결정 8). 세션을 열면 마지막 것을 재생한다 — 화면에 한 줄로 보인다(감사용). */
@@ -178,6 +178,33 @@ export type TranscriptEntry =
       readonly git?: 'existing' | 'scaffolder' | 'offer';
       /** 끝난 뒤 폴더 맨 위 이름들(앞 12개) — 무엇이 생겼는지의 증거. */
       readonly created?: readonly string[];
+    }
+  /**
+   * 앱 실행 카드 (D-091). `package.json` 의 허용 스크립트를 사람이 고른 터미널 창에서 열지 묻는다 — 어느 승인 방식에서도
+   * 사람이 확인해야 연다(H8, 자동 승인 없음). GUI 에서만 선다. 옛 기록에는 없다.
+   */
+  | {
+      readonly kind: 'run';
+      readonly argv: readonly string[];
+      /** 스크립트 이름과 `package.json` 의 본문 원문 — 무엇이 도는지 사람이 본다. */
+      readonly script: string;
+      readonly body: string;
+      readonly asked: readonly AskReason[];
+      /** 알릴 것 — `node_modules` 없음 등. 설치는 하지 않는다. */
+      readonly warnings?: readonly string[];
+    }
+  /**
+   * 앱 실행 결과 (D-091). hs-orc 는 터미널 창을 열 뿐 서버의 수명·로그·포트를 모른다(Q29 A2) — `opened` 는 창을 열었다는 뜻이지
+   * 서버가 떴다는 뜻이 아니다. 엔진을 부르지 않아 `spend` 가 없다. `refused` 는 실행 직전 다시 본 스크립트가 카드와 달라 열지 않은 것이다.
+   */
+  | {
+      readonly kind: 'run-launch';
+      readonly argv: readonly string[];
+      readonly outcome: 'opened' | 'failed' | 'refused';
+      /** 연 터미널 앱 이름. */
+      readonly terminal?: string;
+      /** 실패·거부 사유. */
+      readonly detail?: string;
     }
   /** 세션 이름 (D-085). 마지막 것이 이긴다 — 빈 문자열은 이름을 지운다. id 와 함께 `hs-orc session` 이 세션을 찾는 열쇠다. */
   | { readonly kind: 'name'; readonly name: string }

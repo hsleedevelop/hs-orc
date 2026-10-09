@@ -37,6 +37,9 @@ function line(r: TranscriptRecord, records: readonly TranscriptRecord[]): string
     case 'scaffold-run':
       // 다음 위임이 폴더가 어떻게 생겼는지 알게 한다 (D-088) — 출력 본문은 싣지 않는다.
       return `orc(${r.step === 'scaffold' ? '스캐폴딩' : 'git init'} 실행): ${r.commands.map((c) => c.join(' ')).join(' && ')} → ${r.outcome}${r.exitCode !== null ? ` (exit ${r.exitCode})` : ''}${r.created ? ` · 폴더: ${r.created.join(', ')}` : ''}`;
+    case 'run-launch':
+      // 다음 턴이 앱을 띄웠는지 알게 한다 (D-091) — 창을 열었을 뿐 서버가 떴는지는 hs-orc 가 모른다.
+      return `orc(앱 실행): ${r.argv.join(' ')} → ${r.outcome === 'opened' ? `${r.terminal ?? '터미널'} 창에서 열었다 (서버 상태는 그 창에 있다)` : `${r.outcome}${r.detail ? ` — ${r.detail}` : ''}`}`;
     default:
       return null;
   }

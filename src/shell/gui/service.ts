@@ -50,7 +50,7 @@ import {
   type WorktreeInfo,
 } from './worktree.ts';
 import type { RowClassifier } from '../../adapters/jev.ts';
-import { isTerminalId, openTerminal, terminalCommand, type TerminalId } from './terminal.ts';
+import { isTerminalId, openTerminal, runInTerminal, terminalCommand, type TerminalId } from './terminal.ts';
 import { assembleSession, restoreBudget } from '../conversation.ts';
 import { busyMessage, claimSession, foreignHold, lockPath, releaseSession, syncHold, type SessionHold } from '../../core/session-lock.ts';
 import { assertNotEnded, readSessionMeta, setArchived, setEnded, withRoleLock } from '../../core/session-meta.ts';
@@ -139,6 +139,8 @@ export interface SessionView {
   readonly stepsPending: boolean;
   /** 승인 대기 중인 것이 스캐폴딩 카드다 (D-088). */
   readonly scaffoldPending: boolean;
+  /** 승인 대기 중인 것이 앱 실행 카드다 (D-091) — 화면은 승인 대신 "터미널에서 실행" 을 보인다. */
+  readonly runPending: boolean;
   /** 스캐폴딩이 git 없이 끝나 'git init + 첫 커밋' 을 누를 수 있다 (D-088). */
   readonly gitInitOffered: boolean;
   /** 붙인 이름 (D-085). `hs-orc session send <이름>` 이 이것으로 찾는다. */
@@ -450,6 +452,7 @@ export class GuiService {
       })(),
       stepsPending: s.stepsPending,
       scaffoldPending: s.scaffoldPending,
+      runPending: s.runPending,
       gitInitOffered: s.gitInitOffered,
       ...(s.name ? { name: s.name } : {}),
       external: foreignHold(s.dir, s.id),
@@ -497,6 +500,19 @@ export class GuiService {
   async converseCancel(): Promise<SessionView> {
     const s = this.requireConversation();
     if (s.cancel()) await this.liveCalls.get(`${s.dir}::${s.id}`)?.catch(() => undefined);
+    return this.conversation();
+  }
+
+  /**
+   * 앱 실행 카드를 고른 터미널 창에서 연다 (D-091) — 이 클릭이 승인(H8)이다. 터미널은 목록의 id 로만 받는다(D-021). 경로·argv 는 화면에서 받지 않고
+   * 세션이 카드에서 꺼낸다. `launch` 는 테스트가 실제 터미널을 띄우지 않게 바꿔 끼우는 자리다.
+   */
+  async converseRun(
+    terminal: unknown = 'default',
+    launch: (dir: string, argv: readonly string[], terminal: TerminalId) => Promise<string> = (dir, argv, t) => runInTerminal(dir, argv, t),
+  ): Promise<SessionView> {
+    if (!isTerminalId(terminal)) throw new Error(`모르는 터미널: ${String(terminal)}`);
+    await this.running((s) => s.launchRun((dir, argv) => launch(dir, argv, terminal)));
     return this.conversation();
   }
 
@@ -747,6 +763,8 @@ export class GuiService {
       journal: this.journal,
       ...(this.jev ? { classifier: this.jev } : {}),
       ...(this.execute ? { execute: this.execute } : {}),
+      // 터미널 창을 여는 것은 GUI 뿐이다 (D-091) — chat·`session send` 는 실행 카드를 세우지 않는다.
+      runCards: true,
     });
   }
 }

@@ -43,10 +43,12 @@ export interface AssembleInput {
   readonly approvalMode?: ApprovalMode;
   /** false 면 세션 방식과 무관하게 자동 시작하지 않는다 (D-085 결정 5 — `session send` 의 `--run` 없음). */
   readonly autoStart?: boolean;
+  /** 앱 실행 카드를 세운다 (D-091) — 터미널 창을 여는 GUI 만 true 다. */
+  readonly runCards?: boolean;
 }
 
 export function assembleSession(input: AssembleInput): ConversationSession {
-  const { kind, dir, id, budget, journal, execute, classifier, approvalMode, autoStart } = input;
+  const { kind, dir, id, budget, journal, execute, classifier, approvalMode, autoStart, runCards } = input;
   const catalog = loadEngines();
   const timeout = loadLimits().runTimeoutMs;
   const inGit = kind === 'project' && repoRoot(dir) !== null;
@@ -61,6 +63,7 @@ export function assembleSession(input: AssembleInput): ConversationSession {
     ...(classifier ? { classifier } : {}),
     ...(approvalMode ? { approvalMode } : {}),
     ...(autoStart === false ? { autoStart } : {}),
+    ...(runCards ? { runCards } : {}),
     // 카드가 git 아닌 폴더의 쓰기 거절을 미리 말한다 (D-074). 실행기의 `nonGit` 과 같은 판정이다. 세션은 카드를 세울 때 `gitProbe` 로 다시 본다 (D-088) —
     // 실행기는 조립 때 값 그대로다: git 이 된 폴더의 읽기 전용 위임에 `--skip-git-repo-check` 가 남는 것은 무해하고(D-073 사실 9), 쓰기에는 원래 붙지 않는다.
     inGit,
