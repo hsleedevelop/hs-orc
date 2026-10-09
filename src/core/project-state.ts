@@ -9,6 +9,15 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { REPO_ROOT, REPO_VERIFY_PATH } from '../data/verify.ts';
+
+const realOr = (dir: string): string => {
+  try {
+    return realpathSync(dir);
+  } catch {
+    return path.resolve(dir);
+  }
+};
 
 /**
  * 폴더 하나의 키 — `<basename>-<실제 경로 sha256 앞 8자리>`. 워크트리 슬러그(D-028 결정 2)와 같은 규칙이다.
@@ -16,13 +25,7 @@ import path from 'node:path';
  * 실제 경로로 재므로 링크·`/var`↔`/private/var` 같은 별칭이 한 키로 모인다. 없는 폴더는 그 경로 그대로 잰다.
  */
 export function projectKey(dir: string): string {
-  const real = (() => {
-    try {
-      return realpathSync(dir);
-    } catch {
-      return path.resolve(dir);
-    }
-  })();
+  const real = realOr(dir);
   return `${path.basename(real)}-${createHash('sha256').update(real).digest('hex').slice(0, 8)}`;
 }
 
@@ -65,4 +68,16 @@ export function stateOrigins(env: NodeJS.ProcessEnv = process.env): string[] {
       return [];
     }
   });
+}
+
+/**
+ * 폴더의 검증 선언 파일 (D-093). `HS_ORC_VERIFY_CONFIG`(명시) → 상태 폴더의 `verify.json` → 대상이 hs-orc 저장소면
+ * 그 `data/verify.json`. 다른 프로젝트에 hs-orc 의 `npm test`·`npm run gate`·테스트 glob 을 대지 않는다 —
+ * 남의 폴더에서 돌린 hs-orc 명령은 틀린 증거다. 돌려준 파일이 없으면 읽는 쪽에서 빈 선언이 된다.
+ */
+export function verifyConfigPath(dir: string, env: NodeJS.ProcessEnv = process.env): string {
+  const explicit = env['HS_ORC_VERIFY_CONFIG'];
+  if (explicit !== undefined) return explicit;
+  const own = path.join(projectStateDir(dir, env), 'verify.json');
+  return existsSync(own) || realOr(dir) !== realOr(REPO_ROOT) ? own : REPO_VERIFY_PATH;
 }

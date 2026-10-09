@@ -67,6 +67,12 @@ export const REQUIREMENTS: Readonly<Record<string, readonly Requirement[]>> = {
   ],
 };
 
+/**
+ * 운영 기준이 **기존 테스트**를 전제하는 행 (D-093) — R01 "기존 test만 실행", R06 "…→ 회귀". 대상에 테스트가 없다고
+ * 결정론으로 확인되면(`noTests`) 이 행에서만 그 사실을 reviewer·증거에 싣는다. 요구 증거(`REQUIREMENTS`)는 그대로다.
+ */
+export const EXISTING_TEST_ROWS: ReadonlySet<string> = new Set(['R01', 'R06']);
+
 export interface Rejection {
   readonly evidence: Evidence;
   readonly why: string;
@@ -113,6 +119,8 @@ export interface EvidenceReport {
   readonly missing: readonly string[];
   readonly rejected: readonly Rejection[];
   readonly accepted: readonly Evidence[];
+  /** Core 가 확인한 사실 — 판정을 바꾸지 않고 요약 끝에 붙는다 (D-093: 대상에 기존 테스트 없음). */
+  readonly notes?: readonly string[];
   readonly summary: string;
 }
 
@@ -160,7 +168,7 @@ export function outcomeOf(runOk: boolean, report: EvidenceReport): SettledOutcom
   return report.satisfied ? 'ok' : 'unverified';
 }
 
-export function collect(assignment: Assignment, items: readonly Evidence[]): EvidenceReport {
+export function collect(assignment: Assignment, items: readonly Evidence[], notes: readonly string[] = []): EvidenceReport {
   const requirements = REQUIREMENTS[assignment.id] ?? [];
   const accepted: Evidence[] = [];
   const rejected: Rejection[] = [];
@@ -198,10 +206,14 @@ export function collect(assignment: Assignment, items: readonly Evidence[]): Evi
     missing,
     rejected,
     accepted,
-    summary: contradictions.length > 0
-      ? `검증 결과 완료가 아니다 — ${contradictions.join(' · ')}`
-      : satisfied
-        ? `증거 충족 — ${assignment.operatingCriterion}`
-        : `증거 미충족 (${missing.length}건)${rejected.length ? ` · 거절 ${rejected.length}건` : ''}`,
+    ...(notes.length > 0 ? { notes } : {}),
+    summary: [
+      contradictions.length > 0
+        ? `검증 결과 완료가 아니다 — ${contradictions.join(' · ')}`
+        : satisfied
+          ? `증거 충족 — ${assignment.operatingCriterion}`
+          : `증거 미충족 (${missing.length}건)${rejected.length ? ` · 거절 ${rejected.length}건` : ''}`,
+      ...notes,
+    ].join(' · '),
   };
 }

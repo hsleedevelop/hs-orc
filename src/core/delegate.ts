@@ -10,13 +10,14 @@ import type { AssignmentPlan } from './assign.ts';
 import type { Budget } from './budget.ts';
 import { appendDecision } from './decision-log.ts';
 import { cancelledLine, firstLine, secondLine } from './decide.ts';
-import { reviewText, runDuo, type Verdict } from './duo.ts';
-import { collect, outcomeOf, type Evidence, type EvidenceReport, type SettledOutcome } from './evidence.ts';
-import { changedFiles, runCommand, snapshotTests, testChanges } from './evidence-gather.ts';
+import { noTestsEvidenceNote, primaryNoTestsNote, reviewText, runDuo, type ReviewRun, type Verdict } from './duo.ts';
+import { EXISTING_TEST_ROWS, collect, outcomeOf, type Evidence, type EvidenceReport, type SettledOutcome } from './evidence.ts';
+import { changedFiles, noTests, runCommand, snapshotTests, testChanges } from './evidence-gather.ts';
 import { declaredTests } from '../data/verify.ts';
 import type { EngineReport, SlotExecutor } from './executor.ts';
 import type { Journal } from './journal.ts';
 import { reportError } from './report.ts';
+import { verifyConfigPath } from './project-state.ts';
 import { runStoreRoot, storeRun } from './run-store.ts';
 import type { EngineSessionRef } from './transcript.ts';
 import type { EngineCompaction } from '../adapters/types.ts';
@@ -55,6 +56,8 @@ export interface Delegated {
   readonly verdict: Verdict;
   /** reviewer 검증 글. reviewer 가 둘이면(D-072) reviewer 마다 머리줄을 단 한 글이다 — 기록 모양은 그대로다. */
   readonly review?: string;
+  /** reviewer 마다의 판정과 글 (D-072). 요약이 FAIL 한 쪽의 사유를 고르는 데 쓴다 (D-093) — 기록에는 싣지 않는다. */
+  readonly reviews?: readonly ReviewRun[];
   readonly decisionId: string;
   readonly primarySession?: EngineSessionRef;
   /** primary 실행 중 엔진이 한 압축 (D-058). */
@@ -70,18 +73,22 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
   appendDecision(decision);
 
   // 기존 테스트의 작업 전 내용 — 약해졌는지는 primary 뒤에 본다 (D-047). 선언이 없으면 보지 않는다.
-  const testGlobs = declaredTests();
+  const testGlobs = declaredTests(verifyConfigPath(input.cwd));
   const testsBefore = testGlobs.length > 0 ? snapshotTests(testGlobs, input.cwd) : undefined;
+  // 기존 테스트를 전제하는 행인데 대상에 테스트가 없다 (D-093) — primary 가 밝히게 하고 reviewer·증거에 싣는다. 작업 **전**에 본다.
+  const missingTests = EXISTING_TEST_ROWS.has(plan.assignment.id) ? noTests(input.cwd) : null;
+  const prompt = missingTests ? `${input.prompt}\n\n${primaryNoTestsNote(missingTests)}` : input.prompt;
 
   // **두 슬롯을 실제로 돌린다** (D-009) — primary 만 돌리면 단일 엔진 선택기다. 사다리 ④ 배정은 reviewer 가 둘이다 (D-072).
   let duo;
   try {
-    duo = await runDuo(matrix, plan, input.execute, input.prompt, budget,
+    duo = await runDuo(matrix, plan, input.execute, prompt, budget,
       {
         ...(input.resumePrimary !== undefined
           ? { resumePrimary: input.resumePrimary, ...(input.resumeBaseline ? { resumeBaseline: input.resumeBaseline } : {}) }
           : {}),
         ...(input.signal ? { signal: input.signal } : {}),
+        ...(missingTests ? { noTests: missingTests } : {}),
       });
   } catch (error) {
     // 1차 줄을 pending 으로 버려두지 않는다 — 실행을 시작했고 끝나지 못했다.
@@ -125,7 +132,7 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
   const evidence: Evidence[] = [...duo.evidence, ...input.verify.filter((v) => v.trim()).map((v) => runCommand(v, input.cwd))];
   if (evidence.length > 0) evidence.push(changedFiles(input.cwd));
   if (testsBefore) evidence.push(testChanges(testsBefore, testGlobs, input.cwd));
-  const report = collect(plan.assignment, evidence);
+  const report = collect(plan.assignment, evidence, missingTests ? [noTestsEvidenceNote(missingTests)] : []);
 
   journal.append({
     index: journal.records.length + 1,
@@ -150,7 +157,7 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
     outcome,
     report,
     verdict: duo.verdict,
-    ...(duo.reviews.length > 0 ? { review: reviewText(duo.reviews) } : {}),
+    ...(duo.reviews.length > 0 ? { review: reviewText(duo.reviews), reviews: duo.reviews } : {}),
     decisionId: decision.id,
     ...(run.compactions ? { compactions: run.compactions } : {}),
     // 성공한 primary 만 이을 수 있다 — 실패한 세션을 다음에 이으면 실패를 물려받는다.

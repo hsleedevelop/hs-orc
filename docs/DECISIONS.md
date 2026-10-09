@@ -3895,6 +3895,41 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 **상태** 구현됨 — 같은 PR. 머지로 확정한다(전하 직접 머지).
 
+
+---
+
+## D-093 — 테스트 없는 프로젝트는 그 사실로 FAIL 하지 않고, 요약은 FAIL 사유를 전하며, hs-orc 의 검증 선언은 hs-orc 저장소에서만 쓴다 (전하 결정 2026-10-09)
+
+**배경** 2026-10-09 실사용(`hs-orc-test`, Next.js · 테스트 없음 · `package.json` 에 `test` 없음, 세션 `1009-2302-6c1` 턴 2). "문구 아래 오늘 날짜 출력" 을 Jev 가 R01 로 분류했고 Luna 가 구현해 화면에서 동작했다(전하 확인). Haiku reviewer 는 FAIL 을 냈고 주된 사유는 R01 운영 기준 "기존 test만 실행" · `evidence.ts` R01 `기존 test 실행 결과 + exit code` 였다 — 이 프로젝트에서는 처음부터 충족할 수 없다. reviewer 는 읽기 전용이라 lint 도 재현하지 못했다. 이어 지휘자 요약이 "전달된 결과에는 FAIL 사유가 나와 있지 않습니다" 라고 말했다. 뒤의 R02 수동 지정 FAIL 은 행 선택 문제라 범위 밖이다. 전하가 세 가지 수정을 모두 승인했다.
+
+**확인한 사실**
+- 요약: `buildSummaryPrompt` 는 판정 한 단어·증거 요약·primary 출력만 싣고 reviewer 글(`Delegated.review`)을 싣지 않았다.
+- `data/verify.json` 은 **다른 프로젝트 위임에도 적용됐다.** 읽는 경로가 `import.meta.dirname` 기준 hs-orc 저장소의 파일로 고정이었다. (a) 세션·GUI·chat 경로(`core/delegate.ts`)는 `declaredTests()` 로 hs-orc 의 `tests` glob(`src/**/__tests__/**/*.ts`)을 대상 폴더에 대고 스냅숏을 떴다. 이번 기록에서는 0개가 잡혀 빈 `test-files` 증거로 끝났다(무해). 같은 모양의 폴더를 가진 프로젝트라면 hs-orc 의 약화 게이트가 남의 테스트에 걸린다. 이 경로는 `defaultVerify` 를 부르지 않는다 — 명령은 `options.verify` 로만 들어온다. (b) CLI `hs-orc run`(once·loop)은 `defaultVerify` 와 `declaredTests` 를 둘 다 `process.cwd()` 에 댔다 — 다른 폴더에서 R01·R06 이면 `npm test`, R04 면 `npm run gate` 를 돌린다. test 스크립트가 없는 프로젝트에서는 exit ≠ 0 → `rework` 다.
+
+**결정**
+1. **요약에 reviewer 사유를 싣는다.** 판정이 `pass` 가 아니고 reviewer 글이 있으면 앞 1,500자(`SUMMARY_REVIEW_CHARS`)를 `[reviewer 검증 글 앞부분]` 으로 싣고 "핵심 사유를 한두 개 전한다" 를 지시에 더한다. reviewer 형식이 사유 먼저 · 판정 마지막 줄이라 앞부분이 사유다. `pass` 는 싣지 않는다 — 요약이 달라질 것이 없고 비용만 는다. reviewer 가 둘이면(D-072) PASS 하지 않은 쪽 글만 싣고 1,500자를 그들끼리 나눈다 — 이어 붙인 글의 앞부분만 자르면 첫 PASS 글이 길 때 둘째의 FAIL 사유가 빠진다(PR #133 리뷰). 이를 위해 `Delegated.reviews`(reviewer 별 판정·글)를 넘긴다 — 기록에는 싣지 않는다.
+2. **기존 테스트가 없는 프로젝트 — 결정론 감지.** `noTests(cwd)`(`core/evidence-gather.ts`)는 `package.json` 이 있고, `scripts.test` 가 없거나 `npm init` 자리표시(`no test specified`)이고, 테스트 흔적(`**/*.test.*` · `**/*.spec.*` · `**/*_test.*` · `**/test_*.*` · Node test runner 기본 이름 `**/test.*` · `**/*-test.*` · `**/test-*.*` · `**/__tests__` · `**/test` · `**/tests` · `{jest,vitest,playwright,cypress}.config.*`, `node_modules`·`.git`·`.next` 제외)이 0개일 때만 근거 한 줄을 돌려준다. 그 밖(흔적이 하나라도 있음 · `package.json` 없음 · 읽기 실패)은 `null` 이다. **리뷰어 프롬프트만으로 처리하지 않은 이유**: 테스트가 있는데 모델이 "없다" 고 읽으면 안 돌린 위임이 통과한다. 감지가 틀리는 쪽은 "있는데 없다" 가 아니라 "없는데 있다"(엄격) 쪽으로만 둔다.
+3. **적용 행은 R01·R06**(`EXISTING_TEST_ROWS`) — 운영 기준이 기존 테스트를 전제하는 행이다. 작업 **전에** 감지하고, 확인되면 세 곳에 싣는다: primary 프롬프트 끝 `[Core 확인]`(테스트가 없다는 사실을 밝히고 대신 돌린 검증의 명령과 결과를 적어라) · reviewer 프롬프트 `--- Core 확인 사실 ---`(밝히고 대체 검증을 보고했으면 test 미실행을 이유로 FAIL 하지 마라. 밝히지 않았거나 대체 검증이 없으면 누락이다. 다른 기준은 그대로) · 증거 요약 끝 `대상에 기존 테스트 없음 — …`(결과 카드 `evidence`·결정 로그 2차·요약 프롬프트가 모두 이 문장을 받는다). primary 에도 싣는 이유: 이번 reviewer 지적에 "'없음' 이라는 사실도 보고하지 않았습니다" 가 있었다 — reviewer 만 바꾸면 같은 FAIL 이 반복된다.
+4. **판정 규칙은 바꾸지 않는다.** `REQUIREMENTS`·매트릭스 운영 기준·판정 순서는 그대로다. primary 의 대체 검증 보고는 산문이라 증거가 아니다 — reviewer 가 PASS 해도 다른 증거가 없으면 `unverified` 다(테스트가 있는 프로젝트의 세션 위임도 선언 명령이 없으면 같은 `unverified` 다). 테스트가 있으면 아무것도 싣지 않으므로 안 돌린 위임은 이전처럼 FAIL → `rework` 다.
+5. **검증 선언은 대상 폴더의 것이다.** `verifyConfigPath(dir)`(`core/project-state.ts`): `HS_ORC_VERIFY_CONFIG`(명시) → 상태 폴더 `~/.hs-orc/projects/<키>/verify.json`(D-071 — 작업 폴더에 만들지 않는다) → 대상의 실제 경로가 hs-orc 저장소 뿌리면 `data/verify.json` → 그 밖은 상태 폴더 경로(대개 없음 → 빈 선언). `declaredTests`·`defaultVerify` 는 읽을 파일을 인자로 받는다(`data` 층은 `core` 를 들이지 않는다). 세션은 `input.cwd`, CLI 는 `process.cwd()` 로 부른다. CLI 안내 문구는 읽은 파일 경로를 찍는다.
+
+**비용 (결정 1)** PASS 가 아닌 위임의 요약 1회에만 입력이 는다 — 최대 1,500자, 한국어·마크다운 섞인 글로 약 1,000~1,500 입력 토큰(추정, 토크나이저 실측 아님). 이번 기록의 요약 1회 실측은 $0.026·$0.018 이었다. Opus 입력 단가를 $5/MTok 로 놓으면(`pricing.json` 에 claude 단가가 없어 미검증 가정) 1회 최대 약 $0.0075, 기록 기준 +30~40% 다. 구독 과금(이번 기록의 `plan: subscription`)에서는 금액이 아니라 세션 토큰 상한에 든다. PASS 요약은 그대로다.
+
+**버린 것** 리뷰어 프롬프트에만 "테스트가 없으면 대체 검증으로 갈음" 을 넣기 — 모델이 테스트 유무를 판정하게 된다. 테스트가 없으면 R01 요구 증거를 충족으로 치기 — 산문을 증거로 받는 길이고, 테스트가 있는 프로젝트(선언 없으면 `unverified`)보다 없는 프로젝트가 더 쉽게 `ok` 가 된다. 작업 폴더 안 `verify.json` — D-071 이 작업 폴더에 아무것도 만들지 않기로 했다. R04 "회귀 suite" 를 함께 면제 — 전하가 R01·R06 을 지정했고 다른 행 기준은 바꾸지 않는다(후속 과제).
+
+**검증**
+- `npm run gate` 통과 — 테스트 805 → 821 (`conductor.test.ts` 2 · `session.test.ts` 1 · `delegate.test.ts` 13). 수정 전에 실패함을 하나씩 되돌려 확인했다: 요약에 reviewer 글을 싣지 않으면 conductor·session 2개, 두 reviewer 글을 앞에서만 자르면 conductor 1개, `noTests` 가 늘 `null` 이면 감지 2개, `verifyConfigPath` 가 옛 경로(저장소 파일 고정)면 선언 범위 2개가 실패한다. "test 스크립트가 있다 · 테스트 파일이 있다 · `_test` 이름의 파일이 있다 · `test.js`·`date-test.js`·`test-date.js` 가 있다 · package.json 이 없다" 일곱 경우는 면제가 오지 않고 reviewer FAIL 이 그대로 `rework` 임을 고정한다(수정 전후 모두 통과하는 잠금이다).
+- 엔진 과금 호출 0 — 요약·위임은 가짜 실행기로만 확인했다.
+
+**미검증·위험**
+- 실제 모델이 새 문구를 따르는지는 실측하지 않았다 — Haiku 가 Core 확인 사실을 무시하고 다시 FAIL 할 수 있다. 그때는 문구가 아니라 행 배정(R01 reviewer)·D-040(Core 가 lint 등을 돌린다) 쪽 문제다.
+- `package.json` 이 없는 프로젝트(Swift·Python·Go…)는 감지하지 않는다 — 이전과 같다.
+- hs-orc 저장소 판정은 실행 중인 코드의 뿌리와 대상 폴더의 실제 경로가 같을 때다. 메인 체크아웃의 hs-orc 로 hs-orc 의 다른 워크트리를 대상으로 돌리면 자기 선언이 쓰이지 않는다(빈 선언 → `unverified` 쪽, 안전한 방향).
+- 상태 폴더 `verify.json` 을 만드는 화면·명령은 없다 — 손으로 적는다.
+
+**영향** `core/conductor.ts`(`buildSummaryPrompt`·`SUMMARY_REVIEW_CHARS`) · `core/evidence-gather.ts`(`noTests`) · `core/evidence.ts`(`EXISTING_TEST_ROWS`·`EvidenceReport.notes`·`collect` 3번째 인자) · `core/duo.ts`(`reviewPrompt` 5번째 인자·`DuoOptions.noTests`·`primaryNoTestsNote`·`noTestsEvidenceNote`) · `core/delegate.ts` · `core/project-state.ts`(`verifyConfigPath`) · `data/verify.ts`(파일 인자·`REPO_ROOT`·`REPO_VERIFY_PATH`) · `shell/cli.ts`(once·loop) · `data/verify.json` `$declared` · SPEC §5·§6.4.4 · README.
+
+**상태** 구현됨 — 같은 PR. 머지로 확정한다(전하 직접 머지).
 ---
 
 ## 미해결 목록

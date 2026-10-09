@@ -197,6 +197,20 @@ describe('대화 세션 — 승인·결과 처리 (SPEC §6.4.4)', () => {
     assert.match(readDecisions(log)[0]?.note ?? '', /session 0923-1200-aaa · 승인 user$/);
   });
 
+  it('reviewer 가 FAIL 하면 요약 프롬프트에 그 사유가 실린다 — 요약이 "사유가 없다" 고 말하지 않게 (D-093)', async () => {
+    isolate();
+    const c = conductSpy();
+    const failing: SlotExecutor = (slot) =>
+      Promise.resolve(reply(slot.role === 'reviewer' ? '→ 운영 기준의 test 실행 증거가 없다.\nFAIL' : 'ran'));
+    const { session } = make(c.exec, undefined, failing);
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    const summary = c.prompts.find((p) => p.startsWith('아래 위임 결과')) ?? '';
+    assert.match(summary, /\[reviewer 판정\] fail/);
+    assert.match(summary, /운영 기준의 test 실행 증거가 없다/);
+    assert.match(summary, /핵심 사유/);
+  });
+
   it('증거가 없으면 요약 옆에 사다리 첫 단계를 제안한다', async () => {
     isolate();
     const { session } = make(conductSpy().exec);

@@ -41,6 +41,42 @@ export function uncommittedFiles(cwd: string): string[] | null {
   return (r.stdout ?? '').split('\n').map((l) => l.slice(3).trim()).filter(Boolean);
 }
 
+/** 테스트가 있다는 흔적 (D-093). 넓게 잡는다 — 하나라도 걸리면 "테스트 없음" 이라고 말하지 않는다. */
+const TEST_TRACES = [
+  '**/*.test.*',
+  '**/*.spec.*',
+  '**/*_test.*',
+  '**/test_*.*',
+  // Node test runner 기본 탐색 이름 — npm script 없이 `node --test` 로 돈다.
+  '**/test.*',
+  '**/*-test.*',
+  '**/test-*.*',
+  '**/__tests__',
+  '**/test',
+  '**/tests',
+  '**/{jest,vitest,playwright,cypress}.config.*',
+];
+
+/**
+ * 대상 폴더에 기존 테스트가 **없다고 결정론으로 말할 수 있는가** (D-093). 말할 수 있으면 근거 한 줄, 아니면 `null`.
+ * 안전 쪽이다: `package.json` 이 있고, `scripts.test` 가 없거나 `npm init` 의 자리표시(`no test specified`)이고,
+ * 테스트 흔적이 하나도 없을 때만이다. `package.json` 이 없는 폴더(Swift·Python…)는 판정하지 않는다 —
+ * 테스트가 있는데 "없음" 으로 읽으면 안 돌린 위임이 통과한다.
+ */
+export function noTests(cwd: string): string | null {
+  let scripts: unknown;
+  try {
+    scripts = (JSON.parse(readFileSync(path.join(cwd, 'package.json'), 'utf8')) as { scripts?: unknown }).scripts;
+  } catch {
+    return null;
+  }
+  const test = scripts !== null && typeof scripts === 'object' ? (scripts as Record<string, unknown>)['test'] : undefined;
+  if (test !== undefined && !(typeof test === 'string' && /no test specified/.test(test))) return null;
+  const traces = globSync(TEST_TRACES, { cwd, exclude: (p) => /(^|\/)(node_modules|\.git|\.next)$/.test(p) });
+  if (traces.length > 0) return null;
+  return `package.json 에 test 스크립트가 없고${test === undefined ? '' : '(npm init 자리표시뿐)'} 테스트 파일·설정이 없다`;
+}
+
 /** 선언된 테스트 파일의 작업 전 내용 (D-047). 키는 cwd 기준 상대 경로다. */
 export type TestSnapshot = ReadonlyMap<string, string>;
 

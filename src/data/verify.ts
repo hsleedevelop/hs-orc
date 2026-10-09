@@ -4,6 +4,9 @@
  * **추론하지 않는다.** 업무 유형만 보고 `npm test` 를 넣는 순간 그 프로젝트에서 틀리고,
  * 틀린 검증으로 닫은 완료는 "증거로 닫았다"는 거짓말이 된다.
  * 대신 프로젝트가 `data/verify.json` 에 **선언**하고, 제품은 그것을 그대로 읽는다.
+ *
+ * **선언은 대상 폴더의 것이다** (D-093). 어느 파일을 읽을지는 `core/project-state.ts` 의 `verifyConfigPath` 가 정한다 —
+ * 이 저장소의 `data/verify.json` 은 hs-orc 자기 선언이라 대상이 hs-orc 저장소일 때만 읽힌다.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -13,8 +16,9 @@ export interface VerifyCommand {
   readonly phase?: string;
 }
 
-const VERIFY_PATH = (env: NodeJS.ProcessEnv = process.env): string =>
-  env['HS_ORC_VERIFY_CONFIG'] ?? path.resolve(import.meta.dirname, '..', '..', 'data', 'verify.json');
+/** hs-orc 저장소 뿌리와 그 자기 선언. 다른 폴더의 위임에는 쓰지 않는다 (D-093). */
+export const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..');
+export const REPO_VERIFY_PATH = path.join(REPO_ROOT, 'data', 'verify.json');
 
 /** `phase:명령` 이면 단계를 떼어낸다. 콜론이 명령의 일부일 수 있으므로 앞머리만 본다. */
 export function parseVerify(entry: string): VerifyCommand {
@@ -28,9 +32,9 @@ export function parseVerify(entry: string): VerifyCommand {
  * 기존 테스트로 지킬 경로(glob) — `verify.json` 의 `tests` (D-047). 선언이 없으면 빈 배열이고 게이트도 없다 —
  * 테스트가 어디 있는지 제품은 추측하지 않는다.
  */
-export function declaredTests(env: NodeJS.ProcessEnv = process.env): string[] {
+export function declaredTests(file: string): string[] {
   try {
-    const parsed = JSON.parse(readFileSync(VERIFY_PATH(env), 'utf8')) as Record<string, unknown>;
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
     const tests = parsed['tests'];
     return Array.isArray(tests) ? tests.filter((t): t is string => typeof t === 'string' && t.trim() !== '') : [];
   } catch {
@@ -39,10 +43,10 @@ export function declaredTests(env: NodeJS.ProcessEnv = process.env): string[] {
 }
 
 /** 선언이 없으면 **빈 배열**이다 — "기본값이 있겠지"로 채우지 않는다. */
-export function defaultVerify(rowId: string, env: NodeJS.ProcessEnv = process.env): VerifyCommand[] {
+export function defaultVerify(rowId: string, file: string): VerifyCommand[] {
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(readFileSync(VERIFY_PATH(env), 'utf8')) as Record<string, unknown>;
+    parsed = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
   } catch {
     return []; // 설정 파일이 없는 것은 정상이다.
   }
