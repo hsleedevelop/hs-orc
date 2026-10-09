@@ -14,10 +14,15 @@ import { readSessionLog, type SessionSummary, type TranscriptRecord } from '../c
 import { busyMessage, claimSession, foreignHold, lockPath, releaseSession, syncHold } from '../core/session-lock.ts';
 import { endedMessage, sessionEnded } from '../core/session-meta.ts';
 import { ambiguous, matchSessions } from './session-registry.ts';
-import { compactLines, cutLine, lastEvent, ladderLines, retryLines, roleLabel } from './transcript-lines.ts';
+import { askedNote, cardAsked, compactLines, cutLine, lastEvent, ladderLines, retryLines, roleLabel } from './transcript-lines.ts';
 import { commandLine } from '../core/scaffold.ts';
 
-export function renderRecord(r: TranscriptRecord): string[] {
+/** 기록 여러 건 → 줄. `from` 앞 기록은 그리지 않고 승인 줄이 빌릴 앞 카드를 찾는 데만 쓴다 — 꼬리만 그려도 카드가 잘리지 않는다. */
+export const renderRecords = (records: readonly TranscriptRecord[], from = 0): string[] =>
+  records.flatMap((r, i) => (i < from ? [] : renderRecord(r, cardAsked(records, i))));
+
+/** `card` 는 승인 줄이 묻는 이유 문구를 빌릴 바로 앞 카드의 `asked` 다 (승인 기록에는 코드만 있다). */
+export function renderRecord(r: TranscriptRecord, card?: ReturnType<typeof cardAsked>): string[] {
   switch (r.kind) {
     case 'user':
       return [`나     ${r.text}`];
@@ -62,7 +67,7 @@ export function renderRecord(r: TranscriptRecord): string[] {
     case 'approval':
       if (r.approved && r.asked?.includes('H7')) return ['승인   스캐폴딩 실행 — 사람이 확인했다'];
       if (r.approved && r.by === 'auto') return [`승인   자동 승인 · ${r.mode ?? ''} · 묻는 조건 없음 — 읽기 전용`];
-      return [r.approved ? `승인   ${r.write ? '쓰기 켬 — primary 가 파일을 고칠 수 있다' : '읽기 전용'}` : '거절'];
+      return [r.approved ? [`승인   ${r.write ? '쓰기 켬 — primary 가 파일을 고칠 수 있다' : '읽기 전용'}`, askedNote(r, card)].filter(Boolean).join(' · ') : '거절'];
     case 'mode':
       return [`방식   승인 방식 → ${r.mode}`];
     case 'orchestrator':
@@ -162,7 +167,12 @@ export async function runChat(
   options: { readonly verify: readonly string[] },
 ): Promise<void> {
   const say = (line: string): void => void io.output.write(`${line}\n`);
-  const show = (records: readonly TranscriptRecord[]): void => records.flatMap(renderRecord).forEach(say);
+  // 승인은 앞서 그린 카드와 다른 묶음으로 온다 — 마지막 카드를 들고 있다가 승인 줄이 묻는 이유를 빌리게 한다.
+  let card: TranscriptRecord | undefined;
+  const show = (records: readonly TranscriptRecord[]): void => {
+    renderRecords(card ? [card, ...records] : records, card ? 1 : 0).forEach(say);
+    card = records.findLast((r) => r.kind === 'plan' || r.kind === 'steps') ?? card;
+  };
   const rl = createInterface({ input: io.input, output: io.output, terminal: false });
   // 입력이 끝나면(Ctrl-D·파이프 끝) readline 은 닫히지만 이미 받은 줄은 계속 나온다 —
   // 닫힌 뒤 prompt() 는 던지므로 묻지 않는다.
@@ -365,7 +375,7 @@ export function openingLines(session: ConversationSession, budget: Budget, tail 
     `누적   ${budget.summary()}`,
     ...(broken > 0 ? [`경고   기록에 깨진 줄 ${broken}개 — 건너뛰고 보여준다`] : []),
     ...(records.length > tail ? [`       (앞 기록 ${records.length - tail}개 생략)`] : []),
-    ...records.slice(-tail).flatMap(renderRecord),
+    ...renderRecords(records, records.length - tail),
     ...(session.interrupted ? ['끊김   지난 위임은 승인 뒤 결과가 기록되지 않았다 — 다시 보내면 새로 띄운다.'] : []),
     // Core 는 승인 안 된 배정을 되살리지 않는다 (session.ts 생성자) — 사용자에게 그 사실과 길을 알린다.
     ...(last?.kind === 'plan' ? [`안내   승인 안 된 배정은 되살리지 않는다 — 다시 보내거나 /task ${last.taskId}.`] : []),

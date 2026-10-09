@@ -16,7 +16,29 @@ export const ladderLines = (ladder: Ladder | undefined): string[] =>
 export const retryLines = (retry: boolean | undefined): string[] =>
   retry ? ['재시도 — 승인한 같은 배정이 예외로 끝나 같은 계획으로 다시 세운 카드다 (한 번뿐 — 또 예외면 다시 세우지 않는다)'] : [];
 
-export const cutLine = (cut: Cut | undefined): string[] => (cut ? [`맥락   앞 대화 ${cut.turns}턴·${cut.chars}자를 싣지 못했다`] : []);
+interface Asked { readonly code: string; readonly text: string }
+interface Approval { readonly approved: boolean; readonly mode?: string; readonly asked?: readonly string[] }
+
+/**
+ * 승인한 카드가 왜 물었는지 (D-064·D-086) — 카드의 "묻는 이유" 는 살아 있을 때만 보여, 승인 뒤에는 auto 인데 왜 물었는지가 사라진다.
+ * 승인 기록에는 코드만 있다 — 문구는 바로 앞 카드(배정·단계)의 `asked` 에서 코드로 찾고, 못 찾으면 코드만 쓴다.
+ * 첫 문장만 싣는다 — 뒤 문장("…확인하고 승인하라")은 승인 뒤에 할 일이 아니다. manual 은 늘 묻으므로 싣지 않는다.
+ */
+export function askedNote(approval: Approval, card: readonly Asked[] | undefined): string | null {
+  if (!approval.approved || !approval.mode || approval.mode === 'manual' || !approval.asked || approval.asked.length === 0) return null;
+  return `물은 이유 ${approval.asked.map((code) => {
+    const text = card?.find((a) => a.code === code)?.text.split('. ')[0];
+    return text ? `${code} ${text}` : code;
+  }).join(' · ')}`;
+}
+
+/** 승인 기록(`at`) 바로 앞 카드의 묻는 이유 — 설정 줄이 사이에 있어도 건너뛴다. 재시도 카드도 배정 카드다(D-081). */
+export const cardAsked = <T extends { readonly kind: string }>(records: readonly T[], at: number): readonly Asked[] | undefined => {
+  const card = records.slice(0, at).findLast((r) => !SETTING_KINDS.has(r.kind)) as { readonly kind: string; readonly asked?: readonly Asked[] } | undefined;
+  return card?.kind === 'plan' || card?.kind === 'steps' ? card.asked : undefined;
+};
+
+export const cutLine =(cut: Cut | undefined): string[] => (cut ? [`맥락   앞 대화 ${cut.turns}턴·${cut.chars}자를 싣지 못했다`] : []);
 
 export const compactLines = (compacted: readonly Compaction[] | undefined): string[] =>
   (compacted ?? []).map((c) => `압축   엔진이 앞 맥락을 요약으로 바꿨다 (${c.trigger}${c.preTokens !== undefined && c.postTokens !== undefined ? ` ${c.preTokens}→${c.postTokens} 토큰` : ''})`);
