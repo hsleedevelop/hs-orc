@@ -5,7 +5,7 @@ import { readSessionLog } from '../core/transcript.ts';
 import { interruptGuard } from './chat.ts';
 import { defaultJev } from './jev.ts';
 import { knownSessions, resolveSession } from './session-registry.ts';
-import { SESSION_USAGE, listLines, nameSession, parseSessionArgs, sendToSession, showLines } from './session-cmd.ts';
+import { SESSION_USAGE, listLines, nameSession, newSession, parseSessionArgs, sendToSession, showLines } from './session-cmd.ts';
 
 const out = (lines: readonly string[]): void => void process.stdout.write(`${lines.join('\n')}\n`);
 
@@ -31,6 +31,9 @@ async function main(): Promise<void> {
     }
     case 'name':
       out([nameSession(cwd, args.ref, args.name).line]);
+      return;
+    case 'new':
+      out(newSession(cwd, args.role, args.name).lines);
       return;
     case 'send': {
       const classifier = defaultJev();

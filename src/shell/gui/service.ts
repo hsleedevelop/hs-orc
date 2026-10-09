@@ -24,7 +24,9 @@ import {
   prepareSession,
   readSessionLog,
   scratchRoot,
+  sessionRole,
   type SessionKind,
+  type SessionRole,
   type SessionState,
   type SessionSummary,
   type TranscriptRecord,
@@ -52,7 +54,7 @@ import { isTerminalId, openTerminal, terminalCommand, type TerminalId } from './
 import { assembleSession, restoreBudget } from '../conversation.ts';
 import { busyMessage, claimSession, foreignHold, lockPath, releaseSession, syncHold, type SessionHold } from '../../core/session-lock.ts';
 import { assertNotEnded, readSessionMeta, setArchived, setEnded } from '../../core/session-meta.ts';
-import { assertNameFree } from '../session-registry.ts';
+import { assertNameFree, assertOrchestratorFree } from '../session-registry.ts';
 
 export { skipGitCheck } from '../conversation.ts';
 
@@ -147,6 +149,8 @@ export interface SessionView {
   readonly ended: boolean;
   /** 보관했다 (D-089). 사이드바 기본 목록에서 숨는다 — 대화는 그대로 된다. */
   readonly archived: boolean;
+  /** 역할 (D-090). 기록이 없으면 `worker`. 세션 머리의 칩·지정 버튼이 이것을 본다 — 메시지 경로와는 무관하다. */
+  readonly role: SessionRole;
 }
 
 /** 사이드바·세션 머리가 종료·보관할 세션을 가리키는 값 (D-089). 목록 한 줄의 그것이다. */
@@ -453,6 +457,7 @@ export class GuiService {
         const meta = readSessionMeta(s.dir, s.id);
         return { ended: meta.endedAt !== undefined, archived: meta.archivedAt !== undefined };
       })(),
+      role: s.role,
     };
   }
 
@@ -535,6 +540,17 @@ export class GuiService {
     const s = this.requireConversation();
     assertNameFree(this.workdir, name.trim(), s);
     this.recording((t) => t.rename(name));
+    return this.conversation();
+  }
+
+  /**
+   * 역할을 바꾼다 (D-090) — 오케스트레이터로 지정하거나 워커로 되돌린다. 표시뿐이라 엔진·메시지 경로는 그대로다.
+   * 같은 폴더에 다른 오케스트레이터가 있으면 던진다 — 이름 겹침(`converseRename`)과 같은 자리에서 본다. 스크래치는 Core 가 막는다.
+   */
+  converseRole(role: SessionRole): SessionView {
+    const s = this.requireConversation();
+    if (role === 'orchestrator' && s.kind === 'project') assertOrchestratorFree(s);
+    this.recording((t) => t.setRole(role));
     return this.conversation();
   }
 
@@ -639,7 +655,9 @@ export class GuiService {
 
   /** 종료를 푼다 (D-089). 표식만 지운다 — 기록은 종료 전 그대로라 이어 쓸 수 있다. */
   reopenSession(ref: SessionRef): SessionView | null {
-    const { dir, id } = this.target(ref);
+    const { dir, id, kind } = this.target(ref);
+    // 종료한 오케스트레이터는 0~1 에 세지 않는다 (D-090) — 그 사이 새 오케스트레이터가 섰으면 다시 열어 둘이 되지 않게 막는다.
+    if (kind === 'project' && sessionRole(readSessionLog(dir, id).records) === 'orchestrator') assertOrchestratorFree({ dir, id });
     setEnded(dir, id, false);
     return this.openView(dir, id);
   }

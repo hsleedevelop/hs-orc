@@ -835,3 +835,70 @@ describe('GUI — 세션 종료·보관 (D-089)', () => {
     assert.throws(() => service.archiveSession({ ...ref, id: '../x' }, true), /id 모양이 아니다/);
   });
 });
+
+describe('GUI — 세션 역할 (D-090)', () => {
+  const project = () => {
+    isolated();
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-gui-role-'));
+    return { dir, service: new GuiService(fake, 20, dir) };
+  };
+
+  it('새 세션은 워커다 — 오케스트레이터로 지정하면 뷰·목록에 실리고, 해제하면 워커로 돌아온다. 엔진은 돌지 않는다', () => {
+    const { service } = project();
+    const before = calls.length;
+    const view = service.startConversation('project');
+    assert.equal(view.role, 'worker');
+    assert.equal(service.converseRole('orchestrator').role, 'orchestrator');
+    const row = () => service.conversations().projects[0]?.sessions.find((s) => s.id === view.id);
+    assert.equal(row()?.role, 'orchestrator', '첫 메시지 전이어도 role 줄로 목록에 잡힌다');
+    assert.equal(service.converseRole('worker').role, 'worker');
+    assert.equal(row()?.role, 'worker');
+    assert.equal(calls.length, before);
+    assert.equal(existsSync(lockPath(view.dir, view.id)), false, '쓰고 나면 놓는다');
+  });
+
+  it('같은 폴더의 두 번째 지정은 거절한다 · 스크래치는 지정하지 않는다', () => {
+    const { service } = project();
+    service.startConversation('project');
+    service.converseRole('orchestrator');
+    const second = service.startConversation('project');
+    assert.throws(() => service.converseRole('orchestrator'), /오케스트레이터는 프로젝트당 하나다/);
+    assert.equal(service.conversation().role, 'worker');
+    assert.equal(readSessionLogKinds(second.dir, second.id).length, 0, '거절은 아무것도 쓰지 않는다');
+    service.startConversation('scratch');
+    assert.throws(() => service.converseRole('orchestrator'), /스크래치 세션은 오케스트레이터로/);
+  });
+
+  it('카드가 선 채 지정해도 카드는 살아 있고 승인 대기 점유로 돌아간다', async () => {
+    const { service } = project();
+    const view = service.startConversation('project');
+    service.converseMode('manual');
+    await service.converse('이 타입 에러 고쳐줘');
+    const after = service.converseRole('orchestrator');
+    assert.equal(after.state, 'blocked');
+    assert.equal(after.records.at(-1)?.kind, 'role');
+    assert.equal((JSON.parse(readFileSync(lockPath(view.dir, view.id), 'utf8')) as { state: string }).state, 'blocked');
+    assert.equal(service.conversations().projects[0]?.sessions.find((s) => s.id === view.id)?.status?.state, 'blocked');
+  });
+
+  it('종료한 오케스트레이터는 세지 않아 새로 지정할 수 있고, 그 뒤 옛 오케스트레이터를 다시 열면 거절한다', async () => {
+    const { service } = project();
+    const old = service.startConversation('project');
+    service.converseRole('orchestrator');
+    const ref = { kind: old.kind, dir: old.dir, id: old.id };
+    await service.endSession(ref);
+    service.startConversation('project');
+    assert.equal(service.converseRole('orchestrator').role, 'orchestrator');
+    assert.throws(() => service.reopenSession(ref), /오케스트레이터는 프로젝트당 하나다/);
+    service.converseRole('worker');
+    assert.doesNotThrow(() => service.reopenSession(ref));
+  });
+});
+
+function readSessionLogKinds(dir: string, id: string): string[] {
+  try {
+    return readFileSync(transcriptPath(dir, id), 'utf8').split('\n').filter(Boolean).map((l) => (JSON.parse(l) as { kind: string }).kind);
+  } catch {
+    return [];
+  }
+}

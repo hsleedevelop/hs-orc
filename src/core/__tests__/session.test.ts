@@ -3,7 +3,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadMatrix } from '../../data/matrix.ts';
@@ -1188,3 +1188,99 @@ describe('지휘자 선택·단계 계획 (D-087)', () => {
     assert.deepEqual(readDecisions(log).map((r) => r.status), ['decided', 'declined', 'decided', 'declined']);
   });
 });
+
+describe('세션 역할 (D-090)', () => {
+  const at = '2026-10-09T00:00:00Z';
+  const open = (dir: string, approvalMode: 'auto' | 'manual' = 'manual', kind: 'project' | 'scratch' = 'project') =>
+    new ConversationSession({ approvalMode, matrix, catalog, kind, dir, id: '0923-1200-aaa', budget: new Budget(20, 0), journal: new Journal(), conduct: conductSpy().exec, executorFor: () => delegateSpy().exec });
+
+  it('기록이 없는 세션은 워커다 — 지정은 기록에 남고 마지막 것이 이기며, 다시 열어도 그대로다', () => {
+    isolate();
+    const { session, dir } = make(conductSpy().exec);
+    assert.equal(session.role, 'worker');
+    assert.deepEqual(session.setRole('orchestrator').map((r) => r.kind), ['role']);
+    assert.deepEqual(session.setRole('orchestrator'), [], '같은 역할은 다시 기록하지 않는다');
+    assert.equal(open(dir).role, 'orchestrator');
+    session.setRole('worker');
+    assert.equal(open(dir).role, 'worker');
+    assert.throws(() => session.setRole('boss' as 'worker'), /모르는 역할/);
+  });
+
+  it('옛 세션(role 줄 없음)은 워커로 읽는다', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-'));
+    appendRecord(transcriptPath(dir, '0923-1200-aaa'), { v: 1, at, turn: 1, kind: 'user', text: '넌 누구니' });
+    assert.equal(open(dir).role, 'worker');
+  });
+
+  it('스크래치 세션은 오케스트레이터로 지정하지 않는다 — 프로젝트가 없다', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-'));
+    assert.throws(() => open(dir, 'manual', 'scratch').setRole('orchestrator'), /스크래치 세션은 오케스트레이터로/);
+    assert.equal(readSessionLogLength(dir), 0);
+  });
+
+  it('역할·이름 줄만 있는 세션(`session new`)은 새 세션으로 연다 — 기본 방식과 기본 지휘자, 옛 세션(manual · Haiku)으로 오인하지 않는다', () => {
+    for (const lines of [[{ kind: 'role', role: 'orchestrator' }], [{ kind: 'name', name: 'web' }, { kind: 'role', role: 'worker' }], [{ kind: 'name', name: 'web' }]] as const) {
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-'));
+      for (const l of lines) appendRecord(transcriptPath(dir, '0923-1200-aaa'), { v: 1, at, turn: 0, ...l });
+      const session = open(dir, 'auto');
+      assert.equal(session.mode, 'auto', lines.map((l) => l.kind).join('+'));
+      assert.deepEqual(session.orchestrator, { model: 'opus', effort: 'high' }, lines.map((l) => l.kind).join('+'));
+    }
+  });
+
+  it('옛 기록(제안 직답 뒤 카드 없음)에서 역할을 바꾼 뒤 제안 행을 눌러도 지휘자 제안(H1)으로 선다 — role 줄은 lastEvent 가 건너뛴다', async () => {
+    isolate();
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-'));
+    const file = transcriptPath(dir, '0923-1200-aaa');
+    appendRecord(file, { v: 1, at, turn: 1, kind: 'user', text: '넌 누구니' });
+    appendRecord(file, { v: 1, at, turn: 1, kind: 'direct', text: '답', suggest: 'R01', cost: '$0', notes: [] });
+    const { session } = make(conductSpy().exec, dir);
+    session.setMode('auto');
+    session.setRole('orchestrator');
+    const [plan] = await session.planAs('R01');
+    assert.ok(plan?.kind === 'plan');
+    assert.match(plan.reason, /^지휘자 제안/);
+    assert.ok(plan.asked?.some((a) => a.code === 'H1'), '자동 승인으로 새지 않는다');
+    assert.equal(session.state, 'blocked');
+  });
+
+  it('제안 직답 뒤에 비용 줄이 붙은 옛 기록도 제안 행이 H1 로 선다 — spend 도 설정 줄로 건너뛴다 (목록 맞춤)', async () => {
+    isolate();
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-'));
+    const file = transcriptPath(dir, '0923-1200-aaa');
+    appendRecord(file, { v: 1, at, turn: 1, kind: 'user', text: '넌 누구니' });
+    appendRecord(file, { v: 1, at, turn: 1, kind: 'direct', text: '답', suggest: 'R01', cost: '$0.01', notes: [] });
+    appendRecord(file, { v: 1, at, turn: 1, kind: 'spend', tokens: 3000, unreported: 0, charges: [{ label: 'Haiku', usd: 0.01, source: 'actual', plan: 'subscription' }] });
+    const { session } = make(conductSpy().exec, dir);
+    session.setMode('auto');
+    const [plan] = await session.planAs('R01');
+    assert.ok(plan?.kind === 'plan');
+    assert.match(plan.reason, /^지휘자 제안/);
+    assert.equal(session.state, 'blocked', '수동 지정으로 서면 auto 에서 클릭 없이 시작한다');
+  });
+
+  it('카드가 선 채 역할을 바꿔도 카드는 그대로 승인할 수 있다 · role 줄은 Budget 재생에 영향이 없다', async () => {
+    isolate();
+    const { session, budget } = make(conductSpy().exec);
+    await session.send('이 타입 에러 고쳐줘');
+    assert.equal(session.state, 'blocked');
+    session.setRole('orchestrator');
+    assert.equal(session.state, 'blocked');
+    const out = await session.approve();
+    assert.ok(out.some((r) => r.kind === 'result'));
+    const withRole = new Budget(20, 2_000_000);
+    replaySpend(withRole, session.records());
+    const without = new Budget(20, 2_000_000);
+    replaySpend(without, session.records().filter((r) => r.kind !== 'role'));
+    assert.equal(withRole.summary(), without.summary());
+    assert.equal(withRole.summary(), budget.summary());
+  });
+});
+
+function readSessionLogLength(dir: string): number {
+  try {
+    return readFileSync(transcriptPath(dir, '0923-1200-aaa'), 'utf8').split('\n').filter(Boolean).length;
+  } catch {
+    return 0;
+  }
+}

@@ -7,19 +7,30 @@
  *   hs-orc session show <id|이름> [--tail N] [--json]
  *   hs-orc session send <id|이름> "<메시지>" [--write] [--run] [--verify "<명령>"]...
  *   hs-orc session name <id|이름> <새 이름>        빈 문자열("")이면 이름을 지운다
+ *   hs-orc session new [--role worker|orchestrator] [--name <이름>]   부른 폴더에 세션을 만든다 (D-090) — 엔진은 돌지 않는다
  */
 import type { RowClassifier } from '../adapters/jev.ts';
 import type { SlotExecutor } from '../core/executor.ts';
 import { Journal } from '../core/journal.ts';
-import { H6_BLOCKED, type ConversationSession } from '../core/session.ts';
+import { H6_BLOCKED, SESSION_NAME, type ConversationSession } from '../core/session.ts';
 import { uncommittedFiles } from '../core/evidence-gather.ts';
 import { claimSession, releaseSession } from '../core/session-lock.ts';
 import { assertNotEnded } from '../core/session-meta.ts';
-import { readSessionLog, recordedStatus, sessionStatus, type SessionSummary, type TranscriptRecord } from '../core/transcript.ts';
+import {
+  isSessionRole,
+  prepareSession,
+  readSessionLog,
+  recordedStatus,
+  sessionRole,
+  sessionStatus,
+  type SessionRole,
+  type SessionSummary,
+  type TranscriptRecord,
+} from '../core/transcript.ts';
 import { renderRecord } from './chat.ts';
 import { assembleSession, restoreBudget } from './conversation.ts';
-import { assertNameFree, resolveSession } from './session-registry.ts';
-import { statusLabel } from './transcript-lines.ts';
+import { assertNameFree, assertOrchestratorFree, resolveSession } from './session-registry.ts';
+import { roleLabel, statusLabel } from './transcript-lines.ts';
 
 export const SESSION_USAGE = [
   '사용법: hs-orc session <명령>',
@@ -28,6 +39,8 @@ export const SESSION_USAGE = [
   '  send <id|이름> "<메시지>" [--write] [--run] [--verify "<명령>"]...',
   '                                                      메시지 1건을 보내고 그 턴의 기록을 찍는다',
   '  name <id|이름> <새 이름>                            이름을 붙인다 ("" 은 지운다). 영문자로 시작, 영문·숫자·. _ -',
+  '  new [--role worker|orchestrator] [--name <이름>]    부른 폴더에 세션을 만들고 id 를 찍는다 (기본 worker). 엔진은 돌지 않는다',
+  '                                                      오케스트레이터는 폴더당 하나다 — 이미 있으면 거절한다 (D-090)',
   '',
   'send 는 --run 이 있어야 위임(읽기 위임·읽기 답 포함)을 시작한다 — 세션 방식이 auto·auto-ask 여도 같다(auto 는 GUI·chat 몫).',
   '--run 이 없으면 배정 카드는 거절로 남는다 — 제시만 했다. --run 이면 세션 방식대로 승인하고, 선 카드는 --run 이 승인한다.',
@@ -43,7 +56,8 @@ export type SessionCommand =
   | { readonly cmd: 'ls'; readonly json: boolean }
   | { readonly cmd: 'show'; readonly ref: string; readonly tail: number; readonly json: boolean }
   | { readonly cmd: 'send'; readonly ref: string; readonly message: string; readonly write: boolean; readonly run: boolean; readonly verify: readonly string[] }
-  | { readonly cmd: 'name'; readonly ref: string; readonly name: string };
+  | { readonly cmd: 'name'; readonly ref: string; readonly name: string }
+  | { readonly cmd: 'new'; readonly role: SessionRole; readonly name: string };
 
 export function parseSessionArgs(argv: readonly string[]): SessionCommand {
   const [cmd, ...rest] = argv;
@@ -53,6 +67,8 @@ export function parseSessionArgs(argv: readonly string[]): SessionCommand {
   let write = false;
   let run = false;
   let tail = 10;
+  let role: string | null = null;
+  let name: string | null = null;
   const verify: string[] = [];
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i] ?? '';
@@ -66,6 +82,8 @@ export function parseSessionArgs(argv: readonly string[]): SessionCommand {
     else if (arg === '--write') write = true;
     else if (arg === '--run') run = true;
     else if (arg === '--verify') verify.push(value());
+    else if (arg === '--role') role = value();
+    else if (arg === '--name') name = value();
     else if (arg === '--tail') {
       tail = Number(value());
       if (!Number.isInteger(tail) || tail < 0) throw new Error(`--tail 은 0 이상의 정수다.`);
@@ -74,7 +92,7 @@ export function parseSessionArgs(argv: readonly string[]): SessionCommand {
   }
   // 조용한 폴백 금지 — 명령에 안 맞는 옵션·인자가 무시되면 부른 쪽은 켠 줄 안다.
   const allow = (flags: Record<string, boolean>, count: number): void => {
-    const extra = Object.entries({ json, write, run, verify: verify.length > 0, tail: tail !== 10 }).find(([k, on]) => on && !flags[k]);
+    const extra = Object.entries({ json, write, run, verify: verify.length > 0, tail: tail !== 10, role: role !== null, name: name !== null }).find(([k, on]) => on && !flags[k]);
     if (extra) throw new Error(`${cmd} 에는 --${extra[0]} 를 쓰지 않는다.\n${SESSION_USAGE}`);
     if (positional.length !== count) throw new Error(`${cmd} 은 인자 ${count}개를 받는다 (받음 ${positional.length}개).\n${SESSION_USAGE}`);
   };
@@ -93,6 +111,12 @@ export function parseSessionArgs(argv: readonly string[]): SessionCommand {
     case 'name':
       allow({}, 2);
       return { cmd, ref: a, name: b };
+    case 'new': {
+      allow({ role: true, name: true }, 0);
+      const picked = role ?? 'worker';
+      if (!isSessionRole(picked)) throw new Error(`--role 은 worker · orchestrator 중 하나다 (받음 ${picked}).`);
+      return { cmd, role: picked, name: (name ?? '').trim() };
+    }
     default:
       throw new Error(`모르는 명령이다: ${cmd}\n${SESSION_USAGE}`);
   }
@@ -105,7 +129,7 @@ export function listLines(sessions: readonly SessionSummary[]): string[] {
   if (sessions.length === 0) return ['세션 없음'];
   const width = Math.max(4, ...sessions.map((s) => (s.name ?? '-').length));
   return sessions.map((s) =>
-    [s.id, (s.name ?? '-').padEnd(width), `${statusLabel(s.status)}${s.archived ? ' · 보관' : ''}`.padEnd(12), s.kind.padEnd(7), shortTime(s.lastAt), s.dir, s.preview].join('  '),
+    [s.id, (s.name ?? '-').padEnd(width), `${statusLabel(s.status)}${s.archived ? ' · 보관' : ''}`.padEnd(12), roleLabel(s.role).padEnd(7), s.kind.padEnd(7), shortTime(s.lastAt), s.dir, s.preview].join('  '),
   );
 }
 
@@ -117,6 +141,7 @@ export function showLines(target: SessionSummary, tail: number): string[] {
   return [
     `세션   ${target.kind} ${target.id}${target.name ? ` · 이름 ${target.name}` : ''} · ${target.dir}`,
     `상태   ${statusLabel(status)}${status.holder ? ` (${status.holder.by} · pid ${status.holder.pid})` : ''}`,
+    `역할   ${roleLabel(sessionRole(records))}`,
     `방식   승인 방식 ${mode?.kind === 'mode' ? mode.mode : '(아직 기록 없음)'}`,
     `누적   ${restoreBudget(target.dir, target.id).summary()}`,
     ...(broken > 0 ? [`경고   기록에 깨진 줄 ${broken}개 — 건너뛰고 보여준다`] : []),
@@ -236,4 +261,32 @@ export function nameSession(cwd: string, ref: string, name: string): { target: S
   } finally {
     releaseSession(target.dir, target.id);
   }
+}
+
+/**
+ * 부른 폴더에 project 세션을 만든다 (D-090) — `role` 줄(워커여도)을 남겨 기록 파일이 생기고 `ls`·사이드바·찾기에 잡힌다. 이름을 주면 이름 줄도 남긴다.
+ * 엔진·지휘자는 부르지 않고 방식·지휘자도 굳히지 않는다 — 첫 메시지(`send`)가 그때 기본값으로 굳힌다(새 세션으로 연다, session.ts 생성자).
+ * 검사(이름 모양·겹침 · 오케스트레이터 0~1)를 다 지난 뒤에만 쓴다 — 중간에 던져 반쯤 만든 세션을 남기지 않는다.
+ */
+export function newSession(cwd: string, role: SessionRole, name: string): { target: SessionSummary; lines: string[] } {
+  if (name && !SESSION_NAME.test(name)) throw new Error(`이름은 영문자로 시작하고 영문·숫자·. _ - 만 쓴다 (최대 32자): ${name}`);
+  const { dir, id } = prepareSession('project', cwd);
+  assertNameFree(cwd, name, { dir, id });
+  if (role === 'orchestrator') assertOrchestratorFree({ dir, id });
+  claimSession(dir, id, 'working', 'cli');
+  try {
+    const session = assembleSession({ kind: 'project', dir, id, budget: restoreBudget(dir, id), journal: new Journal() });
+    session.setRole(role);
+    if (name) session.rename(name);
+  } finally {
+    releaseSession(dir, id);
+  }
+  const target: SessionSummary = { id, dir, kind: 'project', lastAt: '', preview: '', role, ...(name ? { name } : {}) };
+  return {
+    target,
+    lines: [
+      `${id}  ${roleLabel(role)}${name ? ` · 이름 ${name}` : ''} · ${dir}`,
+      `안내   보내기: hs-orc session send ${name || id} "<메시지>" — 위임은 --run 이 있어야 시작한다`,
+    ],
+  };
 }

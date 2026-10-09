@@ -36,9 +36,18 @@ export function statusLabel(status: Status | undefined): string {
   }
 }
 
+/** 세션 역할 한 마디 (D-090). chat·`hs-orc session`·GUI 가 같은 말을 쓴다. 모르는 값·없음은 워커다(옛 세션). */
+export const roleLabel = (role: string | undefined): string => (role === 'orchestrator' ? '오케스트레이터' : '워커');
+
 /**
- * 대화 흐름의 마지막 기록 — 설정 줄(이름 D-085 · 승인 방식 · 지휘자 D-087)은 건너뛴다. 화면이 "지금 살아 있는 카드·제안" 을 이것으로 가린다:
- * 승인 대기 중 이름을 붙이거나 지휘자를 바꿨다고 카드 버튼이 사라지면 안 된다. Core `ConversationSession.lastEvent` 와 같은 규칙이다.
+ * 설정 줄 — 이름(D-085) · 승인 방식 · 지휘자(D-087) · 역할(D-090) · 비용(D-054). Core `SETTING_KINDS`(transcript.ts)와 **같은 목록**이다.
+ * 이 파일은 렌더러 번들이라 import 하지 못해 따로 적는다 — 둘이 같은지는 `transcript-lines.test.ts` 가 본다.
+ */
+export const SETTING_KINDS: ReadonlySet<string> = new Set(['name', 'mode', 'orchestrator', 'role', 'spend']);
+
+/**
+ * 대화 흐름의 마지막 기록 — 설정 줄(`SETTING_KINDS`)은 건너뛴다. 화면이 "지금 살아 있는 카드·제안" 을 이것으로 가린다:
+ * 승인 대기 중 이름을 붙이거나 지휘자·역할을 바꿨다고 카드 버튼이 사라지면 안 된다. Core `ConversationSession.lastEvent` 와 같은 규칙이다.
  */
 export const lastEvent = <T extends { readonly kind: string }>(records: readonly T[]): T | undefined =>
-  records.findLast((r) => r.kind !== 'name' && r.kind !== 'mode' && r.kind !== 'orchestrator');
+  records.findLast((r) => !SETTING_KINDS.has(r.kind));

@@ -14,7 +14,7 @@ import { readSessionLog, type SessionSummary, type TranscriptRecord } from '../c
 import { busyMessage, claimSession, foreignHold, lockPath, releaseSession, syncHold } from '../core/session-lock.ts';
 import { endedMessage, sessionEnded } from '../core/session-meta.ts';
 import { ambiguous, matchSessions } from './session-registry.ts';
-import { compactLines, cutLine, lastEvent, ladderLines, retryLines } from './transcript-lines.ts';
+import { compactLines, cutLine, lastEvent, ladderLines, retryLines, roleLabel } from './transcript-lines.ts';
 import { commandLine } from '../core/scaffold.ts';
 
 export function renderRecord(r: TranscriptRecord): string[] {
@@ -82,6 +82,8 @@ export function renderRecord(r: TranscriptRecord): string[] {
       ];
     case 'name':
       return [r.name ? `이름   → ${r.name}` : '이름   지움'];
+    case 'role':
+      return [`역할   → ${roleLabel(r.role)}`];
     case 'result':
       // 취소는 결과가 아니라 멈춤이다 (D-066) — reviewer 판정·검증이 없다. 받은 출력은 남겨 보여준다.
       if (r.outcome === 'cancelled') return [`결과   ${r.step ? `단계 ${r.step} · ` : ''}취소됨 · 결정 ${r.decisionId}`, `증거   ${r.evidence}`, ...(r.text ? [r.text] : [])];

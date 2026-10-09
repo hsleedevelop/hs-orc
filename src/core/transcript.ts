@@ -30,6 +30,9 @@ export interface LadderRecord extends LadderApplied {
 }
 
 export type SessionKind = 'project' | 'scratch';
+/** 세션 역할 (D-090). `project`·`scratch` 는 폴더 종류이고 이것은 프로젝트 안의 역할이다 — 오케스트레이터는 프로젝트당 0~1 개. */
+export type SessionRole = 'worker' | 'orchestrator';
+export const isSessionRole = (v: unknown): v is SessionRole => v === 'worker' || v === 'orchestrator';
 /** AO 어휘 (D-031). `blocked` 는 위임 승인 대기다 — 그 상태에서는 아무것도 자동으로 진행하지 않는다. */
 export type SessionState = 'waiting_input' | 'working' | 'blocked';
 
@@ -178,6 +181,8 @@ export type TranscriptEntry =
     }
   /** 세션 이름 (D-085). 마지막 것이 이긴다 — 빈 문자열은 이름을 지운다. id 와 함께 `hs-orc session` 이 세션을 찾는 열쇠다. */
   | { readonly kind: 'name'; readonly name: string }
+  /** 세션 역할 (D-090). 마지막 것이 이긴다 — 없으면 `worker` 다(이 결정 전 세션이 하던 일이 워커 일이다). 표시·만들기뿐이고 메시지 경로의 입력이 아니다. */
+  | { readonly kind: 'role'; readonly role: SessionRole }
   | {
       readonly kind: 'result';
       /** `cancelled` — 사용자가 실행 중에 멈췄다 (D-066). 실패가 아니라 끊김도 아니다 — 잇지 않는다. */
@@ -305,6 +310,8 @@ export interface SessionSummary {
   readonly status?: SessionStatus;
   /** 보관했다 (D-089) — 사이드바 기본 목록에서 숨는다. 찾기(`hs-orc session`)·이름 겹침 검사에는 그대로 잡힌다. */
   readonly archived?: true;
+  /** 역할 (D-090). 기록이 없거나 못 읽은 세션은 `worker` 다. */
+  readonly role: SessionRole;
 }
 
 /**
@@ -332,9 +339,24 @@ export function sessionName(records: readonly TranscriptRecord[]): string | unde
   return last?.kind === 'name' && last.name ? last.name : undefined;
 }
 
-/** 기록만으로 본 상태 — 점유 표식이 없을 때다. 비용·방식·이름 줄은 턴의 끝을 가리지 않는다. */
+/** 마지막 `role` 기록. 없으면 `worker` 다 (D-090). */
+export function sessionRole(records: readonly TranscriptRecord[]): SessionRole {
+  const last = records.findLast((r) => r.kind === 'role');
+  return last?.kind === 'role' && isSessionRole(last.role) ? last.role : 'worker';
+}
+
+/**
+ * 대화의 흐름이 아닌 줄 — 이름(D-085) · 승인 방식 · 지휘자(D-087) · 역할(D-090) · 비용(D-054). 턴의 끝·살아 있는 카드·제안을 가릴 때
+ * 건너뛴다: 목록 상태(`recordedStatus`) · Core `ConversationSession.lastEvent` · 셸 `transcript-lines.lastEvent` 가 **같은 목록**을 쓴다.
+ * 셸 쪽은 렌더러 번들이라 import 하지 못해 따로 적는다 — 둘이 같은지는 `transcript-lines.test.ts` 가 본다.
+ * 빠지면 그 줄이 끝에 붙은 순간 카드 버튼이 사라지거나 제안 행이 `수동 지정` 으로 서서 H1 이 빠진다 (D-087 결정 13).
+ */
+export const SETTING_KINDS: ReadonlySet<TranscriptEntry['kind']> = new Set(['name', 'mode', 'orchestrator', 'role', 'spend']);
+export const isSettingRecord = (r: { readonly kind: string }): boolean => SETTING_KINDS.has(r.kind as TranscriptEntry['kind']);
+
+/** 기록만으로 본 상태 — 점유 표식이 없을 때다. 설정 줄(`SETTING_KINDS`)은 턴의 끝을 가리지 않는다. */
 export function recordedStatus(records: readonly TranscriptRecord[]): SessionStatus {
-  const last = records.findLast((r) => r.kind !== 'spend' && r.kind !== 'mode' && r.kind !== 'name');
+  const last = records.findLast((r) => !isSettingRecord(r));
   if (last?.kind === 'approval' && last.approved) return { state: 'interrupted' };
   if (last?.kind === 'result' || last?.kind === 'summary') {
     // 요약은 결과 뒤에만 붙는다 — 결과는 그 앞 줄이다.
@@ -415,7 +437,7 @@ export function listSessions(dir: string, kind: SessionKind): SessionSummary[] {
         ({ records } = readSessionLog(dir, id));
       } catch {
         // 한 세션을 못 읽어도 목록은 보여준다. 열면 그때 오류가 드러난다.
-        return { id, dir, kind, lastAt: '', preview: '(읽지 못한 기록)' };
+        return { id, dir, kind, lastAt: '', preview: '(읽지 못한 기록)', role: 'worker' };
       }
       const first = records.find((r) => r.kind === 'user');
       const usage = sessionUsage(records);
@@ -431,6 +453,7 @@ export function listSessions(dir: string, kind: SessionKind): SessionSummary[] {
         ...(name ? { name } : {}),
         status: sessionStatus(dir, id, records),
         ...(archived ? { archived: true as const } : {}),
+        role: sessionRole(records),
       };
     })
     .sort((a, b) => b.lastAt.localeCompare(a.lastAt));

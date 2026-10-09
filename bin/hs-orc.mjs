@@ -30,7 +30,7 @@ const USAGE = `hs-orc ${version} — 작업 1건을 분류·배정하고 두 슬
 
   hs-orc "<작업>" [옵션…]        배정·비용 제시. 실제 실행은 --run 이다 (승인 게이트).
   hs-orc chat [--scratch|--resume <id|이름>|--list]  대화 세션 (줄 입력)
-  hs-orc session ls|show|send|name  id·이름으로 세션 보기·보내기 (다른 세션·오케스트레이터용)
+  hs-orc session ls|show|send|name|new  id·이름으로 세션 보기·보내기·만들기 (다른 세션·오케스트레이터용)
   hs-orc gui                      GUI (Electron)
   hs-orc -- "<작업>"              첫 인자를 하위명령으로 해석하지 않는다
   hs-orc --help | --version
