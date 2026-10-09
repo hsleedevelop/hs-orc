@@ -373,11 +373,15 @@ export class GuiService {
     };
   }
 
-  /** 현재 폴더와 최근 폴더마다 세션을 묶는다. 같은 폴더가 두 번 나오면 세션이 두 묶음에 겹쳐 보인다 — 실제 경로로 합친다. */
+  /**
+   * 현재 폴더와 최근 폴더마다 세션을 묶는다. 같은 폴더가 두 번 나오면 세션이 두 묶음에 겹쳐 보인다 — 실제 경로로 합친다.
+   * 순서는 이름순이다 — 최근 목록(MRU)은 클릭마다 바뀌므로 사이드바가 따라 뛰지 않게 쓰지 않는다. 현재 폴더는 강조로만 드러난다.
+   */
   conversations(): ConversationTree {
     const { current, recent } = this.projects();
     const projects: ProjectInfo[] = [];
     for (const p of [current, ...recent]) if (!projects.some((q) => samePath(q.dir, p.dir))) projects.push(p);
+    projects.sort((a, b) => a.name.localeCompare(b.name) || a.dir.localeCompare(b.dir));
     return {
       projects: projects.map((project) => ({ project, sessions: listSessions(project.dir, 'project') })),
       scratch: listScratchSessions().sort((a, b) => b.lastAt.localeCompare(a.lastAt)),
