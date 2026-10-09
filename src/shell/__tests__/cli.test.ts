@@ -544,6 +544,13 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     assert.match(reviewer, /--- 검증 명령 \(Core 실행\) ---\n\$ echo ONCE_MARK\nexit=0\nONCE_MARK/);
   });
 
+  it('once 는 reviewer 를 꺼도(--no-reviewer) 검증 명령을 돌려 증거에 싣는다 (D-094)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--no-reviewer', '--verify', 'echo NR_MARK'], { PATH: fakeDir });
+    assert.match(r.err, /\+ command `echo NR_MARK` exit=0/);
+    assert.equal(existsSync(codexArgs), false, 'reviewer 가 돌았다');
+  });
+
   it('once 는 읽기 전용이면 검증 명령을 돌리지 않고 그렇다고 남긴다 (D-094)', () => {
     reset();
     const marker = path.join(sandbox, 'once-ro-marker');
