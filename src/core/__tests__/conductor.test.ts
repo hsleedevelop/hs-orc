@@ -132,6 +132,19 @@ describe('지휘자 — 결과 처리 (SPEC §6.4.4)', () => {
     assert.doesNotMatch(passed, /reviewer 검증 글/);
   });
 
+  it('reviewer 가 둘이면 첫 PASS 글이 길어도 FAIL 한 쪽의 사유가 실린다 (D-072·D-093)', () => {
+    const report = { satisfied: false, contradictions: ['reviewer FAIL'], missing: [], rejected: [], accepted: [], summary: '완료가 아니다' };
+    const run = (text: string) => ({ ok: true, text, rawStdout: '', rawStderr: '', durationMs: 1 });
+    const reviews = [
+      { reviewer: 'Sonnet·high', verdict: 'pass' as const, run: run(`${'반례 없음 '.repeat(400)}\nPASS`) },
+      { reviewer: 'Astra·high', verdict: 'fail' as const, run: run('사유: 자정을 넘기면 어제 날짜가 남는다\nFAIL') },
+    ];
+    const review = reviews.map((r) => `[reviewer ${r.reviewer} → ${r.verdict.toUpperCase()}]\n${r.run.text.slice(0, 2000)}`).join('\n\n');
+    const prompt = buildSummaryPrompt('날짜 넣어줘', { text: '넣었다', verdict: 'fail', outcome: 'rework', report, review, reviews });
+    assert.match(prompt, /\[reviewer Astra·high → FAIL\]\n사유: 자정을 넘기면 어제 날짜가 남는다/);
+    assert.doesNotMatch(prompt, /반례 없음/, 'PASS 한 쪽은 싣지 않는다');
+  });
+
   it('검증된 통과면 다음 제안이 없다', () => {
     assert.equal(nextSuggestion('ok', 'pass'), '');
   });

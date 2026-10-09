@@ -10,7 +10,7 @@ import type { AssignmentPlan } from './assign.ts';
 import type { Budget } from './budget.ts';
 import { appendDecision } from './decision-log.ts';
 import { cancelledLine, firstLine, secondLine } from './decide.ts';
-import { noTestsEvidenceNote, primaryNoTestsNote, reviewText, runDuo, type Verdict } from './duo.ts';
+import { noTestsEvidenceNote, primaryNoTestsNote, reviewText, runDuo, type ReviewRun, type Verdict } from './duo.ts';
 import { EXISTING_TEST_ROWS, collect, outcomeOf, type Evidence, type EvidenceReport, type SettledOutcome } from './evidence.ts';
 import { changedFiles, noTests, runCommand, snapshotTests, testChanges } from './evidence-gather.ts';
 import { declaredTests } from '../data/verify.ts';
@@ -56,6 +56,8 @@ export interface Delegated {
   readonly verdict: Verdict;
   /** reviewer 검증 글. reviewer 가 둘이면(D-072) reviewer 마다 머리줄을 단 한 글이다 — 기록 모양은 그대로다. */
   readonly review?: string;
+  /** reviewer 마다의 판정과 글 (D-072). 요약이 FAIL 한 쪽의 사유를 고르는 데 쓴다 (D-093) — 기록에는 싣지 않는다. */
+  readonly reviews?: readonly ReviewRun[];
   readonly decisionId: string;
   readonly primarySession?: EngineSessionRef;
   /** primary 실행 중 엔진이 한 압축 (D-058). */
@@ -155,7 +157,7 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
     outcome,
     report,
     verdict: duo.verdict,
-    ...(duo.reviews.length > 0 ? { review: reviewText(duo.reviews) } : {}),
+    ...(duo.reviews.length > 0 ? { review: reviewText(duo.reviews), reviews: duo.reviews } : {}),
     decisionId: decision.id,
     ...(run.compactions ? { compactions: run.compactions } : {}),
     // 성공한 primary 만 이을 수 있다 — 실패한 세션을 다음에 이으면 실패를 물려받는다.

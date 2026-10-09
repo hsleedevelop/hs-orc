@@ -12,7 +12,7 @@ import type { Effort, Matrix, ModelKey } from '../data/matrix.ts';
 import { AssignError, resolveSlot, type ResolvedSlot } from './assign.ts';
 import type { Delegated } from './delegate.ts';
 import type { SettledOutcome } from './evidence.ts';
-import type { Verdict } from './duo.ts';
+import type { ReviewRun, Verdict } from './duo.ts';
 import type { SlotExecutor, SlotRun } from './executor.ts';
 import { STAGE_LABEL, nextStage } from './ladder.ts';
 import { GraphError, parseGraphSpec, topoSort, type GraphNode, type GraphSpec } from './modes/graph.ts';
@@ -151,11 +151,26 @@ export async function directAnswer(
 export const SUMMARY_REVIEW_CHARS = 1500;
 
 /**
+ * 요약에 실을 reviewer 글. reviewer 가 둘이면(D-072) PASS 하지 않은 쪽만 싣고 상한을 그들끼리 나눈다 —
+ * 이어 붙인 글의 앞부분만 자르면 첫 PASS 글이 길 때 둘째의 FAIL 사유가 빠진다 (D-093 리뷰).
+ */
+function summaryReview(review: string | undefined, reviews: readonly ReviewRun[] | undefined): string {
+  if (!reviews || reviews.length <= 1) return review?.trim() ? review.slice(0, SUMMARY_REVIEW_CHARS) : '';
+  const failing = reviews.filter((r) => r.verdict !== 'pass');
+  const picked = failing.length > 0 ? failing : reviews;
+  const each = Math.floor(SUMMARY_REVIEW_CHARS / picked.length);
+  return picked.map((r) => `[reviewer ${r.reviewer} → ${r.verdict.toUpperCase()}]\n${r.run.text.slice(0, each)}`).join('\n\n');
+}
+
+/**
  * 위임 결과 요약 프롬프트. PASS 가 아니면 reviewer 글을 잘라 싣는다 (D-093) — 싣지 않으면 요약이
  * "FAIL 사유가 나와 있지 않다" 고 말한다. PASS 는 싣지 않는다(요약에 바뀌는 것이 없고 비용만 는다).
  */
-export function buildSummaryPrompt(title: string, d: Pick<Delegated, 'text' | 'verdict' | 'outcome' | 'report' | 'review'>): string {
-  const review = d.verdict !== 'pass' && d.review?.trim() ? d.review.slice(0, SUMMARY_REVIEW_CHARS) : '';
+export function buildSummaryPrompt(
+  title: string,
+  d: Pick<Delegated, 'text' | 'verdict' | 'outcome' | 'report' | 'review' | 'reviews'>,
+): string {
+  const review = d.verdict === 'pass' ? '' : summaryReview(d.review, d.reviews);
   return [
     '아래 위임 결과를 사용자에게 3줄 이내로 요약하라.',
     '새 사실을 지어내지 않는다. reviewer 판정과 증거 상태를 그대로 전한다.',
