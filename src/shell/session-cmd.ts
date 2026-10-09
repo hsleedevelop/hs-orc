@@ -15,7 +15,7 @@ import { Journal } from '../core/journal.ts';
 import { H6_BLOCKED, SESSION_NAME, type ConversationSession } from '../core/session.ts';
 import { uncommittedFiles } from '../core/evidence-gather.ts';
 import { claimSession, releaseSession } from '../core/session-lock.ts';
-import { assertNotEnded } from '../core/session-meta.ts';
+import { assertNotEnded, withRoleLock } from '../core/session-meta.ts';
 import {
   isSessionRole,
   prepareSession,
@@ -272,15 +272,19 @@ export function newSession(cwd: string, role: SessionRole, name: string): { targ
   if (name && !SESSION_NAME.test(name)) throw new Error(`이름은 영문자로 시작하고 영문·숫자·. _ - 만 쓴다 (최대 32자): ${name}`);
   const { dir, id } = prepareSession('project', cwd);
   assertNameFree(cwd, name, { dir, id });
-  if (role === 'orchestrator') assertOrchestratorFree({ dir, id });
-  claimSession(dir, id, 'working', 'cli');
-  try {
-    const session = assembleSession({ kind: 'project', dir, id, budget: restoreBudget(dir, id), journal: new Journal() });
-    session.setRole(role);
-    if (name) session.rename(name);
-  } finally {
-    releaseSession(dir, id);
-  }
+  const write = (): void => {
+    claimSession(dir, id, 'working', 'cli');
+    try {
+      const session = assembleSession({ kind: 'project', dir, id, budget: restoreBudget(dir, id), journal: new Journal() });
+      session.setRole(role);
+      if (name) session.rename(name);
+    } finally {
+      releaseSession(dir, id);
+    }
+  };
+  // 오케스트레이터는 폴더의 역할 잠금 안에서 검사하고 쓴다 (D-090) — 동시에 만든 두 프로세스가 둘 다 검사를 지나지 않게.
+  if (role === 'orchestrator') withRoleLock(dir, () => { assertOrchestratorFree({ dir, id }); write(); });
+  else write();
   const target: SessionSummary = { id, dir, kind: 'project', lastAt: '', preview: '', role, ...(name ? { name } : {}) };
   return {
     target,

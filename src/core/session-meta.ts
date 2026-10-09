@@ -44,11 +44,10 @@ const UPDATE_WAIT_MS = 3000;
 const pause = (ms: number): void => void Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /**
- * 표식 갱신을 프로세스 사이에 직렬화한다 — `<id>.meta.json.lock`. rename 은 파일을 통째로 바꿔 끼울 뿐이라, 두 GUI 가 각자 읽은
- * 옛 값을 쓰면 남이 바꾼 칸(예: 복원하는 사이 붙은 `endedAt`)을 지운다. 차지·죽은 잠금 넘겨받기는 세션 점유(D-085)와 같은 방식이다.
+ * 프로세스 사이 짧은 잠금 — 검사와 쓰기를 한 덩어리로 묶는다. 차지·죽은 잠금 넘겨받기는 세션 점유(D-085)와 같은 방식이다.
+ * `UPDATE_WAIT_MS` 넘게 못 쥐면 `busy(pid)` 문구로 던진다 — 잠금 경로를 말해 남은 잠금을 사람이 지울 수 있게.
  */
-function withUpdateLock<T>(file: string, fn: () => T): T {
-  const lock = `${file}.lock`;
+function withFileLock<T>(lock: string, busy: (pid: number) => string, fn: () => T): T {
   mkdirSync(path.dirname(lock), { recursive: true });
   const deadline = Date.now() + UPDATE_WAIT_MS;
   for (;;) {
@@ -70,7 +69,7 @@ function withUpdateLock<T>(file: string, fn: () => T): T {
       removeDead(lock, seen);
       continue;
     }
-    if (Date.now() > deadline) throw new Error(`세션 표식을 갱신하지 못했다 — 다른 곳(pid ${pid})이 갱신 중이다. 그 프로세스가 아닌데 남았으면 ${lock} 을 지운다.`);
+    if (Date.now() > deadline) throw new Error(`${busy(pid)} 그 프로세스가 아닌데 남았으면 ${lock} 을 지운다.`);
     pause(5);
   }
   try {
@@ -79,6 +78,24 @@ function withUpdateLock<T>(file: string, fn: () => T): T {
     rmSync(lock, { force: true });
   }
 }
+
+/**
+ * 표식 갱신을 프로세스 사이에 직렬화한다 — `<id>.meta.json.lock`. rename 은 파일을 통째로 바꿔 끼울 뿐이라, 두 GUI 가 각자 읽은
+ * 옛 값을 쓰면 남이 바꾼 칸(예: 복원하는 사이 붙은 `endedAt`)을 지운다.
+ */
+const withUpdateLock = <T>(file: string, fn: () => T): T =>
+  withFileLock(`${file}.lock`, (pid) => `세션 표식을 갱신하지 못했다 — 다른 곳(pid ${pid})이 갱신 중이다.`, fn);
+
+/**
+ * 프로젝트(상태 키)의 역할 잠금 `sessions/roles.lock` (D-090). 오케스트레이터 0~1 은 다른 세션들을 보고 판정하므로 세션 점유(`<id>.lock`)로는
+ * 못 막는다 — 두 프로세스가 각자 다른 세션을 쥐고 같은 순간 검사를 지나면 둘 다 쓴다(PR #126 리뷰). 오케스트레이터를 **늘리는** 쓰기
+ * (만들기·지정·종료한 오케스트레이터 다시 열기)는 모두 이 안에서 다시 검사하고 쓴다. 줄이는 쓰기(해제·종료)는 계약을 깨지 않아 잡지 않는다.
+ */
+export const roleLockPath = (dir: string, env: NodeJS.ProcessEnv = process.env): string =>
+  path.join(projectStateDir(dir, env), 'sessions', 'roles.lock');
+
+export const withRoleLock = <T>(dir: string, fn: () => T, env: NodeJS.ProcessEnv = process.env): T =>
+  withFileLock(roleLockPath(dir, env), (pid) => `세션 역할을 바꾸지 못했다 — 다른 곳(pid ${pid})이 이 폴더의 역할을 바꾸는 중이다.`, fn);
 
 /**
  * 한 칸만 바꾼다 — **잠금 안에서 최신 값을 읽어** 다른 칸은 그대로 둔다. 이미 같은 상태면 쓰지 않는다(때를 바꾸지 않는다).

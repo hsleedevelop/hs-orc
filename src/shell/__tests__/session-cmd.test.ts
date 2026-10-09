@@ -1,9 +1,11 @@
 /**
  * `hs-orc session` (D-085) — 다른 세션·오케스트레이터가 id·이름으로 세션을 다룬다. 실행기는 전부 가짜다.
  */
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'node:test';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { gitEnv } from '../../core/git-env.ts';
 import os from 'node:os';
@@ -336,5 +338,35 @@ describe('session new — 역할 (D-090)', () => {
     assert.throws(() => newSession(dir, 'worker', '1bad'), /영문자로 시작/);
     assert.throws(() => newSession(dir, 'worker', 'taken'), /이미 다른 세션/);
     assert.equal(readdirSync(path.dirname(lockPath(dir, 'x'))).filter((n) => n.endsWith('.jsonl')).length, 1);
+  });
+
+  it('두 프로세스가 같은 순간 오케스트레이터를 만들어도 하나만 선다 — 검사와 쓰기가 폴더의 역할 잠금 안에 있다 (PR #126 리뷰)', () => {
+    const dir = folder();
+    const other = [
+      `import { newSession } from ${JSON.stringify(path.resolve(import.meta.dirname, '../session-cmd.ts'))};`,
+      "newSession(process.argv[1], 'orchestrator', '');",
+    ].join('\n');
+    let raced: SpawnSyncReturns<string> | null = null;
+    const append = fs.appendFileSync;
+    // 이 프로세스가 검사를 지나 role 줄을 쓰기 직전 — 그 틈에 다른 프로세스가 같은 폴더에 오케스트레이터를 만든다.
+    mock.method(fs, 'appendFileSync', (...args: Parameters<typeof fs.appendFileSync>) => {
+      if (!raced && String(args[0]).endsWith('.jsonl')) {
+        raced = spawnSync(process.execPath, ['--input-type=module', '-e', other, dir], { env: process.env, encoding: 'utf8' });
+      }
+      append(...args);
+    });
+    syncBuiltinESMExports();
+    try {
+      newSession(dir, 'orchestrator', 'first');
+    } finally {
+      mock.restoreAll();
+      syncBuiltinESMExports();
+    }
+    const race = raced as SpawnSyncReturns<string> | null;
+    assert.notEqual(race?.status, 0, '잠금 없이 검사만 하면 다른 프로세스도 검사를 지나 오케스트레이터가 둘이 된다');
+    assert.match(String(race?.stderr), /이 폴더의 역할을 바꾸는 중이다/);
+    const orchestrators = knownSessions(dir).filter((s) => s.dir === dir && s.role === 'orchestrator');
+    assert.deepEqual(orchestrators.map((s) => s.name), ['first']);
+    assert.equal(existsSync(path.join(path.dirname(lockPath(dir, 'x')), 'roles.lock')), false, '쓰고 나면 놓는다');
   });
 });

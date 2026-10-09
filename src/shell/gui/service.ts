@@ -53,7 +53,7 @@ import type { RowClassifier } from '../../adapters/jev.ts';
 import { isTerminalId, openTerminal, terminalCommand, type TerminalId } from './terminal.ts';
 import { assembleSession, restoreBudget } from '../conversation.ts';
 import { busyMessage, claimSession, foreignHold, lockPath, releaseSession, syncHold, type SessionHold } from '../../core/session-lock.ts';
-import { assertNotEnded, readSessionMeta, setArchived, setEnded } from '../../core/session-meta.ts';
+import { assertNotEnded, readSessionMeta, setArchived, setEnded, withRoleLock } from '../../core/session-meta.ts';
 import { assertNameFree, assertOrchestratorFree } from '../session-registry.ts';
 
 export { skipGitCheck } from '../conversation.ts';
@@ -549,8 +549,13 @@ export class GuiService {
    */
   converseRole(role: SessionRole): SessionView {
     const s = this.requireConversation();
-    if (role === 'orchestrator' && s.kind === 'project') assertOrchestratorFree(s);
-    this.recording((t) => t.setRole(role));
+    // 오케스트레이터를 늘리는 쓰기는 폴더의 역할 잠금 안에서 다시 검사하고 쓴다 — 다른 프로세스와 같은 순간 검사를 지나지 않게.
+    if (role === 'orchestrator' && s.kind === 'project') {
+      withRoleLock(s.dir, () => {
+        assertOrchestratorFree(s);
+        this.recording((t) => t.setRole(role));
+      });
+    } else this.recording((t) => t.setRole(role));
     return this.conversation();
   }
 
@@ -657,8 +662,13 @@ export class GuiService {
   reopenSession(ref: SessionRef): SessionView | null {
     const { dir, id, kind } = this.target(ref);
     // 종료한 오케스트레이터는 0~1 에 세지 않는다 (D-090) — 그 사이 새 오케스트레이터가 섰으면 다시 열어 둘이 되지 않게 막는다.
-    if (kind === 'project' && sessionRole(readSessionLog(dir, id).records) === 'orchestrator') assertOrchestratorFree({ dir, id });
-    setEnded(dir, id, false);
+    // 역할 잠금 안에서 검사하고 표식을 지운다 — 다른 프로세스의 지정·만들기와 같은 순간 검사를 지나지 않게.
+    if (kind === 'project' && sessionRole(readSessionLog(dir, id).records) === 'orchestrator') {
+      withRoleLock(dir, () => {
+        assertOrchestratorFree({ dir, id });
+        setEnded(dir, id, false);
+      });
+    } else setEnded(dir, id, false);
     return this.openView(dir, id);
   }
 

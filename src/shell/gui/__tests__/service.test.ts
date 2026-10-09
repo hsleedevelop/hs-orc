@@ -895,6 +895,62 @@ describe('GUI — 세션 역할 (D-090)', () => {
   });
 });
 
+describe('GUI — 오케스트레이터 0~1 경쟁 (PR #126 리뷰)', () => {
+  /** 다른 프로세스가 같은 폴더에 오케스트레이터를 만든다 — `hs-orc session new --role orchestrator` 그대로. */
+  const rival = (dir: string) =>
+    spawnSync(process.execPath, ['--input-type=module', '-e', [
+      `import { newSession } from ${JSON.stringify(path.resolve(import.meta.dirname, '../../session-cmd.ts'))};`,
+      // 이름을 주지 않는다 — 이름은 폴더를 넘어 겹침을 보므로, 앞 테스트의 경쟁자 이름에 걸려 잠금과 무관하게 거절될 수 있다.
+      "newSession(process.argv[1], 'orchestrator', '');",
+    ].join('\n'), dir], { env: process.env, encoding: 'utf8' });
+
+  /** `method` 가 `match` 경로를 처음 건드리기 직전(검사는 끝났고 쓰기는 아직)에 경쟁자를 돌리고 `act` 의 결과를 돌려준다. */
+  const raceAt = (method: 'appendFileSync' | 'renameSync', match: (file: string) => boolean, dir: string, act: () => void) => {
+    let raced: ReturnType<typeof spawnSync> | null = null;
+    const original = fs[method] as (...a: unknown[]) => unknown;
+    mock.method(fs, method, (...args: unknown[]) => {
+      if (!raced && match(String(method === 'renameSync' ? args[1] : args[0]))) raced = rival(dir);
+      return original(...args);
+    });
+    syncBuiltinESMExports();
+    try {
+      act();
+    } finally {
+      mock.restoreAll();
+      syncBuiltinESMExports();
+    }
+    return raced as ReturnType<typeof spawnSync> | null;
+  };
+
+  const orchestrators = (service: GuiService) =>
+    (service.conversations().projects[0]?.sessions ?? []).filter((s) => s.role === 'orchestrator' && s.status?.state !== 'ended');
+
+  it('지정 — 검사를 지나 쓰기 직전에 다른 프로세스가 만들려 해도 하나만 선다', () => {
+    isolated();
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-gui-race-'));
+    const service = new GuiService(fake, 20, dir);
+    const view = service.startConversation('project');
+    const race = raceAt('appendFileSync', (f) => f.endsWith(`${view.id}.jsonl`), dir, () => service.converseRole('orchestrator'));
+    assert.notEqual(race?.status, 0, '잠금 없이 검사만 하면 경쟁자도 검사를 지나 둘이 된다');
+    assert.match(String(race?.stderr), /이 폴더의 역할을 바꾸는 중이다/);
+    assert.deepEqual(orchestrators(service).map((s) => s.id), [view.id]);
+  });
+
+  it('종료한 오케스트레이터 다시 열기 — 표식을 지우기 직전에 다른 프로세스가 만들려 해도 하나만 선다', async () => {
+    isolated();
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-gui-race-'));
+    const service = new GuiService(fake, 20, dir);
+    const view = service.startConversation('project');
+    service.converseRole('orchestrator');
+    const ref = { kind: view.kind, dir: view.dir, id: view.id };
+    await service.endSession(ref);
+    const race = raceAt('renameSync', (f) => f.endsWith(`${view.id}.meta.json`), dir, () => service.reopenSession(ref));
+    assert.notEqual(race?.status, 0, '잠금 없이 검사만 하면 경쟁자는 아직 종료된 것으로 보고 새로 만든다');
+    assert.match(String(race?.stderr), /이 폴더의 역할을 바꾸는 중이다/);
+    assert.deepEqual(orchestrators(service).map((s) => s.id), [view.id]);
+  });
+});
+
 function readSessionLogKinds(dir: string, id: string): string[] {
   try {
     return readFileSync(transcriptPath(dir, id), 'utf8').split('\n').filter(Boolean).map((l) => (JSON.parse(l) as { kind: string }).kind);
