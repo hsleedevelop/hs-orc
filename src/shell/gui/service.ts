@@ -541,14 +541,20 @@ export class GuiService {
   /**
    * 엔진을 부르지 않고 기록만 붙이는 호출 (D-085). 다른 프로세스가 쥐었으면 거절한다 — 그쪽이 같은 파일에 쓰는 중이다.
    * 도는 우리 위임(`live`)에는 그대로 붙는다(방식 변경은 도는 중에도 된다, D-064). 끝나면 카드가 섰는지에 맞춰 점유를 맞춘다.
+   * 쓰는 동안 점유를 쥐고, 종료(D-089)는 쥔 **뒤에** 본다 — 검사만 하고 쓰면 그 틈에 다른 GUI 가 종료해도 기록이 붙는다.
+   * 도는 위임은 이미 쥐고 있어 다시 쥐지도 놓지도 않는다 — 끝날 때 `running` 이 놓는다.
    */
   private recording(op: (s: ConversationSession) => unknown): void {
     const s = this.requireConversation();
-    const other = foreignHold(s.dir, s.id);
-    if (other) throw new Error(busyMessage(other, lockPath(s.dir, s.id)));
-    assertNotEnded(s.dir, s.id);
-    op(s);
-    if (!this.live.has(`${s.dir}::${s.id}`)) syncHold(s.dir, s.id, s.state === 'blocked' ? 'blocked' : null, 'gui');
+    const key = `${s.dir}::${s.id}`;
+    // 다른 곳이 쥐었으면 여기서 던진다(같은 거절 문구) — 그 점유는 건드리지 않는다.
+    if (!this.live.has(key)) claimSession(s.dir, s.id, 'working', 'gui');
+    try {
+      assertNotEnded(s.dir, s.id);
+      op(s);
+    } finally {
+      if (!this.live.has(key)) syncHold(s.dir, s.id, s.state === 'blocked' ? 'blocked' : null, 'gui');
+    }
   }
 
   async converseAsk(): Promise<SessionView> {
