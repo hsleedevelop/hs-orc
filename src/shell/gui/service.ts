@@ -700,13 +700,15 @@ export class GuiService {
   /**
    * 숨김 표식(종료·보관)을 지운다. 종료·보관한 오케스트레이터는 0~1 에 세지 않으므로 (D-090), 지운 뒤 다시 세지는 오케스트레이터면
    * 그 사이 선 다른 오케스트레이터와 둘이 되지 않게 거절한다 — 워커로 바꿔 풀지 않는다. 남은 표식(`still`)이 있으면 여전히 숨어 있어 보지 않는다.
-   * 역할 잠금 안에서 검사하고 지운다 — 다른 프로세스의 지정·만들기와 같은 순간 검사를 지나지 않게.
+   * project 세션은 워커여도 역할 잠금을 **먼저** 쥐고 그 안에서 역할·남은 표식을 읽는다 — 밖에서 워커로 읽고 지우면, 그 틈에 다른 프로세스가
+   * 숨은 이 세션을 지정하고(숨어 있어 0~1 을 지난다) 새 오케스트레이터까지 만든 뒤 숨김이 풀려 둘이 된다(PR #132 리뷰).
    */
   private unhide(ref: SessionRef, still: 'endedAt' | 'archivedAt', clear: () => void): void {
     const { dir, id, kind } = ref;
-    if (kind !== 'project' || sessionRole(readSessionLog(dir, id).records) !== 'orchestrator') return clear();
+    if (kind !== 'project') return clear();
     withRoleLock(dir, () => {
-      if (readSessionMeta(dir, id)[still] === undefined) assertOrchestratorFree({ dir, id });
+      const counts = sessionRole(readSessionLog(dir, id).records) === 'orchestrator' && readSessionMeta(dir, id)[still] === undefined;
+      if (counts) assertOrchestratorFree({ dir, id });
       clear();
     });
   }
