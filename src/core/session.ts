@@ -43,11 +43,15 @@ import { readUnclassifiedWithLegacy, recordUnclassified, suggestRows, unclassifi
 import { markStateOrigin } from './project-state.ts';
 import {
   appendRecord,
+  isSessionRole,
+  isSettingRecord,
   readSessionLog,
   sessionName,
+  sessionRole,
   transcriptPath,
   type LadderRecord,
   type SessionKind,
+  type SessionRole,
   type SessionState,
   type TranscriptEntry,
   type TranscriptRecord,
@@ -210,18 +214,21 @@ export class ConversationSession {
     this.log = readSessionLog(deps.dir, deps.id).records;
     this.turn = this.log.reduce((max, r) => Math.max(max, r.turn), 0);
     const recorded = this.log.findLast((r) => r.kind === 'mode');
-    // 방식이 없는 기록은 이 결정 전의 세션이다 — 조용히 자동이 되지 않게 manual 로 연다 (D-064 결정 8). 빈 기록만 기본값을 받는다.
+    // 첫 메시지 전 세션 — 설정 줄만 있다. 이름(D-085)·역할(D-090, `hs-orc session new`)만 붙인 세션도 새 세션이라 기본값을 받는다.
+    // 처음 구현은 지휘자를 `기록 0줄` 로만 갈라, 이름·역할만 붙인 세션을 다시 열면 옛 지휘자(Haiku·low)로 열었다.
+    const fresh = this.log.every(isSettingRecord);
+    // 방식이 없는 기록은 이 결정 전의 세션이다 — 조용히 자동이 되지 않게 manual 로 연다 (D-064 결정 8). 새 세션만 기본값을 받는다.
     this.modeValue =
       recorded?.kind === 'mode' && isApprovalMode(recorded.mode)
         ? recorded.mode
-        : this.log.every((r) => r.kind === 'name') // 첫 메시지 전에 이름만 붙인 세션도 새 세션이다 (D-085).
+        : fresh
           ? (deps.approvalMode ?? loadLimits().approvalMode)
           : 'manual';
     const orchestrator = this.log.findLast((r) => r.kind === 'orchestrator');
     this.orchestratorValue =
       orchestrator?.kind === 'orchestrator'
         ? { model: orchestrator.model, effort: orchestrator.effort }
-        : this.log.length === 0
+        : fresh
           ? (deps.orchestrator ?? defaultOrchestrator())
           : LEGACY_ORCHESTRATOR;
     // 기록의 모델이 카탈로그에서 빠졌으면(이름 변경·삭제) 세션을 못 여는 대신 기본 지휘자로 열고 그 사실을 남긴다.
@@ -448,11 +455,12 @@ export class ConversationSession {
   }
 
   /**
-   * 마지막 기록 — 설정 줄(이름 D-085 · 승인 방식 · 지휘자 D-087)은 대화의 흐름이 아니라 건너뛴다. 끊김·지휘자 제안 판정이 설정을 바꿨다고
-   * 바뀌면 안 된다(옛 기록에서 지휘자를 바꾼 뒤 제안 행을 누르면 H1 이 빠지던 것). 셸의 `lastEvent`(transcript-lines.ts)와 같은 규칙이다.
+   * 마지막 기록 — 설정 줄(`SETTING_KINDS` — 이름 · 승인 방식 · 지휘자 · 역할 · 비용)은 대화의 흐름이 아니라 건너뛴다. 끊김·지휘자 제안 판정이
+   * 설정을 바꿨다고 바뀌면 안 된다(옛 기록에서 지휘자를 바꾼 뒤 제안 행을 누르면 H1 이 빠지던 것). 비용 줄은 직접 답 **뒤에** 붙으므로
+   * 건너뛰지 않으면 옛 기록(제안 직답 + 비용)의 제안 행이 `수동 지정` 으로 선다. 셸의 `lastEvent`(transcript-lines.ts)·목록 상태와 같은 목록이다.
    */
   private lastEvent(): TranscriptRecord | undefined {
-    return this.log.findLast((r) => r.kind !== 'name' && r.kind !== 'mode' && r.kind !== 'orchestrator');
+    return this.log.findLast((r) => !isSettingRecord(r));
   }
 
   /**
@@ -461,6 +469,25 @@ export class ConversationSession {
    */
   isStale(): boolean {
     return this.stateValue !== 'working' && readSessionLog(this.deps.dir, this.deps.id).records.length !== this.log.length;
+  }
+
+  /** 역할 (D-090). 마지막 `role` 기록, 없으면 `worker`. */
+  get role(): SessionRole {
+    return sessionRole(this.log);
+  }
+
+  /**
+   * 역할을 바꾼다 (D-090) — `role` 기록을 남긴다. 표시뿐이라 메시지 경로는 그대로다. 프로젝트당 오케스트레이터 0~1 은
+   * 모든 세션을 아는 셸이 먼저 본다 — Core 는 스크래치만 막는다(프로젝트가 없다). 같은 역할이고 이미 기록돼 있으면 아무것도 하지 않는다 —
+   * 기록이 없는 `worker` 에 `worker` 를 주면 남긴다(`hs-orc session new` 는 이 줄로 세션 파일을 만든다).
+   */
+  setRole(role: SessionRole): TranscriptRecord[] {
+    if (!isSessionRole(role)) throw new SessionStateError(`모르는 역할이다: ${String(role)} — worker · orchestrator`);
+    if (role === 'orchestrator' && this.deps.kind === 'scratch') {
+      throw new SessionStateError('스크래치 세션은 오케스트레이터로 지정하지 않는다 — 프로젝트가 없다 (D-090).');
+    }
+    if (role === this.role && this.log.some((r) => r.kind === 'role')) return [];
+    return [this.append({ kind: 'role', role })];
   }
 
   /** 붙인 이름 (D-085). 없으면 undefined. */

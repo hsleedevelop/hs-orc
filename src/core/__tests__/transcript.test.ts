@@ -10,6 +10,7 @@ import {
   prepareSession,
   readSessionLog,
   readTranscript,
+  recordedStatus,
   transcriptPath,
   type TranscriptRecord,
 } from '../transcript.ts';
@@ -111,5 +112,31 @@ describe('대화 기록 (SPEC §6.4.1)', () => {
     assert.equal(loaded.broken, 1);
     assert.deepEqual(listSessions(dir, 'project').map((s) => s.id).sort(), ['new', 'old']);
     assert.equal(readTranscript(legacyTranscriptPath(dir, 'old')).records.length, 1);
+  });
+});
+
+describe('목록 상태·역할 (D-085 · D-090)', () => {
+  const at = '2026-10-09T00:00:00.000Z';
+  const result: TranscriptRecord = { v: 1, at, turn: 1, kind: 'result', outcome: 'ok', verdict: 'pass', text: '', review: '', evidence: '', decisionId: 'd' };
+
+  it('결과 뒤의 설정 줄(역할 · 지휘자 · 방식 · 이름 · 비용)은 완료를 가리지 않는다', () => {
+    for (const tail of [
+      { kind: 'role', role: 'orchestrator' },
+      { kind: 'orchestrator', model: 'opus', effort: 'high' },
+      { kind: 'mode', mode: 'auto' },
+      { kind: 'name', name: 'web' },
+    ] as const) {
+      assert.deepEqual(recordedStatus([user(1, '고쳐줘'), result, { v: 1, at, turn: 1, ...tail }]), { state: 'done', outcome: 'ok' }, tail.kind);
+    }
+  });
+
+  it('목록 행에 역할을 싣는다 — role 줄이 없으면 워커, 마지막 것이 이긴다', () => {
+    const dir = tmp();
+    appendRecord(transcriptPath(dir, 'old'), user(1, '옛 세션'));
+    appendRecord(transcriptPath(dir, 'orc'), { v: 1, at, turn: 0, kind: 'role', role: 'orchestrator' });
+    appendRecord(transcriptPath(dir, 'back'), { v: 1, at, turn: 0, kind: 'role', role: 'orchestrator' });
+    appendRecord(transcriptPath(dir, 'back'), { v: 1, at, turn: 0, kind: 'role', role: 'worker' });
+    const roles = Object.fromEntries(listSessions(dir, 'project').map((s) => [s.id, s.role]));
+    assert.deepEqual(roles, { old: 'worker', orc: 'orchestrator', back: 'worker' });
   });
 });

@@ -12,7 +12,7 @@
  */
 import { createElement as h, useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { compactLines, cutLine, lastEvent, ladderLines, retryLines, statusLabel } from '../../transcript-lines.ts';
+import { compactLines, cutLine, lastEvent, ladderLines, retryLines, roleLabel, statusLabel } from '../../transcript-lines.ts';
 
 const SCREENS = ['Session', 'Dashboard', 'Agents', 'Reviews', 'Debug'] as const;
 type Screen = (typeof SCREENS)[number];
@@ -27,6 +27,7 @@ interface WorktreeInfo { dir: string; branch: string | null; head: string; main:
 interface WorktreeState { repo: string | null; items: WorktreeInfo[]; current: string }
 
 type SessionKind = 'project' | 'scratch';
+type SessionRole = 'worker' | 'orchestrator';
 type SessionState = 'waiting_input' | 'working' | 'blocked';
 type ApprovalMode = 'manual' | 'auto-ask' | 'auto';
 // `terminal.ts` 의 TERMINALS 와 같은 id — 렌더러는 node 모듈을 못 싣는다. 모르는 id 는 서비스가 거절한다.
@@ -63,16 +64,17 @@ type Rec =
   | { kind: 'orchestrator'; turn: number; model: string; effort: string }
   | { kind: 'steps'; turn: number; title: string; steps: Step[]; estimateUsd: number; by: string; cost: string; cut?: Cut; write?: true; asked?: { code: string; text: string }[]; guide?: string[]; readOnlyBlocked?: true }
   | { kind: 'name'; turn: number; name: string }
+  | { kind: 'role'; turn: number; role: SessionRole }
   | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string; cut?: Cut; compacted?: Compaction[]; step?: string }
   | { kind: 'summary'; turn: number; text: string; next: string; by?: string }
   | { kind: 'error'; turn: number; text: string };
 interface Hold { pid: number; by: string; state: 'working' | 'blocked' }
-interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; progress: string[]; mode: ApprovalMode; ladder: { stage: string; label: string; changes: string[] } | null; orchestrator: OrchestratorChoice & { engine: string; line: string }; stepsPending: boolean; scaffoldPending: boolean; gitInitOffered: boolean; name?: string; external: Hold | null; ended: boolean; archived: boolean }
+interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; progress: string[]; mode: ApprovalMode; ladder: { stage: string; label: string; changes: string[] } | null; orchestrator: OrchestratorChoice & { engine: string; line: string }; stepsPending: boolean; scaffoldPending: boolean; gitInitOffered: boolean; name?: string; external: Hold | null; ended: boolean; archived: boolean; role: SessionRole }
 interface SessionUsage { tokens: number; cacheReadTokens: number; cacheReadPartial?: true; billedUsd: number; convertedUsd: number }
 type Activity = 'working' | 'blocked' | 'done' | 'interrupted' | 'idle' | 'ended';
 interface SessionStatus { state: Activity; outcome?: string; holder?: { pid: number; by: string } }
 // `placeholder` 는 렌더러만 붙인다 — 첫 메시지 전이라 기록이 없는 열린 세션의 자리다. 종료·보관할 것이 없다.
-interface SessionSummary { id: string; dir: string; kind: SessionKind; lastAt: string; preview: string; usage?: SessionUsage; name?: string; status?: SessionStatus; archived?: true; placeholder?: true }
+interface SessionSummary { id: string; dir: string; kind: SessionKind; lastAt: string; preview: string; usage?: SessionUsage; name?: string; status?: SessionStatus; archived?: true; role?: SessionRole; placeholder?: true }
 interface SessionRef { kind: SessionKind; dir: string; id: string }
 interface ConversationTree { projects: { project: ProjectInfo; sessions: SessionSummary[] }[]; scratch: SessionSummary[] }
 
@@ -97,6 +99,8 @@ interface Bridge {
   convGitInit(): Promise<SessionView>;
   convTerminal(terminal: string): Promise<string>;
   convRename(name: string): Promise<SessionView>;
+  // 오케스트레이터로 지정·워커로 되돌리기 (D-090). 같은 폴더에 다른 오케스트레이터가 있으면 거절된다.
+  convRole(role: SessionRole): Promise<SessionView>;
   convClose(): Promise<void>;
   // 종료·보관 (D-089). 열린 세션이면 그 뷰, 아니면 null 이다.
   convEnd(ref: SessionRef): Promise<SessionView | null>;
@@ -327,7 +331,7 @@ function NewSession(props: { onOpen: (v: SessionView) => void; onError: (m: stri
   return h('div', { className: 'stack' },
     card('새 세션',
       h('div', { className: 'row' },
-        h('button', { className: 'btn accent', disabled: busy, onClick: () => start('project') }, '이 폴더에서 시작'),
+        h('button', { className: 'btn accent', disabled: busy, title: '이 폴더에서 워커 세션을 연다 — 오케스트레이터 지정은 세션 머리에서 한다 (D-090)', onClick: () => start('project') }, '워커 세션 만들기'),
         h('button', { className: 'btn', disabled: busy, onClick: () => start('scratch') }, '스크래치'),
         h('span', { className: 'hint' }, '스크래치는 폴더 없이 시작한다 — 쓰기를 켤 수 없다')),
       h('div', { className: 'hint', style: { marginTop: 8 } }, '지난 세션은 왼쪽 목록에서 연다')));
@@ -440,6 +444,8 @@ function Sidebar(props: {
         className: `st ${s.status?.state ?? ''}${s.status?.state === 'done' && s.status.outcome !== 'ok' && s.status.outcome !== undefined ? ' bad' : ''}`,
         title: s.status?.holder ? `${s.status.holder.by} · pid ${s.status.holder.pid}` : '',
       }, statusLabel(s.status)),
+      // 역할 칩 (D-090) — 오케스트레이터만 색을 입힌다. 워커가 기본이라 흐리게 둔다.
+      s.placeholder ? null : h('span', { className: `role ${s.role ?? 'worker'}`, title: s.role === 'orchestrator' ? '이 폴더의 오케스트레이터 세션' : '워커 세션' }, roleLabel(s.role)),
       h('span', { className: 'ref', title: `id ${s.id}${s.name ? ` · 이름 ${s.name}` : ''}` }, s.name ? `${s.name} · ${s.id}` : s.id)),
     h('span', { className: 't' }, `${s.lastAt ? s.lastAt.slice(0, 16).replace('T', ' ') : '—'}${where ? ` · ${where}` : ''}`),
     usage ? h('span', { className: 'u', title: usage.title }, usage.line) : null);
@@ -483,6 +489,10 @@ function Sidebar(props: {
       !folded.has(key) && sessions.length === 0 ? h('div', { className: 'sb-empty' }, '세션 없음') : null);
   };
 
+  // 오케스트레이터 행은 프로젝트 묶음 맨 위에 고정한다 (D-090). 종료한 오케스트레이터는 0~1 에 세지 않으므로 고정하지 않는다 — 시각 순서 그대로다.
+  const pinned = (s: SessionSummary) => s.role === 'orchestrator' && s.status?.state !== 'ended';
+  const pinOrchestrator = (sessions: SessionSummary[]) => [...sessions.filter(pinned), ...sessions.filter((s) => !pinned(s))];
+
   // 보관한 세션(D-089)은 기본 목록에서 빼고 맨 아래 보관함에 모은다. 서비스는 다 주고 여기서 가른다 —
   // 빼고 받으면 열린 보관 세션이 "(새 세션)" 자리로 다시 생긴다.
   const active = (sessions: SessionSummary[]) => sessions.filter((s) => !s.archived);
@@ -508,7 +518,7 @@ function Sidebar(props: {
                 useDir(project.dir);
               },
             }, project.name),
-            '이 폴더에서 새 세션', project.dir, withOpen(project.dir, active(all), all),
+            '이 폴더에서 워커 세션 만들기', project.dir, pinOrchestrator(withOpen(project.dir, active(all), all)),
             `${project.dir === current ? ' current' : ''}${project.exists ? '' : ' missing'}`)),
         group('::scratch', h('span', { className: 'sb-name static' }, '스크래치'), '새 스크래치 세션', null, withOpen(null, active(tree.scratch), tree.scratch)),
         h('div', { key: '::archive', className: 'sb-group' },
@@ -551,7 +561,7 @@ function orchestratorSelects(
   ];
 }
 
-function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v: SessionView) => void; onClose: () => void }): ReactElement {
+function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v: SessionView) => void; onClose: () => void; onOpen: (v: SessionView) => void }): ReactElement {
   const { onChange } = props;
   // 요청이 도는 동안 받은 뷰. 자동 승인 위임은 send 하나가 카드·승인·실행·결과를 모두 지나므로 (D-064 결정 7) 끝나기 전에는 카드도 취소 버튼(D-066)도 없다.
   const [peek, setPeek] = useState<SessionView | null>(null);
@@ -596,7 +606,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       orc.convView().then((v) => {
         const changed = v.records.length !== cur.records.length || v.state !== cur.state || v.name !== cur.name
           || v.external?.pid !== cur.external?.pid || v.external?.state !== cur.external?.state
-          || v.ended !== cur.ended || v.archived !== cur.archived;
+          || v.ended !== cur.ended || v.archived !== cur.archived || v.role !== cur.role;
         if (live && changed) onChange(v);
       }, () => undefined);
     }, 2000);
@@ -843,6 +853,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
         return stepsCard(r, i, r === last && view.state === 'blocked' && view.stepsPending);
       case 'name':
         return h('div', { key: i, className: 'hint' }, r.name ? `이름 → ${r.name}` : '이름 지움');
+      case 'role':
+        return h('div', { key: i, className: 'hint' }, `역할 → ${roleLabel(r.role)}`);
       case 'result':
         return h('section', { key: i, className: 'card' },
           h('span', { className: 'label' }, `위임 결과${r.step ? ` · 단계 ${r.step}` : ''} · ${r.decisionId}`),
@@ -875,6 +887,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
         className: 'btn mono', title: `id ${view.id} — 눌러서 복사`,
         onClick: () => { void navigator.clipboard?.writeText(view.id); },
       }, view.id),
+      // 역할 칩 (D-090). 표시뿐이다 — 오케스트레이터도 워커와 같은 메시지 경로를 돈다.
+      h('span', { className: `role ${view.role}`, title: view.role === 'orchestrator' ? '이 폴더의 오케스트레이터 세션 — 폴더당 하나' : '워커 세션' }, roleLabel(view.role)),
       naming === null
         ? h('button', {
             className: 'btn', disabled: locked, title: '이름을 붙이면 id 대신 이름으로 부를 수 있다',
@@ -903,6 +917,20 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
           onChange: (e: { target: { value: string } }) => { setTerminal(e.target.value); localStorage.setItem(TERMINAL_KEY, e.target.value); },
         }, ...TERMINALS.map((t) => h('option', { key: t.id, value: t.id }, t.label))),
         h('button', { className: 'btn', title: `${view.dir} 에서 터미널 열기`, onClick: () => { orc.convTerminal(terminal).catch((e: unknown) => setError(why(e))); } }, '터미널'),
+        // 역할 (D-090) — 지정·해제는 기록 한 줄이다. 같은 폴더에 다른 오케스트레이터가 있으면 서비스가 거절한다. 스크래치는 프로젝트가 없어 두지 않는다.
+        view.kind === 'project'
+          ? h('button', {
+              className: 'btn', disabled: locked,
+              title: view.role === 'orchestrator' ? '워커로 되돌린다 — 이 폴더에 오케스트레이터가 없어진다' : '이 세션을 이 폴더의 오케스트레이터로 지정한다 — 폴더당 하나',
+              onClick: () => act(orc.convRole(view.role === 'orchestrator' ? 'worker' : 'orchestrator')),
+            }, view.role === 'orchestrator' ? '오케스트레이터 해제' : '오케스트레이터로 지정')
+          : null,
+        view.kind === 'project' && view.role === 'orchestrator'
+          ? h('button', {
+              className: 'btn', disabled: busy, title: '같은 폴더에서 새 워커 세션을 연다 — 이 세션은 사이드바에 그대로 남는다',
+              onClick: () => { orc.convStart('project').then(props.onOpen, (e: unknown) => setError(why(e))); },
+            }, '워커 세션 만들기')
+          : null,
         h('button', { className: 'btn', title: '화면에서만 닫는다 — 세션은 그대로고 사이드바에서 다시 연다', onClick: props.onClose }, '세션 닫기'),
         // 닫기와 다른 무게의 조작이다 (D-089) — 세로 선 너머에 따로 둔다. 보관은 숨김, 종료는 쓰기 잠금이다. 둘 다 기록을 지우지 않는다.
         h('div', { className: 'head-end' },
@@ -1094,6 +1122,7 @@ function App(): ReactElement {
           rows,
           onChange: accept,
           onClose: () => { orc.convClose().then(() => setConv(null), (e: unknown) => setError(why(e))); },
+          onOpen: opened,
         })
       : h(NewSession, { onOpen: opened, onError: setError }));
   const body =
@@ -1111,7 +1140,7 @@ function App(): ReactElement {
       h(Sidebar, {
         current: projects?.current.dir,
         open: conv,
-        refresh: `${projects?.current.dir ?? ''}|${conv ? `${conv.dir}::${conv.id}::${conv.records.length}::${conv.ended}::${conv.archived}` : ''}`,
+        refresh: `${projects?.current.dir ?? ''}|${conv ? `${conv.dir}::${conv.id}::${conv.records.length}::${conv.ended}::${conv.archived}::${conv.role}` : ''}`,
         onOpen: opened,
         onView: accept,
         onProject: moved,

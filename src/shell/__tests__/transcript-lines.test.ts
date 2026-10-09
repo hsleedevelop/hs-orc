@@ -3,7 +3,8 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { compactLines, cutLine, lastEvent } from '../transcript-lines.ts';
+import { SETTING_KINDS as CORE_SETTING_KINDS } from '../../core/transcript.ts';
+import { SETTING_KINDS, compactLines, cutLine, lastEvent } from '../transcript-lines.ts';
 
 describe('transcript-lines', () => {
   it('컷이 없으면 줄이 없고, 있으면 잘린 턴·글자 수를 한 줄로 알린다', () => {
@@ -23,5 +24,14 @@ describe('transcript-lines', () => {
     const plan = { kind: 'plan', turn: 1 };
     assert.equal(lastEvent([{ kind: 'user', turn: 1 }, plan, { kind: 'name', turn: 1 }]), plan);
     assert.equal(lastEvent([{ kind: 'name', turn: 0 }]), undefined);
+  });
+
+  it('역할·비용 줄도 건너뛴다 — 승인 대기 중 오케스트레이터로 지정해도 카드 버튼이 남는다 (D-090)', () => {
+    const plan = { kind: 'plan', turn: 1 };
+    assert.equal(lastEvent([{ kind: 'user', turn: 1 }, plan, { kind: 'role', turn: 1 }, { kind: 'spend', turn: 1 }]), plan);
+  });
+
+  it('건너뛰는 설정 줄 목록이 Core(`transcript.ts`)와 같다 — 한쪽에만 더하면 화면과 Core 가 다른 카드를 살아 있다고 본다', () => {
+    assert.deepEqual([...SETTING_KINDS].sort(), [...CORE_SETTING_KINDS].sort());
   });
 });

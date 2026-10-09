@@ -1,10 +1,12 @@
 /**
  * `hs-orc session` (D-085) — 다른 세션·오케스트레이터가 id·이름으로 세션을 다룬다. 실행기는 전부 가짜다.
  */
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'node:test';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { gitEnv } from '../../core/git-env.ts';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,11 +15,11 @@ import type { RowClassifier } from '../../adapters/jev.ts';
 import type { ApprovalMode } from '../../data/limits.ts';
 import { Journal } from '../../core/journal.ts';
 import { lockPath } from '../../core/session-lock.ts';
-import { setEnded } from '../../core/session-meta.ts';
+import { setArchived, setEnded } from '../../core/session-meta.ts';
 import { prepareSession, readSessionLog } from '../../core/transcript.ts';
 import { assembleSession, restoreBudget } from '../conversation.ts';
 import { knownSessions, resolveSession } from '../session-registry.ts';
-import { listLines, nameSession, parseSessionArgs, sendToSession } from '../session-cmd.ts';
+import { listLines, nameSession, newSession, parseSessionArgs, sendToSession, showLines } from '../session-cmd.ts';
 
 const calls: string[] = [];
 const fake: SlotExecutor = (slot, prompt) => {
@@ -273,5 +275,98 @@ describe('session — GENERAL 읽기 답도 --run 이 있어야 돈다 (D-085 �
 
     const ran = await sendToSession({ cwd: dir, ref: 'general1', message: ask, write: false, run: true, verify: [], execute: watch, classifier: general });
     assert.ok(ran.records.some((r) => r.kind === 'direct' && r.read?.by === 'auto'), `기록: ${ran.records.map((r) => r.kind).join(',')}`);
+  });
+});
+
+describe('session new — 역할 (D-090)', () => {
+  /** 홈을 가둔 빈 project 폴더. */
+  const folder = () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'hs-session-new-'));
+    process.env['HS_ORC_SCRATCH'] = path.join(root, 'scratch');
+    process.env['HS_ORC_PROJECTS'] = path.join(root, 'projects.json');
+    const dir = path.join(root, 'proj');
+    mkdirSync(dir);
+    return dir;
+  };
+
+  it('인자 — 기본은 worker, 모르는 역할·다른 명령의 --role·--name 은 던진다', () => {
+    assert.deepEqual(parseSessionArgs(['new']), { cmd: 'new', role: 'worker', name: '' });
+    assert.deepEqual(parseSessionArgs(['new', '--role', 'orchestrator', '--name', 'hub']), { cmd: 'new', role: 'orchestrator', name: 'hub' });
+    assert.throws(() => parseSessionArgs(['new', '--role', 'boss']), /worker · orchestrator/);
+    assert.throws(() => parseSessionArgs(['new', 'extra']), /인자 0개/);
+    assert.throws(() => parseSessionArgs(['ls', '--role', 'worker']), /ls 에는 --role/);
+    assert.throws(() => parseSessionArgs(['send', 'web', 'hi', '--name', 'x']), /send 에는 --name/);
+  });
+
+  it('부른 폴더에 세션 파일을 만들고 id 를 찍는다 — 역할·이름 줄만 남고 엔진은 돌지 않는다. ls·show·찾기에 잡힌다', () => {
+    const dir = folder();
+    const before = calls.length;
+    const { target, lines } = newSession(dir, 'orchestrator', 'hub');
+    assert.equal(calls.length, before, '엔진 0회');
+    assert.deepEqual(readSessionLog(dir, target.id).records.map((r) => r.kind), ['role', 'name']);
+    assert.match(lines[0] ?? '', new RegExp(`^${target.id}  오케스트레이터 · 이름 hub`));
+    assert.equal(resolveSession(dir, 'hub').id, target.id);
+    assert.equal(resolveSession(dir, 'hub').role, 'orchestrator');
+    assert.match(listLines(knownSessions(dir)).join('\n'), new RegExp(`${target.id}  hub +idle +오케스트레이터`));
+    assert.ok(showLines(resolveSession(dir, 'hub'), 0).includes('역할   오케스트레이터'));
+    assert.equal(existsSync(lockPath(dir, target.id)), false, '쓰고 나면 놓는다');
+    const worker = newSession(dir, 'worker', '');
+    assert.deepEqual(readSessionLog(dir, worker.target.id).records.map((r) => r.kind), ['role'], '워커도 role 줄로 파일을 만든다');
+  });
+
+  it('같은 폴더의 두 번째 오케스트레이터는 거절하고 아무것도 쓰지 않는다 — 다른 폴더는 따로 센다', () => {
+    const dir = folder();
+    const first = newSession(dir, 'orchestrator', 'hub1');
+    const files = () => readdirSync(path.dirname(lockPath(dir, 'x'))).filter((n) => n.endsWith('.jsonl')).length;
+    assert.throws(() => newSession(dir, 'orchestrator', ''), new RegExp(`이미 hub1 · ${first.target.id} 가 있다`));
+    assert.equal(files(), 1);
+    assert.doesNotThrow(() => newSession(folder(), 'orchestrator', ''));
+  });
+
+  it('보관한 오케스트레이터는 세고, 종료한 오케스트레이터는 세지 않는다', () => {
+    const dir = folder();
+    const first = newSession(dir, 'orchestrator', '');
+    setArchived(dir, first.target.id, true);
+    assert.throws(() => newSession(dir, 'orchestrator', ''), /보관됨/);
+    setEnded(dir, first.target.id, true);
+    assert.doesNotThrow(() => newSession(dir, 'orchestrator', ''));
+  });
+
+  it('이름 모양이 틀리거나 겹치면 파일을 만들기 전에 던진다', () => {
+    const dir = folder();
+    newSession(dir, 'worker', 'taken');
+    assert.throws(() => newSession(dir, 'worker', '1bad'), /영문자로 시작/);
+    assert.throws(() => newSession(dir, 'worker', 'taken'), /이미 다른 세션/);
+    assert.equal(readdirSync(path.dirname(lockPath(dir, 'x'))).filter((n) => n.endsWith('.jsonl')).length, 1);
+  });
+
+  it('두 프로세스가 같은 순간 오케스트레이터를 만들어도 하나만 선다 — 검사와 쓰기가 폴더의 역할 잠금 안에 있다 (PR #126 리뷰)', () => {
+    const dir = folder();
+    const other = [
+      `import { newSession } from ${JSON.stringify(path.resolve(import.meta.dirname, '../session-cmd.ts'))};`,
+      "newSession(process.argv[1], 'orchestrator', '');",
+    ].join('\n');
+    let raced: SpawnSyncReturns<string> | null = null;
+    const append = fs.appendFileSync;
+    // 이 프로세스가 검사를 지나 role 줄을 쓰기 직전 — 그 틈에 다른 프로세스가 같은 폴더에 오케스트레이터를 만든다.
+    mock.method(fs, 'appendFileSync', (...args: Parameters<typeof fs.appendFileSync>) => {
+      if (!raced && String(args[0]).endsWith('.jsonl')) {
+        raced = spawnSync(process.execPath, ['--input-type=module', '-e', other, dir], { env: process.env, encoding: 'utf8' });
+      }
+      append(...args);
+    });
+    syncBuiltinESMExports();
+    try {
+      newSession(dir, 'orchestrator', 'first');
+    } finally {
+      mock.restoreAll();
+      syncBuiltinESMExports();
+    }
+    const race = raced as SpawnSyncReturns<string> | null;
+    assert.notEqual(race?.status, 0, '잠금 없이 검사만 하면 다른 프로세스도 검사를 지나 오케스트레이터가 둘이 된다');
+    assert.match(String(race?.stderr), /이 폴더의 역할을 바꾸는 중이다/);
+    const orchestrators = knownSessions(dir).filter((s) => s.dir === dir && s.role === 'orchestrator');
+    assert.deepEqual(orchestrators.map((s) => s.name), ['first']);
+    assert.equal(existsSync(path.join(path.dirname(lockPath(dir, 'x')), 'roles.lock')), false, '쓰고 나면 놓는다');
   });
 });
