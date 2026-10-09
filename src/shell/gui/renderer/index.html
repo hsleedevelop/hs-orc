@@ -105,6 +105,8 @@
       .sb-act.danger.confirm { background: color-mix(in srgb, var(--red) 20%, var(--bg-elev)); color: var(--fg-strong); }
       .sb-act[disabled] { opacity: .35; cursor: default; }
       .sb-item.archived .p { color: var(--dim-2); }
+      /* 드러난 동작 버튼 아래로 미리보기가 들어가지 않게 그만큼 비운다. */
+      .sb-row:hover .sb-item .p, .sb-row:focus-within .sb-item .p { padding-right: 96px; }
       /* 세션 머리의 보관·종료 — 닫기와 세로 선으로 가른다. */
       .head-end { display: flex; align-items: center; gap: 6px; padding-left: 10px; border-left: 1px solid var(--border-2); }
       .sb-item .u { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 10px; color: var(--dim); }

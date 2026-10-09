@@ -1111,7 +1111,7 @@ function App(): ReactElement {
       h(Sidebar, {
         current: projects?.current.dir,
         open: conv,
-        refresh: `${projects?.current.dir ?? ''}|${conv ? `${conv.dir}::${conv.id}::${conv.records.length}` : ''}`,
+        refresh: `${projects?.current.dir ?? ''}|${conv ? `${conv.dir}::${conv.id}::${conv.records.length}::${conv.ended}::${conv.archived}` : ''}`,
         onOpen: opened,
         onView: accept,
         onProject: moved,
