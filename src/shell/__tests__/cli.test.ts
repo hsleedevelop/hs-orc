@@ -527,13 +527,32 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
 
   it('once 는 rework(검증 명령 실패)면 exit 1, unverified 면 exit 0 이다 (D-044)', () => {
     reset();
-    const red = cli(['이 아키텍처 설계 검토해줘', '--run', '--verify', 'exit 1'], { PATH: fakeDir, REVIEWER_PASS: '1' });
+    const red = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--verify', 'exit 1'], { PATH: fakeDir, REVIEWER_PASS: '1' });
     assert.match(red.err, /outcome=rework/);
     assert.equal(red.code, 1, '테스트가 실패했는데 exit 0 — 스크립트가 다음 단계로 넘어간다.');
     reset();
-    const unknown = cli(['이 아키텍처 설계 검토해줘', '--run', '--verify', 'exit 0'], { PATH: fakeDir, REVIEWER_PASS: '1' });
+    const unknown = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--verify', 'exit 0'], { PATH: fakeDir, REVIEWER_PASS: '1' });
     assert.match(unknown.err, /outcome=unverified/);
     assert.equal(unknown.code, 0, 'R10 은 문서 절을 자동으로 못 모은다 — unverified 는 once 의 정상 결과다.');
+  });
+
+  it('once 는 검증 명령을 reviewer 앞에 돌려 결과를 reviewer 프롬프트에 싣는다 (D-094)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--verify', 'echo ONCE_MARK'], { PATH: fakeDir, REVIEWER_PASS: '1' });
+    assert.equal(r.code, 0, r.err);
+    const reviewer = readFileSync(codexArgs, 'utf8').split('<<END>>')[0] ?? '';
+    assert.match(reviewer, /--- 검증 명령 \(Core 실행\) ---\n\$ echo ONCE_MARK\nexit=0\nONCE_MARK/);
+  });
+
+  it('once 는 읽기 전용이면 검증 명령을 돌리지 않고 그렇다고 남긴다 (D-094)', () => {
+    reset();
+    const marker = path.join(sandbox, 'once-ro-marker');
+    rmSync(marker, { force: true });
+    const r = cli(['이 아키텍처 설계 검토해줘', '--run', '--verify', `touch '${marker}'`], { PATH: fakeDir, REVIEWER_PASS: '1' });
+    assert.equal(existsSync(marker), false, '읽기 전용 위임에서 원본에 명령이 돌았다');
+    assert.match(r.err, /읽기 전용이라 검증 명령\(touch .*\)을 실행하지 않는다/);
+    assert.match(r.err, /읽기 전용 위임이라 검증 명령 1개를 실행하지 않았다/);
+    assert.doesNotMatch(readFileSync(codexArgs, 'utf8'), /검증 명령 \(Core 실행\)/);
   });
 
   it('reviewer 실행이 실패하면 재시도하지 않고 사람에게 올린다', () => {

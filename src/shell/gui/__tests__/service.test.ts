@@ -98,7 +98,7 @@ describe('GUI — S5 시나리오', () => {
   it('증거가 모이면 ok 로 닫는다 — "성공했습니다"가 아니라 exit code 다', async () => {
     const log = isolated();
     const service = new GuiService(fake);
-    const result = await service.run({ task: '이 타입 에러 고쳐줘', verify: ['exit 0'] });
+    const result = await service.run({ task: '이 타입 에러 고쳐줘', verify: ['exit 0'], write: true });
 
     assert.equal(result.outcome, 'ok');
     assert.equal(result.report?.satisfied, true);
@@ -107,7 +107,7 @@ describe('GUI — S5 시나리오', () => {
 
   it('검증 명령이 실패하면 증거로 치지 않는다', async () => {
     isolated();
-    const result = await new GuiService(fake).run({ task: '이 타입 에러 고쳐줘', verify: ['exit 3'] });
+    const result = await new GuiService(fake).run({ task: '이 타입 에러 고쳐줘', verify: ['exit 3'], write: true });
     // exit code 3 도 **증거다**(형태가 맞다). 다만 R01 은 코드 값을 따지지 않으므로 충족이다 —
     // 이 테스트는 그 사실을 고정한다: 통과/실패 판정은 사람이 하고, 제품은 증거의 **존재와 형태**를 본다.
     assert.equal(result.report?.satisfied, true);
@@ -158,7 +158,7 @@ describe('GUI — 작업 폴더 (폴더 전환)', () => {
     assert.equal(service.useProject(project).current.dir, project);
 
     // MARKER 는 **바꾼 폴더에만** 있다. 이 명령이 통과하면 cwd 가 실제로 옮겨간 것이다.
-    const result = await service.run({ task: '이 타입 에러 고쳐줘', verify: ['test -f MARKER'] });
+    const result = await service.run({ task: '이 타입 에러 고쳐줘', verify: ['test -f MARKER'], write: true });
     assert.equal(result.report?.accepted.some((e) => e.kind === 'command' && e.exitCode === 0), true);
     assert.equal(service.debug().cwd, project, 'Debug 화면이 예전 폴더를 보여주면 안 된다');
   });

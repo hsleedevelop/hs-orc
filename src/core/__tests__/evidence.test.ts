@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadMatrix } from '../../data/matrix.ts';
 import { REQUIREMENTS, collect, outcomeOf, validate, type Evidence } from '../evidence.ts';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { changedFiles, runCommand, snapshotTests, testChanges } from '../evidence-gather.ts';
@@ -51,9 +51,9 @@ describe('"성공했습니다"는 증거가 아니다', () => {
     assert.match(validate({ kind: 'document-section', name: '대안', text: 'ok' }) ?? '', /사실상 비었다/);
   });
 
-  it('시그널로 죽은 명령은 exit code -1 로 남아 "성공"으로 읽히지 않는다', () => {
-    const e = runCommand('kill -9 $$', process.cwd());
-    assert.equal(e.kind === 'command' && e.exitCode !== 0, true);
+  it('시그널로 죽은 명령은 exit code -1 로 남아 "성공"으로 읽히지 않는다', async () => {
+    const { evidence } = await runCommand('kill -9 $$', process.cwd());
+    assert.equal(evidence.exitCode, -1);
   });
 });
 
@@ -169,11 +169,29 @@ describe('기존 테스트 약화 (D-047)', () => {
 });
 
 describe('기계적 수집', () => {
-  it('명령을 실제로 돌려 exit code 를 받는다', () => {
-    assert.deepEqual(
-      [runCommand('exit 0'), runCommand('exit 7')].map((e) => (e.kind === 'command' ? e.exitCode : null)),
-      [0, 7],
-    );
+  it('명령을 실제로 돌려 exit code 를 받는다', async () => {
+    assert.deepEqual([(await runCommand('exit 0')).evidence.exitCode, (await runCommand('exit 7')).evidence.exitCode], [0, 7]);
+  });
+
+  it('시간 초과면 그룹째 끝내 손자도 남기지 않고 exit -1 이다 (D-094·D-078)', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-verify-timeout-'));
+    const pidFile = path.join(dir, 'pid');
+    const started = Date.now();
+    const { evidence } = await runCommand(`sleep 120 >/dev/null 2>&1 & echo $! > '${pidFile}'; wait`, dir, { timeoutMs: 300 });
+    assert.ok(Date.now() - started < 10_000);
+    assert.equal(evidence.exitCode, -1);
+    const pid = Number(readFileSync(pidFile, 'utf8').trim());
+    const deadline = Date.now() + 5_000;
+    const alive = (): boolean => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    while (alive() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(alive(), false, '손자 sleep 이 살아 있다');
   });
 
   it('변경 파일은 git 이 진실이다 — 모델이 말한 목록을 믿지 않는다', () => {

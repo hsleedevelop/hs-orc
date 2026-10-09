@@ -221,11 +221,11 @@ describe('대화 세션 — 승인·결과 처리 (SPEC §6.4.4)', () => {
     assert.match(summary.next, /코드·로그·재현 조건 보강/);
   });
 
-  it('검증 명령이 통과하면 다음 제안이 없다', async () => {
+  it('검증 명령이 통과하면 다음 제안이 없다 — 쓰기 위임이어야 돈다 (D-094)', async () => {
     isolate();
     const { session } = make(conductSpy().exec);
     await session.send('이 타입 에러 고쳐줘');
-    const summary = (await session.approve({ verify: ['exit 0'] })).at(-1);
+    const summary = (await session.approve({ verify: ['exit 0'], write: true })).at(-1);
     assert.ok(summary?.kind === 'summary' && summary.next === '');
   });
 

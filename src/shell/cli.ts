@@ -23,9 +23,9 @@ import { EXISTING_TEST_ROWS, FAILING_PHASES, collect, contradiction, notRun, out
 import { readUnclassifiedWithLegacy, recordUnclassified, suggestRows } from '../core/unclassified.ts';
 import { declaredTests, defaultVerify } from '../data/verify.ts';
 import { depStatus } from './deps.ts';
-import { noTestsEvidenceNote, parseVerdict, primaryNoTestsNote, reviewPrompt, runDuo } from '../core/duo.ts';
+import { checksText, noTestsEvidenceNote, parseVerdict, primaryNoTestsNote, readOnlyVerifyNote, reviewPrompt, runDuo } from '../core/duo.ts';
 import { Budget } from '../core/budget.ts';
-import { changedFiles, loadEvidenceFile, noTests, runCommand, snapshotTests, testChanges, type TestSnapshot } from '../core/evidence-gather.ts';
+import { changedFiles, loadEvidenceFile, noTests, runCommand, snapshotTests, testChanges, type CommandEvidence, type TestSnapshot } from '../core/evidence-gather.ts';
 import { GATE_CHECKS, parseGateCheck, type GateSignals } from '../core/gatekeeper.ts';
 import { routeWithFallback } from '../core/pipeline.ts';
 import { defaultJev } from './jev.ts';
@@ -324,9 +324,10 @@ async function main(): Promise<void> {
     const plainCmds = postCmds.filter((v) => v.phase === undefined);
     let reproduced = '';
     if (args.write && plainCmds.length + preCmds.length > 0) {
-      const baseline = [...plainCmds, ...preCmds]
-        .map((v) => runCommand(v.cmd, process.cwd(), v.phase))
-        .flatMap((e) => (e.kind === 'command' ? [e] : []));
+      const baseline: CommandEvidence[] = [];
+      for (const v of [...plainCmds, ...preCmds]) {
+        baseline.push((await runCommand(v.cmd, process.cwd(), v.phase !== undefined ? { phase: v.phase } : {})).evidence);
+      }
       process.stderr.write(`기준선 ${baseline.map((c) => `\`${cmdLabel(c)}\` exit=${c.exitCode}`).join(', ')}\n`);
       // D-046: 돌지 못한 명령(126·127·시그널·시간 초과)은 환경 문제다 — 모델도 --fix-red-baseline 도 고치지 못한다.
       const unrunnable = baseline.filter((c) => notRun(c.exitCode) !== null);
@@ -412,12 +413,13 @@ async function main(): Promise<void> {
         // Evaluator 는 reviewer 슬롯이 돈다 (D-003). 형식·판정은 once 의 독립 리뷰와 같다 —
         // 마지막 줄 PASS/FAIL, 못 읽으면 unknown 이고 통과로 봐주지 않는다.
         evaluate: async (_ctx, output) => {
-          const ran = args.write
-            ? postCmds.map((v) => runCommand(v.cmd, process.cwd(), v.phase)).flatMap((e) => (e.kind === 'command' ? [e] : []))
-            : [];
+          const ran: CommandEvidence[] = [];
+          if (args.write) {
+            for (const v of postCmds) ran.push((await runCommand(v.cmd, process.cwd(), v.phase !== undefined ? { phase: v.phase } : {})).evidence);
+          }
           const failed = ran.filter((c) => contradiction(c) !== null);
           const checks = args.write
-            ? [ran.map((c) => `$ ${cmdLabel(c)}\nexit=${c.exitCode}\n${c.output.slice(-1500)}`).join('\n\n'), reproduced]
+            ? [checksText(ran), reproduced]
                 .filter(Boolean)
                 .join('\n\n') || undefined
             : verifyCmds.length > 0
@@ -548,9 +550,29 @@ async function main(): Promise<void> {
   const testsBefore = args.write && testGlobs.length > 0 ? snapshotTests(testGlobs) : undefined;
   // 기존 테스트를 전제하는 행인데 대상에 테스트가 없다 (D-093) — 작업 전에 보고 primary·reviewer·증거에 싣는다.
   const missingTests = EXISTING_TEST_ROWS.has(plan.assignment.id) ? noTests(process.cwd()) : null;
+  // 프로젝트가 선언한 기본 검증 + 이번 실행의 --verify. 추론은 없다 (SPEC §5).
+  const verifyConfig = verifyConfigPath(process.cwd());
+  const declared = defaultVerify(plan.assignment.id, verifyConfig);
+  const verify = [...declared, ...args.verify];
+  if (declared.length > 0) {
+    process.stderr.write(`검증   ${verifyConfig} 선언 ${declared.length}건: ${declared.map((v) => v.cmd).join(' · ')}\n`);
+  }
+  const verifyLabels = verify.map((v) => (v.phase ? `${v.phase}:${v.cmd}` : v.cmd));
+  if (!args.write && verify.length > 0) {
+    process.stderr.write(`검증   읽기 전용이라 검증 명령(${verifyLabels.join(' · ')})을 실행하지 않는다 — 실행하려면 --write (D-094)\n`);
+  }
+  // 검증 명령은 primary 뒤·reviewer 앞에 돌리고 결과를 reviewer 에 싣는다 (D-094, D-040 과 같은 형식).
+  const ran: CommandEvidence[] = [];
+  const checks = args.write && verify.length > 0
+    ? async (): Promise<string> => {
+        for (const v of verify) ran.push((await runCommand(v.cmd, process.cwd(), v.phase !== undefined ? { phase: v.phase } : {})).evidence);
+        return checksText(ran);
+      }
+    : undefined;
   const duo = await runDuo(matrix, plan, execute, missingTests ? `${args.task}\n\n${primaryNoTestsNote(missingTests)}` : args.task, budget, {
     skipReviewer: args.skipReviewer,
     ...(missingTests ? { noTests: missingTests } : {}),
+    ...(checks ? { checks } : {}),
   });
   const run = {
     outcome: duo.primary.ok ? ('ok' as const) : ('error' as const),
@@ -599,15 +621,7 @@ async function main(): Promise<void> {
   }
 
   // 증거 수집 (SPEC §5). 운영 기준이 요구하는 증거가 모였을 때만 완료다 (PRD G4).
-  // 프로젝트가 선언한 기본 검증 + 이번 실행의 --verify. 추론은 없다 (SPEC §5).
-  const verifyConfig = verifyConfigPath(process.cwd());
-  const declared = defaultVerify(plan.assignment.id, verifyConfig);
-  const verify = [...declared, ...args.verify];
-  if (declared.length > 0) {
-    process.stderr.write(`검증   ${verifyConfig} 선언 ${declared.length}건: ${declared.map((v) => v.cmd).join(' · ')}\n`);
-  }
-  const evidence: Evidence[] = [...duo.evidence];
-  for (const v of verify) evidence.push(runCommand(v.cmd, process.cwd(), v.phase));
+  const evidence: Evidence[] = [...duo.evidence, ...ran];
   if (verify.length > 0) evidence.push(changedFiles());
   const tests = testsBefore ? testChanges(testsBefore, testGlobs) : undefined;
   if (tests) evidence.push(tests);
@@ -618,7 +632,10 @@ async function main(): Promise<void> {
       process.stderr.write(`${reportError('evidence', 'load', error).display}\n`);
     }
   }
-  const report = collect(plan.assignment, evidence, missingTests ? [noTestsEvidenceNote(missingTests)] : []);
+  const report = collect(plan.assignment, evidence, [
+    ...(missingTests ? [noTestsEvidenceNote(missingTests)] : []),
+    ...(!args.write && verify.length > 0 ? [readOnlyVerifyNote(verifyLabels)] : []),
+  ]);
 
   process.stderr.write(
     [

@@ -7,17 +7,45 @@ import { existsSync, globSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Evidence } from './evidence.ts';
 import { gitEnv } from './git-env.ts';
+import { runArgv, type CommandRunner } from './scaffold.ts';
 
-/** 명령을 실제로 돌려 exit code 를 받는다. **출력이 아니라 코드가 증거다.** */
-export function runCommand(cmd: string, cwd = process.cwd(), phase?: string, timeout = 300_000): Evidence {
-  const r = spawnSync('/bin/sh', ['-c', cmd], { cwd, encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'pipe'] });
+export type CommandEvidence = Extract<Evidence, { kind: 'command' }>;
+
+export interface VerifyOptions {
+  readonly phase?: string;
+  /** 명령 하나의 상한. 넘으면 그룹째 끝내고 exit -1 이다 (D-046 "돌지 못했다"). */
+  readonly timeoutMs?: number;
+  /** 위임 취소 (D-066). 서면 그룹 밖 자손까지 끝낸다 (D-078). */
+  readonly signal?: AbortSignal;
+  /** 테스트 주입용. 기본은 스캐폴딩과 같은 실행기다 (D-088). */
+  readonly runner?: CommandRunner;
+}
+
+/**
+ * 명령을 실제로 돌려 exit code 를 받는다. **출력이 아니라 코드가 증거다.**
+ * 비동기다 (D-094) — GUI 는 위임을 Electron 메인 프로세스에서 돈다. 동기 실행은 명령이 끝날 때까지 취소·화면 요청을 막았다.
+ * 셸 문자열 그대로 `sh -c` 로 돈다 — 사람이 적은 검증 명령의 뜻은 바뀌지 않는다. 프로세스 그룹으로 띄워 시간 초과·취소 때 손자까지 끝낸다.
+ */
+export async function runCommand(
+  cmd: string,
+  cwd = process.cwd(),
+  options: VerifyOptions = {},
+): Promise<{ readonly evidence: CommandEvidence; readonly cancelled: boolean }> {
+  const run = await (options.runner ?? runArgv)(['/bin/sh', '-c', cmd], {
+    cwd,
+    timeoutMs: options.timeoutMs ?? 300_000,
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
   return {
-    kind: 'command',
-    cmd,
-    // 시그널로 죽으면 exit code 가 null 이다. -1 로 기록해 "성공"으로 읽히지 않게 한다.
-    exitCode: r.status ?? -1,
-    output: `${r.stdout ?? ''}${r.stderr ?? ''}`.slice(-4000),
-    ...(phase !== undefined ? { phase } : {}),
+    evidence: {
+      kind: 'command',
+      cmd,
+      // 시그널·시간 초과·취소로 끝나면 exit code 가 없다. -1 로 기록해 "성공"으로 읽히지 않게 한다.
+      exitCode: run.outcome === 'timeout' || run.outcome === 'cancelled' ? -1 : (run.exitCode ?? -1),
+      output: run.tail,
+      ...(options.phase !== undefined ? { phase: options.phase } : {}),
+    },
+    cancelled: run.outcome === 'cancelled',
   };
 }
 

@@ -257,6 +257,7 @@ cursor  -p "<prompt>" --model gpt-5.6-sol-xhigh --output-format stream-json
 
 - 취소는 자식 프로세스를 **실제로 종료**해야 한다. 프로세스 그룹 단위 종료. 좀비 검출 테스트 필수.
   - 대화 세션의 위임 취소도 이 경로를 쓴다 — `AbortSignal` 이 `SlotRunOptions.signal` 로 내려가 어댑터 `cancel()` 을 부른다 (D-066).
+  - 검증 명령도 같다 — 같은 신호가 검증 실행기로 내려가 그룹 밖 자손까지 끝낸다(D-078). 그 자리에서 멈추면 결과는 `cancelled`(멈춘 단계 `verify`)다 (D-094).
 - 진행 줄 (D-084): `RunEvent` 의 `progress` 는 claude·cursor `assistant` 줄(중간 글·`tool_use`)과 codex `command_execution`·`file_change` 에서 나온다. 결과 `text`·과금·증거에 들지 않는다. 실행기는 `SlotRunOptions.onProgress` 가 있을 때만 `progress`·`text`·`notice` 를 한 줄씩 넘기고, 대화 세션이 그것을 모아 GUI 의 "실행 중…" 아래에 보인다(기록에는 남기지 않는다).
   - 엔진이 자기 그룹 밖으로 띄운 자손(codex 는 셸 명령마다 새 그룹)도 죽인다 — 신호 전에 `ps` 로 자손을 모아 그 그룹·pid 에도 SIGTERM → 2초 → SIGKILL. 엔진이 먼저 끝나도 SIGKILL 유예는 지우지 않는다 (D-078).
 - 타임아웃은 작업 유형별 기본값을 두되 사용자가 덮어쓸 수 있다.
@@ -366,6 +367,12 @@ R06 `reproduce`/`fix`/`regress` 단계 표기 지원), 변경 파일은 git 에�
 단, 모양이 맞아도 **나쁜 결과를 말하는 증거**가 하나라도 있으면 `rework` 다 (D-043) — phase 없는 명령과
 `after`·`fix`·`regress` 는 exit 0 을, `before`·`reproduce` 는 exit ≠ 0 을 기대하고(위 표 5·6행의 "실패"·"통과"),
 reviewer 판정 `FAIL` 도, `verify.json` 의 `tests` 로 선언된 **기존 테스트가 약해진 것**(줄이 바뀌거나 지워짐·파일 삭제 — 줄 추가는 허용, D-047)도 여기에 든다. 판정 순서는 실행 실패(`wrong`) → 나쁜 결과(`rework`) → 증거 충족(`ok`) → 그 밖(`unverified`).
+
+**언제·어떻게 돌리나 (D-094).** once·세션·loop 모두 검증 명령을 **쓰기 위임에서만, primary 뒤·reviewer 앞에** Core 가 돌리고,
+명령·exit·출력 꼬리(1,500자)를 reviewer 프롬프트의 "검증 명령 (Core 실행)" 절에 싣는다(D-040 과 같은 형식, `checksText`).
+읽기 전용 위임은 primary 의 변경이 작업 트리에 없어 원본을 검사하게 되므로 돌리지 않고, 증거 요약에 `읽기 전용 위임이라 검증 명령 N개를 실행하지 않았다` 를 남긴다.
+primary 가 실패하면 돌리지 않는다. 실행은 비동기다 — `sh -c` 를 프로세스 그룹으로 띄우고 명령당 300초 상한, 위임 취소(D-066)·시간 초과 때 그룹 밖 자손까지 끝낸다(D-078).
+GUI 는 위임을 Electron 메인 프로세스에서 도므로 동기 실행이면 명령이 끝날 때까지 취소·화면 요청을 받지 못한다.
 
 행별 **기본 검증 명령**은 `data/verify.json`(수기)에 프로젝트가 선언한다 — 제품은 추론하지 않는다.
 `default` 와 행 id 선언을 합치고 `--verify` 와 다시 합친다. **선언이 없으면 빈 배열이다**:
