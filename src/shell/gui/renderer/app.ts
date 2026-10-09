@@ -37,6 +37,7 @@ const TERMINALS: { id: string; label: string }[] = [
 ];
 // 고른 터미널은 이 기기의 화면 선호라 세션·프로젝트 상태에 두지 않는다.
 const TERMINAL_KEY = 'hs-orc.terminal';
+const FOLDED_KEY = 'hs-orc.sidebar.folded';
 
 const MODES: { id: ApprovalMode; label: string; hint: string }[] = [
   { id: 'manual', label: 'manual', hint: '모든 배정을 묻는다' },
@@ -367,9 +368,24 @@ function Sidebar(props: {
   }, []);
   const tree = useAsync(() => orc.convList(), [props.refresh, tick]);
   const [busy, setBusy] = useState(false);
-  // 접힌 묶음 키. 기본은 펼침 — 처음 보는 사람이 세션이 없다고 오해하지 않게.
-  const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
-  const toggle = (key: string) => setFolded((f) => { const n = new Set(f); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+  // 접힌 묶음 키. 기본은 펼침 — 처음 보는 사람이 세션이 없다고 오해하지 않게. 새로고침 뒤에도 남는다.
+  const [folded, setFolded] = useState<ReadonlySet<string>>(() => {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem(FOLDED_KEY) ?? '[]');
+      return new Set(Array.isArray(saved) ? saved.filter((k): k is string => typeof k === 'string') : []);
+    } catch {
+      // 깨진 값이면 모두 펼친다 — 사이드바가 안 뜨는 것보다 낫다.
+      return new Set();
+    }
+  });
+  const fold = (key: string, on: boolean) => setFolded((f) => {
+    if (f.has(key) === on) return f;
+    const n = new Set(f);
+    if (on) n.add(key); else n.delete(key);
+    localStorage.setItem(FOLDED_KEY, JSON.stringify([...n]));
+    return n;
+  });
+  const toggle = (key: string) => fold(key, !folded.has(key));
 
   const run = <T>(p: Promise<T>, done: (v: T) => void) => {
     setBusy(true);
@@ -430,9 +446,14 @@ function Sidebar(props: {
     : [
         ...tree.projects.map(({ project, sessions }) =>
           group(project.dir,
+            // 다른 폴더는 펼치면서 옮긴다. 옮길 게 없으면(이미 현재 폴더·도는 중·없는 폴더) 접고 편다 — 도는 중에도 막히지 않는다.
             h('button', {
-              className: 'sb-name', disabled: busy || !project.exists, title: project.exists ? project.short : `${project.short} (없음)`,
-              onClick: () => useDir(project.dir),
+              className: 'sb-name', title: project.exists ? project.short : `${project.short} (없음)`,
+              onClick: () => {
+                if (project.dir === current || busy || !project.exists) { toggle(project.dir); return; }
+                fold(project.dir, false);
+                useDir(project.dir);
+              },
             }, project.name),
             '이 폴더에서 새 세션', project.dir, withOpen(project.dir, sessions),
             `${project.dir === current ? ' current' : ''}${project.exists ? '' : ' missing'}`)),

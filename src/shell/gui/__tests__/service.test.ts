@@ -312,7 +312,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     await assert.rejects(service.converseApprove({ verify: [], write: true }), /쓰기를 켤 수 없다/);
   });
 
-  it('세션 목록은 프로젝트별로 묶인다 — 현재 폴더가 먼저, 떠난 폴더의 세션은 그 폴더 아래 남는다', async () => {
+  it('세션 목록은 프로젝트별로 묶인다 — 이름순이라 폴더를 옮겨도 순서가 그대로고, 떠난 폴더의 세션은 그 폴더 아래 남는다', async () => {
     isolated();
     const a = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'hs-tree-a-')));
     const b = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'hs-tree-b-')));
@@ -323,9 +323,15 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     service.useProject(b);
 
     const tree = service.conversations();
-    assert.deepEqual(tree.projects.map((g) => g.project.dir), [b, a]);
-    assert.deepEqual(tree.projects[0]?.sessions, []);
-    assert.ok(tree.projects[1]?.sessions.some((s) => s.id === view.id && s.preview === '넌 누구니'));
+    assert.deepEqual(tree.projects.map((g) => g.project.dir), [a, b]);
+    assert.ok(tree.projects[0]?.sessions.some((s) => s.id === view.id && s.preview === '넌 누구니'));
+    assert.deepEqual(tree.projects[1]?.sessions, []);
+
+    // 이름 클릭·다른 폴더의 ＋(useProject)와 세션 열기(openConversation) 모두 최근 목록을 당기지만 사이드바 순서는 그대로다.
+    service.openConversation('project', a, view.id);
+    assert.deepEqual(service.conversations().projects.map((g) => g.project.dir), [a, b]);
+    service.useProject(b);
+    assert.deepEqual(service.conversations().projects.map((g) => g.project.dir), [a, b]);
   });
 
   it('다른 폴더로 옮기면 그 폴더의 것이 아닌 project 세션을 닫는다', () => {
