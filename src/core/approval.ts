@@ -22,7 +22,7 @@ export const A2_REMAINING_FACTOR = 2;
 /** A2 토큰 (D-064 U4): 남은 토큰이 `tokenBudget` 의 이 비율 미만이다. 배정별 예상 토큰이 없어 비율로 둔다. */
 export const A2_TOKEN_REMAINING_RATIO = 0.2;
 
-export type AskCode = 'H1' | 'H2' | 'H3' | 'H4' | 'H5' | 'H6' | 'H7' | 'A1' | 'A2' | 'A3' | 'A4';
+export type AskCode = 'H1' | 'H2' | 'H3' | 'H4' | 'H5' | 'H6' | 'H7' | 'H8' | 'A1' | 'A2' | 'A3' | 'A4';
 
 /** 묻는 이유 하나. `text` 는 카드에 이름으로 보인다 — 이유 없이 선 카드는 무엇을 봐야 할지 모른다. */
 export interface AskReason {
@@ -86,6 +86,15 @@ export const H6_TEXT = '쓰기 행인데 git 아닌 폴더라 읽기 전용으�
 export const scaffoldAsk = (): AskReason => ({
   code: 'H7',
   text: 'hs-orc 가 이 명령을 엔진 없이 이 폴더에서 직접 실행한다 — 네트워크로 패키지를 받아 폴더에 파일을 만든다. 사람이 확인해야 돈다 (자동 승인 없음)',
+});
+
+/**
+ * H8 — 사람이 고른 터미널 창에서 이 폴더의 `package.json` 스크립트를 실행한다 (D-091). 스캐폴딩(H7)과 같은 규칙이다 —
+ * 어느 방식에서도 사람이 확인한다, 자동 승인 경로가 없다. 소스를 고치지 않으므로 쓰기 게이트(D-086)·H5 는 묻지 않는다.
+ */
+export const runAsk = (): AskReason => ({
+  code: 'H8',
+  text: '고른 터미널 창에서 이 폴더의 package.json 스크립트를 실행한다 — 스크립트 본문이 그대로 돈다(사람이 터미널에서 직접 치는 것과 같다). 사람이 확인해야 연다 (자동 승인 없음)',
 });
 
 const isFailure = (r: TranscriptRecord): boolean =>

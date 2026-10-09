@@ -75,6 +75,11 @@ export interface DirectOptions {
    * 주면 "행을 골라 위임하라" 대신 이것으로 안내하고 행을 제안하지 않는다.
    */
   readonly scaffold?: string;
+  /**
+   * 앱(dev 서버) 실행 요청으로 감지됐는데 실행 카드를 세우지 못한 턴 (D-091) — 카드가 서는 길·못 선 이유·사람이 칠 명령.
+   * 주면 "행을 골라 위임하라" 대신 이것으로 안내하고 행을 제안하지 않는다 — 위임 엔진은 포트를 열지 못한다(Q29).
+   */
+  readonly run?: string;
 }
 
 /**
@@ -83,12 +88,14 @@ export interface DirectOptions {
  */
 export function buildDirectPrompt(matrix: Matrix, context: string, message: string, options: DirectOptions = {}): string {
   const rows = matrix.assignments.map((a) => `${a.id}\t${a.task}`).join('\n');
-  const unrouted = options.unrouted === true || options.scaffold !== undefined;
+  const unrouted = options.unrouted === true || options.scaffold !== undefined || options.run !== undefined;
   return [
     '너는 hs-orc 의 지휘자다. 사용자와 대화로 짧게 답한다.',
     '규칙:',
     '- 파일을 고치거나 명령을 실행하지 않는다.',
-    options.scaffold !== undefined
+    options.run !== undefined
+      ? '- 개발 작업을 대신 수행하거나 그 결과를 지어내지 않는다. 이 메시지는 앱(dev 서버) 실행 요청이다 — 업무 행을 고르라고 안내하지 않는다. 위임 엔진의 샌드박스는 포트를 열지 못하고 서버는 끝나지 않아 위임으로 돌지 않는다. 아래 [실행] 대로 다음 행동을 안내하고, 명령은 [실행] 에 적힌 것만 쓴다.'
+      : options.scaffold !== undefined
       ? '- 개발 작업을 대신 수행하거나 그 결과를 지어내지 않는다. 이 메시지가 새 프로젝트를 만드는(스캐폴딩) 요청이면 업무 행을 고르라고 안내하지 않는다 — 위임 엔진의 샌드박스는 네트워크를 막아 스캐폴더가 돌지 않는다. 아래 [스캐폴딩] 대로 다음 행동을 안내한다. 새 프로젝트 요청이 아니면 이 요청은 업무 행에 배정되지 않았다고 말하고 위임하려면 사용자가 행을 직접 골라야 한다고 안내한다 (GUI 의 "위임하기" · CLI 의 `/task Rxx`).'
       : unrouted
       ? '- 개발 작업을 대신 수행하거나 그 결과를 지어내지 않는다. 작업 요청이면 이 요청은 업무 행에 배정되지 않았다고 말하고, 위임하려면 사용자가 아래 업무 목록에서 행을 직접 골라야 한다고 안내한다 (GUI 의 "위임하기" · CLI 의 `/task Rxx`). 행을 대신 고르거나 추천하지 않는다.'
@@ -99,6 +106,7 @@ export function buildDirectPrompt(matrix: Matrix, context: string, message: stri
     '[업무 목록]',
     rows,
     ...(options.scaffold !== undefined ? ['', '[스캐폴딩]', options.scaffold] : []),
+    ...(options.run !== undefined ? ['', '[실행]', options.run] : []),
     ...(context ? ['', '[최근 대화]', context] : []),
     '',
     '[이번 메시지]',

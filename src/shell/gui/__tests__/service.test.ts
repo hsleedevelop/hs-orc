@@ -248,6 +248,31 @@ describe('GUI — 대화 세션 (v2.1)', () => {
     assert.deepEqual(opened, [`ghostty ${view.dir}`]);
   });
 
+  it('앱 실행 요청은 실행 카드가 서고, 고른 터미널로 연다 — 모르는 터미널은 거절하고 카드는 남는다 (D-091)', async () => {
+    isolated();
+    const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'hs-gui-run-')));
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ scripts: { dev: 'next dev' } }));
+    mkdirSync(path.join(dir, 'node_modules'));
+    const service = new GuiService(fake, 20, dir);
+    service.useProject(dir);
+    service.startConversation('project');
+    calls.length = 0;
+    const card = await service.converse('현재 앱 실행해줘');
+    assert.equal(card.runPending, true);
+    assert.equal(card.records.at(-1)?.kind, 'run');
+    assert.deepEqual(calls, [], '엔진·지휘자를 부르지 않는다');
+    const launched: string[] = [];
+    const launch = (d: string, argv: readonly string[], t: string) => { launched.push(`${t} ${d} ${argv.join(' ')}`); return Promise.resolve('Otty'); };
+    await assert.rejects(service.converseRun('/bin/sh', launch), /모르는 터미널/);
+    assert.equal(service.conversation().runPending, true);
+    const view = await service.converseRun('otty', launch);
+    assert.deepEqual(launched, [`otty ${dir} npm run dev`]);
+    const last = view.records.at(-1);
+    assert.ok(last?.kind === 'run-launch' && last.outcome === 'opened' && last.terminal === 'Otty');
+    assert.equal(view.runPending, false);
+    assert.equal(view.state, 'waiting_input');
+  });
+
   it('분류되지 않는 메시지에 직접 답한다', async () => {
     isolated();
     const service = new GuiService(fake, 20, process.cwd());

@@ -25,4 +25,11 @@ describe('상한 파일 검사 (SPEC §9)', () => {
     for (const jevContextChars of [1, 2.5]) assert.throws(() => checkLimits({ ...loadLimits(), jevContextChars }), /jevContextChars/);
     assert.throws(() => checkLimits({ ...loadLimits(), jevTimeoutMs: 0 }), /jevTimeoutMs/);
   });
+
+  it('실행 스크립트는 비지 않은 이름 배열이다 — 셸 문자를 담은 이름은 거절한다 (D-091)', () => {
+    assert.deepEqual(loadLimits().runScripts, ['dev', 'start']);
+    for (const runScripts of [[], ['dev; rm -rf ~'], ['Dev'], 'dev']) {
+      assert.throws(() => checkLimits({ ...loadLimits(), runScripts } as never), /runScripts/);
+    }
+  });
 });

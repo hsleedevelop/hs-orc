@@ -48,6 +48,8 @@ export interface Limits {
   readonly jevContextChars: number;
   /** 쓰기가 본질인 행 (D-086). git project 폴더에서 이 행의 배정은 쓰기 스위치가 켜진 채 선다. */
   readonly writeRows: readonly string[];
+  /** 앱 실행 카드가 고르는 `package.json` 스크립트 (D-091). 앞의 것이 이긴다. */
+  readonly runScripts: readonly string[];
 }
 
 const LIMITS_PATH = path.resolve(import.meta.dirname, '..', '..', 'data', 'limits.json');
@@ -79,6 +81,9 @@ export function checkLimits(limits: Limits): Limits {
   }
   if (!Array.isArray(limits.writeRows) || !limits.writeRows.every((id) => typeof id === 'string' && /^R\d{2}$/.test(id))) {
     throw new Error(`limits.json 의 writeRows 는 행 id(R01 꼴) 배열이어야 한다: ${JSON.stringify(limits.writeRows)}`);
+  }
+  if (!Array.isArray(limits.runScripts) || limits.runScripts.length === 0 || !limits.runScripts.every((name) => typeof name === 'string' && /^[a-z][a-z0-9:_-]*$/.test(name))) {
+    throw new Error(`limits.json 의 runScripts 는 스크립트 이름(영소문자로 시작, a-z 0-9 : _ -) 배열이어야 한다: ${JSON.stringify(limits.runScripts)}`);
   }
   return limits;
 }

@@ -60,6 +60,8 @@ type Rec =
   | { kind: 'approval'; turn: number; approved: boolean; write: boolean; by?: 'user' | 'auto'; mode?: ApprovalMode; asked?: string[] }
   | { kind: 'scaffold'; turn: number; scaffolder: string; label: string; argv: string[]; asked: { code: string; text: string }[] }
   | { kind: 'scaffold-run'; turn: number; step: 'scaffold' | 'git-init'; commands: string[][]; outcome: string; exitCode: number | null; tail: string; durationMs: number; git?: 'existing' | 'scaffolder' | 'offer'; created?: string[] }
+  | { kind: 'run'; turn: number; argv: string[]; script: string; body: string; hooks?: { name: string; body: string }[]; asked: { code: string; text: string }[]; warnings?: string[] }
+  | { kind: 'run-launch'; turn: number; argv: string[]; outcome: 'opened' | 'failed' | 'refused'; terminal?: string; detail?: string }
   | { kind: 'mode'; turn: number; mode: ApprovalMode }
   | { kind: 'orchestrator'; turn: number; model: string; effort: string }
   | { kind: 'steps'; turn: number; title: string; steps: Step[]; estimateUsd: number; by: string; cost: string; cut?: Cut; write?: true; asked?: { code: string; text: string }[]; guide?: string[]; readOnlyBlocked?: true }
@@ -69,7 +71,7 @@ type Rec =
   | { kind: 'summary'; turn: number; text: string; next: string; by?: string }
   | { kind: 'error'; turn: number; text: string };
 interface Hold { pid: number; by: string; state: 'working' | 'blocked' }
-interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; progress: string[]; mode: ApprovalMode; ladder: { stage: string; label: string; changes: string[] } | null; orchestrator: OrchestratorChoice & { engine: string; line: string }; stepsPending: boolean; scaffoldPending: boolean; gitInitOffered: boolean; name?: string; external: Hold | null; ended: boolean; archived: boolean; role: SessionRole }
+interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; progress: string[]; mode: ApprovalMode; ladder: { stage: string; label: string; changes: string[] } | null; orchestrator: OrchestratorChoice & { engine: string; line: string }; stepsPending: boolean; scaffoldPending: boolean; runPending: boolean; gitInitOffered: boolean; name?: string; external: Hold | null; ended: boolean; archived: boolean; role: SessionRole }
 interface SessionUsage { tokens: number; cacheReadTokens: number; cacheReadPartial?: true; billedUsd: number; convertedUsd: number }
 type Activity = 'working' | 'blocked' | 'done' | 'interrupted' | 'idle' | 'ended';
 interface SessionStatus { state: Activity; outcome?: string; holder?: { pid: number; by: string } }
@@ -97,6 +99,8 @@ interface Bridge {
   convReject(): Promise<SessionView>;
   convAsk(): Promise<SessionView>;
   convGitInit(): Promise<SessionView>;
+  // 앱 실행 카드를 고른 터미널 창에서 연다 (D-091) — 이 클릭이 승인(H8)이다.
+  convRun(terminal: string): Promise<SessionView>;
   convTerminal(terminal: string): Promise<string>;
   convRename(name: string): Promise<SessionView>;
   // 오케스트레이터로 지정·워커로 되돌리기 (D-090). 같은 폴더에 다른 오케스트레이터가 있으면 거절된다.
@@ -777,6 +781,35 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
             h('button', { className: 'btn', disabled: locked, onClick: () => act(orc.convReject()) }, '거절'))
         : null);
 
+  // 앱 실행 카드 (D-091) — 고른 터미널 창에서 package.json 스크립트를 연다. 어느 방식에서도 이 버튼이 승인이다(H8). 터미널은 머리의 선택을 따른다.
+  const terminalLabel = TERMINALS.find((t) => t.id === terminal)?.label ?? terminal;
+  const runCard = (r: Extract<Rec, { kind: 'run' }>, i: number, active: boolean): ReactNode =>
+    h('section', { key: i, className: 'card' },
+      h('span', { className: 'label' }, `앱 실행 · ${r.script}`),
+      h('div', { className: 'hint' }, `엔진 없이 터미널 창에서 연다 · 엔진 비용 0 · 폴더 ${view.dir}`),
+      h('pre', { className: 'plain mono', style: { marginTop: 8 } }, r.argv.join(' ')),
+      h('div', { className: 'hint mono' }, `package.json ${r.script}: ${r.body}`),
+      // pre/post 스크립트는 패키지 매니저가 앞뒤로 함께 돌릴 수 있다 — 무엇이 도는지 다 보인다 (PR #130 리뷰).
+      ...(r.hooks ?? []).map((k, j) => h('div', { key: `k${j}`, className: 'hint mono' }, `package.json ${k.name}: ${k.body} · 함께 돌 수 있다`)),
+      ...(r.warnings ?? []).map((w, j) => h('div', { key: `w${j}`, className: 'hint warn' }, w)),
+      active ? h('div', { className: 'hint warn' }, `묻는 이유: ${r.asked.map((a) => a.text).join(' · ')}`) : null,
+      active
+        ? h('div', { className: 'row', style: { marginTop: 10 } },
+            h('button', { className: 'btn accent', disabled: locked, onClick: () => act(orc.convRun(terminal)) }, `터미널에서 실행 · ${terminalLabel}`),
+            h('button', { className: 'btn', disabled: locked, onClick: () => act(orc.convReject()) }, '거절'),
+            h('span', { className: 'hint' }, '터미널은 머리의 선택(기본·Ghostty·Otty)을 따른다 — 서버의 로그·중지는 그 창에 있다'))
+        : null);
+
+  const runLaunchCard = (r: Extract<Rec, { kind: 'run-launch' }>, i: number): ReactNode =>
+    h('section', { key: i, className: 'card' },
+      h('span', { className: 'label' }, '앱 실행 결과 · 엔진 비용 0'),
+      h('div', { className: 'row' },
+        h('span', { className: `chip ${r.outcome === 'opened' ? 'pass' : 'fail'}` }, r.outcome === 'opened' ? 'OPENED' : r.outcome.toUpperCase()),
+        h('span', { className: 'hint mono' }, `$ ${r.argv.join(' ')}`)),
+      r.outcome === 'opened'
+        ? h('div', { className: 'hint' }, `${r.terminal ?? '터미널'} 창에서 열었다 — hs-orc 는 창을 열 뿐 서버가 떴는지·포트·로그는 그 창에 있다`)
+        : h('div', { className: 'warn' }, r.detail ?? ''));
+
   const scaffoldRunCard = (r: Extract<Rec, { kind: 'scaffold-run' }>, i: number): ReactNode =>
     h('section', { key: i, className: 'card' },
       h('span', { className: 'label' }, `${r.step === 'scaffold' ? '스캐폴딩' : 'git init'} 결과 · 엔진 비용 0`),
@@ -841,8 +874,13 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
         return scaffoldCard(r, i, r === last && view.state === 'blocked' && view.scaffoldPending);
       case 'scaffold-run':
         return scaffoldRunCard(r, i);
+      case 'run':
+        return runCard(r, i, r === last && view.state === 'blocked' && view.runPending);
+      case 'run-launch':
+        return runLaunchCard(r, i);
       case 'approval':
         if (r.approved && r.asked?.includes('H7')) return h('div', { key: i, className: 'hint' }, '스캐폴딩 실행 확인');
+        if (r.approved && r.asked?.includes('H8')) return h('div', { key: i, className: 'hint' }, '앱 실행 확인');
         // 자동 승인도 카드·비용은 그대로 위에 보인다 (G2·FR-5) — 승인 클릭만 없다 (D-064 결정 7).
         if (r.approved && r.by === 'auto') return h('div', { key: i, className: 'hint' }, `자동 승인 · ${r.mode ?? ''} · 묻는 조건 없음`);
         // 카드의 묻는 이유는 살아 있을 때만 보인다 — 승인 줄에 남겨 auto 인데 왜 물었는지 승인 뒤에도 읽힌다.

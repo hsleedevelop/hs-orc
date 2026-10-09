@@ -11,7 +11,8 @@ import type { Engines } from '../data/engines.ts';
 import type { Matrix } from '../data/matrix.ts';
 import { isApprovalMode, loadLimits, type ApprovalMode, type OrchestratorChoice } from '../data/limits.ts';
 import type { AssignmentPlan } from './assign.ts';
-import { dirtyWriteRisk, evaluateApproval, evaluateRead, nonGitWriteRefusal, readOnlyWriteRow, scaffoldAsk, type ApprovalCheck, type AskReason } from './approval.ts';
+import { dirtyWriteRisk, evaluateApproval, evaluateRead, nonGitWriteRefusal, readOnlyWriteRow, runAsk, scaffoldAsk, type ApprovalCheck, type AskReason } from './approval.ts';
+import { detectRun, runCommandText, runTarget, sameRunTarget, type RunTarget } from './run-app.ts';
 import { loadScaffolders, type Scaffolder, type Scaffolders } from '../data/scaffolders.ts';
 import { GIT_INIT_COMMANDS, allowedArgv, commandLine, detectScaffold, folderEntries, runArgv, runSequence, type CommandRunner, type ScaffoldRequest } from './scaffold.ts';
 import type { Budget, BudgetMark } from './budget.ts';
@@ -115,6 +116,13 @@ export interface SessionDeps {
   readonly scaffolders?: () => Scaffolders;
   /** 스캐폴더·git init 실행기 (D-088). 없으면 셸 없는 spawn(`runArgv`). 테스트가 가짜를 넣는다 — 네트워크를 부르지 않는다. */
   readonly runCommand?: CommandRunner;
+  /**
+   * 앱 실행 카드를 세우는 셸인가 (D-091). 터미널 창을 여는 것은 GUI 뿐이다 — chat·`session send` 는 카드를 세우지 않고
+   * 지휘자 `[실행]` 안내로 간다(막다른 카드를 세우지 않는다, G6). 기본 false.
+   */
+  readonly runCards?: boolean;
+  /** 실행 카드가 고르는 스크립트 (D-091). 없으면 `limits.json` 의 `runScripts`. */
+  readonly runScripts?: readonly string[];
 }
 
 /** `plan.reason` 에 남는 출처 — 행을 고른 것이 지휘자다. `수동 지정` 이면 사람이 고른 것으로 적힌다 (`pipeline.ts` reasonLabel). */
@@ -128,6 +136,12 @@ export const SCAFFOLD_GUIDE = 'git 아닌 폴더 · 쓰기 위임 — 새 프로
 
 /** H6 카드를 읽기 전용으로 승인하려 할 때 (D-088). */
 export const H6_BLOCKED = 'git 아닌 폴더의 쓰기 행은 읽기 전용으로 승인하지 않는다 (H6, D-088) — 파일을 하나도 못 만든다. 새 프로젝트면 빈 폴더에서 "next 앱 init 해줘" 처럼 보내 스캐폴딩 카드로, 기존 파일이면 git init 한 뒤 다시 보낸다.';
+
+/** 앱 실행 요청인데 사람이 행을 골라 위임할 때 배정 카드에 싣는 예고 (D-091 — Q29 4-2). 막지는 않는다 — 사람이 고른 것이다. */
+export const RUN_DELEGATE_NOTE = '앱 실행 요청으로 보인다 — 위임 엔진의 샌드박스는 포트를 열지 못해 dev 서버가 뜨지 않는다 (D-091 실측: codex network-bind 거부). GUI 에서 같은 메시지를 보내면 실행 카드가 서고 고른 터미널 창에서 연다';
+
+/** 실행 요청 위임이 실패한 뒤의 다음 제안 (D-091) — 사다리를 올려도 같은 샌드박스라 다시 과금만 한다. */
+export const RUN_NEXT = '앱 실행은 위임으로 돌지 않는다 — 사다리를 올려도 같은 샌드박스다. GUI 에서 "앱 실행해줘" 를 보내면 실행 카드가 서고 고른 터미널 창에서 연다 (D-091)';
 
 /** 끝난 뒤 기록에 남기는 폴더 맨 위 이름 수. */
 const CREATED_SHOWN = 12;
@@ -159,6 +173,9 @@ interface Pending {
 interface ScaffoldPending {
   readonly scaffolder: Scaffolder;
 }
+
+/** 승인 대기 중인 앱 실행 카드 (D-091). 자동 승인 경로가 없다 — 셸이 `launchRun()` 으로 터미널 여는 함수를 넘겨야 시작한다. */
+type RunPending = RunTarget;
 
 /** 승인 대기 중인 단계 계획 (D-087). 배정 카드(`Pending`)와 따로 둔다 — 자동 승인·행 바꾸기·사다리가 타지 않는다. */
 interface StepsPending {
@@ -192,6 +209,7 @@ export class ConversationSession {
   private pending: Pending | null = null;
   private pendingSteps: StepsPending | null = null;
   private pendingScaffold: ScaffoldPending | null = null;
+  private pendingRun: RunPending | null = null;
   /** 도는 위임의 취소 신호 (D-066). primary·reviewer·읽기 답(D-083) 실행 동안만 있다 — 지휘자의 요약·직접 답은 취소 대상이 아니다. */
   private delegation: AbortController | null = null;
   /** 도는(또는 마지막으로 돈) 엔진 실행의 진행 줄 (D-084). 기록에 남기지 않는다 — 화면이 "실행 중…" 아래에 보여줄 뿐이다. */
@@ -254,6 +272,11 @@ export class ConversationSession {
   /** 승인 대기 중인 것이 스캐폴딩 카드인가 (D-088) — 셸이 묻는 답(y·n)을 고르고, `session send --run` 은 승인하지 않는다. */
   get scaffoldPending(): boolean {
     return this.pendingScaffold !== null;
+  }
+
+  /** 승인 대기 중인 것이 앱 실행 카드인가 (D-091) — 셸이 `approve()` 대신 `launchRun()` 을 부르고, `session send --run` 은 승인하지 않는다. */
+  get runPending(): boolean {
+    return this.pendingRun !== null;
   }
 
   /**
@@ -539,6 +562,13 @@ export class ConversationSession {
       const scaffold = taskId ? null : this.scaffoldRoute(text);
       if (scaffold?.card) return [this.stageScaffold(scaffold.card)];
       const scaffoldWhy = scaffold?.why ?? null;
+      // 앱(dev 서버) 실행 요청도 분류보다 먼저 본다 (D-091) — 위임 엔진은 포트를 열지 못한다. 감지는 부탁하는 꼴 + 대상만 잡는 좁은 결정론이라
+      // 카드를 못 세워도 Jev 로 보내지 않고(외부 전송 0) 지휘자가 `[실행]` 절로 안내한다 — 행을 고르라는 안내가 이번 실패(1009-1733-a12)의 길이었다.
+      if (!taskId && !scaffold && detectRun(text)) {
+        const run = this.runRoute();
+        if ('card' in run) return [this.stageRun(run.card)];
+        return await this.answer(text, [`앱 실행 요청 — 실행 카드를 세우지 않았다: ${run.why}`], true, write, false, undefined, this.runPrompt(run));
+      }
       // D-033: 지휘자가 대화 맥락으로 직접 답하고 SUGGEST 로 행을 제안한다 — 맥락 없는
       // 폴백의 선택이 대화성 후속을 잘못 위임하는 일이 없다. 규칙이 놓친 메시지는 항상 직접 답으로 간다.
       const { classifier } = this.deps;
@@ -558,6 +588,8 @@ export class ConversationSession {
         ...(reasonLabel ? { reasonLabel } : {}),
       });
       const notes = routed.fallback ? [routed.fallback.line] : [];
+      // 실행 요청에 사람이 행을 골랐다 — 막지 않고 카드가 헛실행을 예고한다 (D-091).
+      if (taskId && detectRun(text)) notes.push(RUN_DELEGATE_NOTE);
       if (scaffoldWhy) notes.push(`새 프로젝트 요청으로 보였지만 스캐폴딩 카드를 세우지 않았다 — ${scaffoldWhy}`);
       const result = routed.result;
       const general = routed.jev === 'general';
@@ -771,6 +803,73 @@ export class ConversationSession {
     ].join('\n');
   }
 
+  private get runScripts(): readonly string[] {
+    return this.deps.runScripts ?? loadLimits().runScripts;
+  }
+
+  /** 실행 카드를 세울 수 있나 (D-091). 조건: project 세션 · 카드를 여는 셸(GUI) · `package.json` 에 허용 스크립트. 못 세우면 사유 — 알면 대상도. */
+  private runRoute(): { readonly card: RunTarget } | { readonly why: string; readonly target?: RunTarget } {
+    if (this.deps.kind !== 'project') return { why: '스크래치 세션이다 — 앱 실행은 그 앱의 project 폴더를 열고 한다' };
+    const target = runTarget(this.deps.dir, this.runScripts);
+    if ('why' in target) return { why: target.why };
+    if (this.deps.runCards !== true) return { why: '터미널 창을 여는 실행 카드는 GUI 에만 있다 — 여기서는 터미널에서 직접 실행한다', target };
+    return { card: target };
+  }
+
+  /** 카드를 못 세운 실행 요청에 지휘자가 안내할 재료 (D-091) — 카드가 서는 길, 못 선 이유, 사람이 칠 명령(알 때만). */
+  private runPrompt(run: { readonly why: string; readonly target?: RunTarget }): string {
+    return [
+      'hs-orc GUI 는 project 폴더의 package.json 에 허용 스크립트(' + this.runScripts.join('·') + ')가 있으면, 사람이 실행 카드에서 확인한 뒤 고른 터미널 창(기본·Ghostty·Otty)에서 그 스크립트를 연다. 서버의 로그·중지는 그 터미널 창에 있다.',
+      `지금 카드를 세우지 않은 이유: ${run.why}`,
+      ...(run.target ? [`사람이 터미널에서 칠 명령: \`${runCommandText(this.deps.dir, run.target.argv)}\` (스크립트 ${run.target.script}: ${run.target.body})`] : []),
+      ...(run.target && run.target.hooks.length > 0 ? [`함께 돌 수 있는 스크립트: ${run.target.hooks.map((h) => `${h.name}: ${h.body}`).join(' · ')}`] : []),
+      ...(run.target?.missingDeps ? ['node_modules 가 없다 — 먼저 의존성을 설치해야 한다(hs-orc 는 설치하지 않는다).'] : []),
+      '위임 엔진(업무 행)으로는 실행하지 않는다 — 샌드박스가 포트를 막는다.',
+    ].join('\n');
+  }
+
+  /** 실행 카드를 세운다 (D-091). 엔진·Jev·지휘자를 부르지 않는다. 어느 방식에서도 자동 승인하지 않는다(H8). */
+  private stageRun(target: RunTarget): TranscriptRecord {
+    this.pendingRun = target;
+    this.stateValue = 'blocked';
+    const warnings = target.missingDeps ? [`node_modules 가 없다 — ${target.pm} install 을 먼저 하지 않으면 바로 실패한다 (hs-orc 는 설치하지 않는다)`] : [];
+    return this.append({
+      kind: 'run', argv: [...target.argv], script: target.script, body: target.body, asked: [runAsk()],
+      ...(target.hooks.length > 0 ? { hooks: target.hooks.map((h) => ({ ...h })) } : {}),
+      ...(warnings.length > 0 ? { warnings } : {}),
+    });
+  }
+
+  /**
+   * 사람이 확인한 실행 카드를 연다 (D-091). `open` 은 셸이 고른 터미널에서 argv 를 이 폴더로 여는 함수다 — 연 터미널 이름을 돌려주고, 못 열면 던진다.
+   * 열기 직전에 `package.json` 을 다시 읽어 카드와 argv·본문이 글자까지 같아야 연다 — 아니면 `refused`. 서버의 수명은 그 창의 것이다(hs-orc 는 모른다).
+   */
+  async launchRun(open: (dir: string, argv: readonly string[]) => Promise<string>): Promise<TranscriptRecord[]> {
+    this.require('blocked', '실행');
+    const pending = this.pendingRun;
+    if (!pending) throw new SessionStateError('실행할 앱 실행 카드가 없다.');
+    this.pendingRun = null;
+    const out = [this.append({ kind: 'approval', approved: true, write: false, by: 'user', mode: this.modeValue, asked: ['H8'] })];
+    this.stateValue = 'working';
+    try {
+      const now = runTarget(this.deps.dir, this.runScripts);
+      if ('why' in now || !sameRunTarget(now, pending)) {
+        const detail = 'why' in now ? `${now.why} — 열지 않았다` : `카드가 선 뒤 스크립트가 바뀌었다 (지금: ${now.argv.join(' ')} · ${[`${now.script}: ${now.body}`, ...now.hooks.map((h) => `${h.name}: ${h.body}`)].join(' · ')}) — 열지 않았다. 다시 보낸다`;
+        out.push(this.append({ kind: 'run-launch', argv: [...pending.argv], outcome: 'refused', detail }));
+        return out;
+      }
+      try {
+        const terminal = await open(this.deps.dir, now.argv);
+        out.push(this.append({ kind: 'run-launch', argv: [...now.argv], outcome: 'opened', terminal }));
+      } catch (error) {
+        out.push(this.append({ kind: 'run-launch', argv: [...now.argv], outcome: 'failed', detail: why(error) }));
+      }
+    } finally {
+      this.stateValue = 'waiting_input';
+    }
+    return out;
+  }
+
   /** 스캐폴딩 카드를 세운다 (D-088). 엔진·Jev 를 부르지 않는다. 어느 방식에서도 자동 승인하지 않는다(H7). */
   private stageScaffold(scaffolder: Scaffolder): TranscriptRecord {
     this.pendingScaffold = { scaffolder };
@@ -874,7 +973,7 @@ export class ConversationSession {
     return write && this.deps.kind === 'project' && !inGit ? [SCAFFOLD_GUIDE] : [];
   }
 
-  private async answer(text: string, notes: readonly string[], ignoreSuggest = false, write = false, general = false, scaffold?: string): Promise<TranscriptRecord[]> {
+  private async answer(text: string, notes: readonly string[], ignoreSuggest = false, write = false, general = false, scaffold?: string, run?: string): Promise<TranscriptRecord[]> {
     const { matrix, budget, conduct } = this.deps;
     // route() 가 이미 working 으로 바꿔 놓았을 수 있다 — 여기서도 다시 대입해 answer() 를 단독으로
     // 불러도(테스트 등) 같은 보장이 서게 하고, 모든 탈출 경로를 finally 하나로 묶는다 (final-review #2).
@@ -886,13 +985,13 @@ export class ConversationSession {
       }
       const slot = this.conductor();
       const context = buildContext(this.records(), this.contextLimits, { before: this.turn });
-      const answer = await directAnswer(conduct, slot, matrix, context.text, text, { unrouted: ignoreSuggest, ...(scaffold !== undefined ? { scaffold } : {}) });
+      const answer = await directAnswer(conduct, slot, matrix, context.text, text, { unrouted: ignoreSuggest, ...(scaffold !== undefined ? { scaffold } : {}), ...(run !== undefined ? { run } : {}) });
       const charge = budget.charge(`${slot.label}·${slot.effort}`, answer.run.actualUsd, estimateUsd(matrix, slot), answer.run.meteredUsd, slot.plan);
       budget.countTokens(answer.run.usage);
       if (!answer.run.ok) {
         return [this.append({ kind: 'error', text: `직접 답을 받지 못했다: ${answer.run.text || '엔진이 실패했다'}` })];
       }
-      const suggest = ignoreSuggest || scaffold !== undefined ? null : answer.suggest;
+      const suggest = ignoreSuggest || scaffold !== undefined || run !== undefined ? null : answer.suggest;
       const guide = this.scaffoldGuide(write);
       const direct = this.append({
         kind: 'direct',
@@ -935,6 +1034,8 @@ export class ConversationSession {
   /** 선 카드를 승인한다. 스캐폴딩 카드(D-088)는 `verify`·`write` 를 쓰지 않는다 — 허용 목록 명령을 그대로 돌린다. */
   async approve(options: { readonly verify?: readonly string[]; readonly write?: boolean } = {}): Promise<TranscriptRecord[]> {
     if (this.pendingScaffold) return this.runScaffold();
+    // 실행 카드는 터미널을 고르는 셸이 `launchRun()` 으로 연다 (D-091) — 여기서 열 터미널이 없다. 카드는 그대로 남는다.
+    if (this.pendingRun) throw new SessionStateError('앱 실행 카드는 GUI 의 "터미널에서 실행" 으로 연다 (D-091) — 거절하거나 새 메시지로 넘어갈 수 있다.');
     return this.pendingSteps ? this.runSteps(options) : this.start(options, 'user');
   }
 
@@ -1160,6 +1261,7 @@ export class ConversationSession {
     this.pending = null;
     this.pendingSteps = null;
     this.pendingScaffold = null;
+    this.pendingRun = null;
     this.stateValue = 'waiting_input';
     const out = [this.append({ kind: 'approval', approved: false, write: false })];
     if (pending) this.logUnexecuted(pending, 'declined');
@@ -1407,7 +1509,9 @@ export class ConversationSession {
   /** 모델은 요약만 한다. 다음 제안은 코드가 계산한다 (SPEC §6.4.4). 요약이 실패해도 제안은 남긴다. */
   private async summarize(title: string, d: Delegated): Promise<TranscriptRecord[]> {
     // 결과가 이미 기록에 붙은 뒤다 — 사다리 상태(다음에 올릴 수 있는 단계)가 이 결과를 본다.
-    const next = nextSuggestion(d.outcome, d.verdict, this.ladderOffer());
+    // 실행 요청의 위임 실패에 사다리를 권하지 않는다 (D-091) — 모델을 올려도 같은 샌드박스라 같은 실패를 다시 과금한다.
+    const failed = d.outcome !== 'cancelled' && (d.outcome !== 'ok' || d.verdict === 'fail');
+    const next = failed && detectRun(title) ? RUN_NEXT : nextSuggestion(d.outcome, d.verdict, this.ladderOffer());
     return this.summarizeWith(buildSummaryPrompt(title, d), next);
   }
 

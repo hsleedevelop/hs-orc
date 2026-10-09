@@ -5,6 +5,11 @@
  * Electron 을 import 하지 않는다 (`worktree.ts` 와 같은 이유). shell 안에만 있다 (D-001).
  */
 import { spawn } from 'node:child_process';
+import { runCommandText, shellQuote } from '../../core/run-app.ts';
+import { randomBytes } from 'node:crypto';
+import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 export interface TerminalCommand {
   readonly cmd: string;
@@ -68,4 +73,65 @@ export function openTerminal(dir: string, command: TerminalCommand = terminalCom
       child.once('spawn', () => { child.unref(); resolve(); });
     }
   });
+}
+
+/** 인용은 Core 와 같은 함수다 — 지휘자 안내 명령(`runCommandText`)과 터미널 스크립트가 같은 규칙을 쓴다. */
+export { shellQuote };
+
+/**
+ * 터미널이 실행할 `.command` 스크립트 본문 (D-091). 폴더로 가서 argv 를 돌리고, 끝나면(Ctrl-C 포함) 그 폴더의 로그인 셸로 남는다 —
+ * 창을 닫는 터미널(Ghostty)에서도 실패 출력이 사라지지 않게. 폴더·인자는 모두 작은따옴표 인용이다 — 이름의 `'`·`$`·`;` 가 명령이 되지 않는다.
+ */
+export function runScript(dir: string, argv: readonly string[]): string {
+  const command = argv.map(shellQuote).join(' ');
+  return [
+    '#!/bin/sh',
+    '# hs-orc 앱 실행 (D-091) — 사람이 실행 카드에서 확인한 명령이다.',
+    // Ctrl-C 는 포그라운드 그룹 전체에 간다 — 잡지 않으면 이 sh 도 죽어 아래 안내·셸로 남기가 돌지 않는다. 잡은(무시가 아닌) 신호는
+    // 자식에게 기본 동작으로 넘어가므로 서버는 그대로 멈춘다.
+    "trap ':' INT",
+    `cd ${shellQuote(dir)} || exit 1`,
+    `printf '%s\\n' ${shellQuote(`[hs-orc] ${dir} 에서 ${argv.join(' ')} — Ctrl-C 로 멈춘다`)}`,
+    command,
+    'code=$?',
+    `printf '\\n[hs-orc] 끝났다 (exit %s) — 이 창은 이 폴더의 셸로 남는다\\n' "$code"`,
+    'exec "${SHELL:-/bin/zsh}" -l',
+    '',
+  ].join('\n');
+}
+
+/** 실행 스크립트를 두는 곳 — 열고 나면 쓸모가 없어 한 시간 지난 것은 다음 실행 때 지운다. */
+const RUN_DIR = path.join(os.tmpdir(), 'hs-orc-run');
+const RUN_KEEP_MS = 60 * 60 * 1000;
+
+/**
+ * 고른 터미널 창에서 이 폴더의 argv 를 연다 (D-091 — Q29 A2). macOS 만 된다: 실행 비트를 준 `.command` 파일을 `open -a <앱>` 으로 넘긴다 —
+ * Terminal·Ghostty·Otty 모두 이 문서 유형을 받아 사용자의 로그인 셸에서 돌린다(D-091 실측). AppleScript(자동화 권한)를 쓰지 않는다.
+ * 서버의 수명·로그·중지는 그 창의 것이다 — hs-orc 는 띄운 뒤 모른다. 연 앱 이름을 돌려준다. 못 열면 던진다.
+ */
+export async function runInTerminal(
+  dir: string,
+  argv: readonly string[],
+  terminal: TerminalId = 'default',
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  open: (command: TerminalCommand) => Promise<void> = (command) => openTerminal(command.cwd, command),
+): Promise<string> {
+  if (platform !== 'darwin') throw new Error(`터미널 창에 명령을 실어 여는 것은 macOS 만 된다 — 터미널에서 직접 실행한다: ${runCommandText(dir, argv)}`);
+  const base = terminalCommand(dir, platform, env, terminal);
+  const app = base.args[1] ?? 'Terminal';
+  mkdirSync(RUN_DIR, { recursive: true, mode: 0o700 });
+  const now = Date.now();
+  for (const name of readdirSync(RUN_DIR)) {
+    const file = path.join(RUN_DIR, name);
+    try {
+      if (now - statSync(file).mtimeMs > RUN_KEEP_MS) rmSync(file, { force: true });
+    } catch {
+      // 다른 hs-orc 가 지웠다.
+    }
+  }
+  const file = path.join(RUN_DIR, `run-${now}-${randomBytes(4).toString('hex')}.command`);
+  writeFileSync(file, runScript(dir, argv), { mode: 0o700 });
+  await open({ cmd: 'open', args: ['-a', app, file], cwd: dir, wait: true });
+  return app;
 }

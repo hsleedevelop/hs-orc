@@ -64,8 +64,21 @@ export function renderRecord(r: TranscriptRecord, card?: ReturnType<typeof cardA
       ];
     case 'scaffold-run':
       return scaffoldRunLines(r);
+    // 실행 카드는 GUI 에서만 선다 (D-091) — chat·`session show` 는 그 기록을 읽기만 한다.
+    case 'run':
+      return [
+        `실행   앱 실행 카드 (GUI) — 고른 터미널 창에서 이 폴더의 스크립트를 연다 · 엔진 비용 0`,
+        `명령   ${r.argv.join(' ')}  (${r.script}: ${r.body})`,
+        ...(r.hooks ?? []).map((k) => `함께   ${k.name}: ${k.body}`),
+        ...(r.warnings ?? []).map((w) => `안내   ${w}`),
+      ];
+    case 'run-launch':
+      return [r.outcome === 'opened'
+        ? `결과   앱 실행 · ${r.terminal ?? '터미널'} 창에서 열었다 — 서버의 로그·중지는 그 창에 있다`
+        : `결과   앱 실행 · ${r.outcome}${r.detail ? ` — ${r.detail}` : ''}`];
     case 'approval':
       if (r.approved && r.asked?.includes('H7')) return ['승인   스캐폴딩 실행 — 사람이 확인했다'];
+      if (r.approved && r.asked?.includes('H8')) return ['승인   앱 실행 — 사람이 확인했다'];
       if (r.approved && r.by === 'auto') return [`승인   자동 승인 · ${r.mode ?? ''} · 묻는 조건 없음 — 읽기 전용`];
       return [r.approved ? [`승인   ${r.write ? '쓰기 켬 — primary 가 파일을 고칠 수 있다' : '읽기 전용'}`, askedNote(r, card)].filter(Boolean).join(' · ') : '거절'];
     case 'mode':
@@ -383,6 +396,7 @@ export function openingLines(session: ConversationSession, budget: Budget, tail 
     // 카드 합치기(D-064) 이전 기록 — 제안만 있고 배정이 없다.
     ...(last?.kind === 'direct' && last.suggest ? [`안내   ${last.suggest} 로 위임하려면 /task ${last.suggest}.`] : []),
     ...(last?.kind === 'scaffold' ? ['안내   승인 안 된 스캐폴딩 카드는 되살리지 않는다 — 같은 메시지를 다시 보낸다.'] : []),
+    ...(last?.kind === 'run' ? ['안내   승인 안 된 앱 실행 카드는 되살리지 않는다 — 실행 카드는 GUI 에서 같은 메시지를 다시 보낸다.'] : []),
     ...(session.gitInitOffered ? ['안내   /git-init — 스캐폴딩 폴더에 git init + 첫 커밋을 한다.'] : []),
     CHAT_HELP,
   ];

@@ -3620,7 +3620,7 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 ---
 
-## Q29 — "앱 실행해줘" 를 어떻게 처리할까: 엔진 없이 hs-orc 가 띄우기 · 터미널에 명령을 실어 보내기 · 실행 행 · Jev 판정 · 보안 (조사)
+## Q29 — "앱 실행해줘" 를 어떻게 처리할까: 엔진 없이 hs-orc 가 띄우기 · 터미널에 명령을 실어 보내기 · 실행 행 · Jev 판정 · 보안 (조사) → **D-091 확정** (권장 묶음 + 사전 실측)
 
 **배경** 2026-10-09 실사용 `~/.hs-orc/projects/hs-orc-test-39c894d7/sessions/1009-1733-a12.jsonl` (`auto`, 지휘자 Opus·high, 폴더 `/Users/hsonpro/projects/temp_lab/hs-orc-test` — D-088 실측 1 이 만든 Next.js 앱, git). 요청은 "현재 앱 실행해줘" 였고 위임은 rework/FAIL 로 끝났다. 전하 표현은 "앱실행에 대한 모델 지정" 이었고, 오케스트레이터 판단은 "모델이 아니라 실행 환경 문제 — sandbox 가 포트를 막고, dev 서버는 오래 떠 있어야 해서 실행하고 끝나는 위임과 맞지 않는다" 였다. 이 절은 그 판단을 검증하고 결정 재료를 모은다 — **코드·정책 변경 없음, 엔진·Jev 실행 없음.** 근거는 (사실: 코드·문서·로컬 기록으로 확인) · (추론) · (미검증)으로 적는다. 기록은 읽기만 했다.
 
@@ -3751,6 +3751,101 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 7. **사전 실측 승인**: `codex sandbox` listen 확인 1회(모델 호출 0)와 A2 메커니즘 확인(터미널 창이 뜬다)을 R1 착수 전에 할지.
 
 결정 전에는 코드·SPEC 을 바꾸지 않는다.
+→ **D-091** (2026-10-09 전하 결정): 권장 묶음 + 사전 실측 — 결정 1 = A2(R1), 2 = J1+J3, 3 = `dev`·`start`, 4 = 경고만, 5 = 사람 확인(H7 과 같은 규칙), 6 = GUI, 7 = 사전 실측 승인.
+
+---
+
+## D-091 — 앱 실행 요청은 실행 카드로 받고, 사람이 확인하면 고른 터미널 창에서 `package.json` 의 허용 스크립트를 연다 (Q29 확정 R1, 전하 결정 2026-10-09)
+
+**배경** Q29. 2026-10-09 실사용 `1009-1733-a12` — "현재 앱 실행해줘" → Jev NONE → 사람이 R01 지정 → codex `workspace-write` 가 listen 을 `EPERM` 으로 막아 rework/FAIL, 약 $0.13. Q29 는 원인이 모델이 아니라 실행 환경(쓰기 인자·위임 수명)이라고 보고, A2(터미널에 명령을 실어 보내기)를 권했다. A2 의 메커니즘이 미검증이라 사전 실측을 먼저 했다.
+
+**결정** (Q29 §7 — 전하 결정: 권장 묶음 + 사전 실측)
+1. **실행 주체는 A2(R1)다.** hs-orc 는 사람이 고른 터미널 창에서 명령을 열 뿐이고, 서버의 수명·로그·중지·포트는 그 창의 것이다. A1(hs-orc 가 직접 띄우고 로그·중지·포트까지 관리)은 필요가 확인된 뒤에 연다. A3(실행 행 + 엔진 sandbox 확대)은 버린다(Q29 §4-1 근거).
+2. **판정은 J1 + J3이다.** 결정론 감지(`detectRun`)를 스캐폴딩 감지 다음, 분류보다 먼저 둔다. 잡히면 Jev 를 부르지 않는다. 카드를 못 세우면 지휘자가 `[실행]` 절로 안내한다. Jev criteria 는 바꾸지 않는다(K4).
+3. **허용 스크립트는 `dev`·`start`다**(`limits.json` `runScripts`, 앞의 것이 이긴다).
+4. **`npm install` 은 넣지 않는다.** `node_modules` 가 없으면 카드가 경고만 한다.
+5. **어느 방식(`auto` 포함)에서도 사람이 확인한다.** D-088 H7 과 같은 규칙이고, 코드는 **H8** 로 따로 둔다(기록·화면이 스캐폴딩과 가른다).
+6. **셸 범위는 GUI 다.** chat·`session send` 에서는 카드를 세우지 않고 지휘자 안내로 간다.
+7. **사전 실측을 했다** — 아래 실측 1·2.
+
+**실측 1 — codex sandbox listen** (2026-10-09, codex-cli 0.160.0, 모델 호출 0, D-073 사실 8 과 같은 방식): `codex sandbox -P :workspace -C <스크래치> --log-denials -- node listen.js`. listen.js 는 `127.0.0.1:0`·`0.0.0.0:0` 에 listen 을 시도한다.
+- sandbox 밖에서는 둘 다 `LISTEN OK` 다.
+- `:workspace` 안에서는 둘 다 `EPERM listen EPERM: operation not permitted` 다.
+- 거부 로그는 `(node) network-bind local:*:0` 이다.
+- → Q29 사실 2-1 의 n=1(1009 기록)이 재현됐다. 원인은 seatbelt 의 `network-bind` 거부다(사실). `network_access` 설정은 재지 않았다(1회 범위).
+
+**실측 2 — 터미널에 명령 싣기** (2026-10-09 19:12~19:14, 대상 `/Users/hsonpro/projects/temp_lab/hs-orc-test`): 실행 비트를 준 `.command` 파일(`cd '<폴더>' && exec npm run dev`)을 `open -a <앱> <파일>` 로 열었다.
+- 세 앱 모두 Info.plist 에 이 문서 유형이 있다 — Terminal 2.15 `com.apple.terminal.shell-script` · Ghostty 1.3.1 확장자 `command` · Otty 1.5.4 `com.apple.terminal.shell-script`.
+
+| 앱 | 결과 | 프로세스 계보 (서버 → 위) |
+|---|---|---|
+| Terminal(기본) | `:3000` LISTEN · `curl` 200 | `next-server` ← `npm run dev` ← `-zsh` ← `login` ← Terminal (앱이 꺼져 있었다 → 새로 떴다) |
+| Ghostty | 같음 | ← `-/bin/zsh` ← `/usr/bin/login` ← 이미 떠 있던 ghostty(10-05부터)의 새 창 |
+| Otty | 같음 | ← `-zsh` ← `/usr/bin/login` ← Otty (꺼져 있었다 → 새로 떴다) |
+
+- → 세 터미널 모두 **사용자의 로그인 셸**에서 돈다. 그래서 `npm`(mise 관리 node)이 PATH 에 있다. AppleScript·자동화(TCC) 권한이 필요 없다(사실).
+- **명령을 실을 수 없는 터미널은 없었다.** 그래서 대체 동작이 필요한 것은 실측 밖의 경우뿐이다. macOS 밖에서는 열지 않고 칠 명령을 말하며 실패한다. `open` 이 실패하면(앱 없음 등) `run-launch{failed}` 에 stderr 를 남긴다. 둘 다 사람이 명령을 그대로 복사해 칠 수 있게 argv 를 기록에 남긴다.
+- 정리: 띄운 dev 서버 셋을 종료했다. 실측이 띄운 Terminal·Otty 는 종료했고, 원래 떠 있던 Ghostty 는 두었다(그 창의 셸은 서버 종료와 함께 끝났다). 미커밋 `app/page.tsx` 의 sha1 `a3553cf…` 은 실측 전후로 같다. `next dev` 는 `.next/`·`next-env.d.ts` 를 쓰는데, 이 폴더의 `.gitignore` 가 둘 다 무시한다.
+
+**구현 기록 — R1 (2026-10-09)**
+1. **감지** `core/run-app.ts` `detectRun`.
+   - 잡는 것: 대상(앱·서버·사이트·프로젝트…) **바로 뒤**(조사 을·를·좀·다시 정도만 끼인다)에 부탁하는 동사(`실행해`·`구동해`·`띄워`·`켜줘`·`돌려줘`, `시작해줘` 는 서버·앱만)가 오는 문장, 영어 `run|start|launch|serve (the|my|this) (dev|local) app|server|site|frontend`, 또는 `npm|pnpm|yarn|bun (run) dev|start` 를 직접 짚은 문장. 처음 구현은 대상과 동사를 따로 봐 "앱에 다크모드 켜줘"·"이 프로젝트 시작해줘"·"run it"·"start working on the app" 을 잡았다 — 실행 카드를 거절해도 분류로 넘어가지 않아 진짜 작업 요청이 막히므로 조였다(PR 전 검토).
+   - 빼는 것: 테스트·빌드·린트·배포·에러·버그·고쳐·구현·재현·설명·방법·"하면"·"했더니"·"안 돼" 같은 말이 하나라도 있으면 잡지 않는다. 영어 낱말은 앞이 글자·`-` 가 아닐 때만 본다(`hs-orc-test` 폴더 이름에 걸리지 않게).
+   - 스캐폴딩 감지가 잡은 문장은 보지 않는다. 행 지정(`planAs`)도 보지 않는다.
+2. **대상** `runTarget(dir, runScripts)`.
+   - `package.json` `scripts` 에서 허용 이름 중 처음 있는 것을 고른다.
+   - bin 은 잠금 파일로 고른다(`pnpm-lock.yaml`→pnpm · `yarn.lock`→yarn · `bun.lock(b)`→bun · `package-lock.json`·없음→npm). argv 는 `[bin, 'run', 스크립트]` 다.
+   - 사용자 문장은 argv 에 들어가지 않는다. 스크립트 본문은 검사하지 않고 카드에 원문으로 보인다 — 사람이 터미널에서 직접 칠 때와 같은 신뢰다.
+   - **`pre<이름>`·`post<이름>` 도 카드에 보이고 실행 직전 비교에 넣는다** (PR #130 리뷰 P2). `npm run dev` 는 `predev`·`postdev` 를 앞뒤로 돌린다(npm 문서 — pre/post scripts). 처음 구현은 `dev` 본문만 비교해, 카드가 선 뒤 `dev` 를 그대로 두고 `predev` 만 더하거나 바꾸면 사람이 보지 않은 명령이 sandbox 밖에서 돌았다. 다른 매니저가 그 스크립트를 돌리는지와 무관하게 있으면 모두 싣는다 — 돌지 않는 매니저라도 비교가 엄격해질 뿐이다.
+3. **카드** `run` 기록(argv·script·body·asked `[H8]`·`warnings`(`node_modules` 없음)).
+   - 조건: project 세션 · `SessionDeps.runCards`(GUI 조립만 true) · 허용 스크립트가 있음. 엔진·Jev·지휘자 0회, `spend` 없음.
+   - 쓰기 게이트(D-086)·H5 를 묻지 않는다 — 소스를 고치지 않는다. git 밖 폴더도 막지 않는다.
+4. **실행** `ConversationSession.launchRun(open)`. `approve()` 는 실행 카드를 열지 않고 던지며, 카드는 그대로 남는다.
+   - GUI "터미널에서 실행 · <머리의 터미널 선택>" → `GuiService.converseRun(terminalId)`. 터미널은 목록 id 만 받는다(D-021).
+   - `approval{approved, write: false, by: 'user', asked: ['H8']}` 를 남기고, 열기 직전 `package.json` 을 다시 읽는다. argv·본문이 카드와 글자까지 같아야 연다 — 아니면 `run-launch{refused}`.
+   - `shell/gui/terminal.ts` `runInTerminal`: `$TMPDIR/hs-orc-run/run-<시각>-<난수>.command`(0700)를 쓰고 `open -a <앱> <파일>` 을 부른다. 한 시간 지난 파일은 다음 실행 때 지운다.
+   - 스크립트 모양: `cd '<폴더>' || exit 1` → 안내 한 줄 → `'npm' 'run' 'dev'` → 끝나면 `[hs-orc] 끝났다 (exit N)` → `exec "${SHELL:-/bin/zsh}" -l`. 서버가 끝나도(Ctrl-C·실패) 창이 그 폴더의 로그인 셸로 남는다 — 창을 닫는 터미널에서도 실패 출력이 남는다. **Ctrl-C 는 포그라운드 그룹 전체에 가므로 스크립트 첫머리에 `trap ':' INT` 를 둔다** — 없으면 `.command` 의 `sh` 도 함께 죽어 안내·셸로 남기가 돌지 않는다(그룹 SIGINT 로 재현: 출력이 안내 한 줄에서 끝나고 `sh` 가 SIGINT 로 죽었다). 잡은 신호는 자식에게 기본 동작으로 넘어가 서버는 그대로 멈춘다. 폴더·인자는 모두 POSIX 작은따옴표로 인용한다.
+   - 결과는 `run-launch{opened, terminal}` 이다. 다음 위임 맥락에는 `orc(앱 실행): npm run dev → Terminal 창에서 열었다 (서버 상태는 그 창에 있다)` 한 줄이 실린다.
+5. **카드를 못 세우면** — chat·`session send`(`runCards` 없음) · 스크래치 · `package.json` 없음 · 허용 스크립트 없음.
+   - Jev 없이 지휘자 직접 답으로 간다. 분류 줄 `앱 실행 요청 — 실행 카드를 세우지 않았다: <사유>` 를 붙인다.
+   - 프롬프트 `[실행]` 절: 카드가 서는 길 · 사유 · 알면 `cd '<폴더>' && <argv>` 와 스크립트 원문(pre/post 포함) · `node_modules` 없음 · "위임 엔진으로는 실행하지 않는다". **폴더는 터미널 스크립트와 같은 POSIX 작은따옴표 인용이다**(`core/run-app.ts` `shellQuote`·`runCommandText` — 셸이 같은 함수를 쓴다, PR #130 리뷰 P2). 처음 구현은 인용하지 않아 `Mobile Documents` 같은 공백 경로에서 `cd` 가 실패했고, 경로의 `;`·`$(…)` 가 명령이 될 수 있었다.
+   - 지휘자 규칙은 "행을 고르라고 안내하지 않는다 · 명령은 [실행] 에 적힌 것만" 이다. SUGGEST 는 `NONE` 으로 고정하고 버린다.
+   - D-088 과 다른 점: 스캐폴딩은 카드를 못 세워도 분류를 탄다. 실행은 감지가 좁아 Jev 를 건너뛴다 — 외부 전송 0, 그리고 "행을 골라 위임" 길이 이번 실패의 원인이었다.
+6. **Q29 4-2 의 작은 둘.**
+   - 실행 요청 문장에 사람이 행을 고르면 배정 카드 `notes` 에 `RUN_DELEGATE_NOTE`(샌드박스가 포트를 못 연다 · GUI 실행 카드 길)가 붙는다. 막지 않는다.
+   - 그 위임이 실패하면 요약 `next` 가 사다리 대신 `RUN_NEXT` 다. **사다리 버튼(`ladderOffer`)은 그대로 보인다** — 문구만 바꿨다(범위 최소).
+7. 화면·기록: chat·`session show` 는 `run`·`run-launch`·H8 승인 줄을 읽기만 한다. SPEC §6.4 에 경로·H8·기록 종류를 적었다.
+
+**검증**
+- `npm run gate` 통과 — 테스트 793개, 새 20건(`run-app.test.ts` 14 · `terminal.test.ts` 4 · `limits.test.ts` 1 · `service.test.ts` 1). 엔진 호출 0.
+  - PR #130 리뷰 회귀 2건(수정 전 실패 확인): `dev` 그대로 · `predev` 추가/변경 · `postdev` 삭제 → 셋 다 `refused` · opener 0회, 카드 `hooks` 표시. 폴더 `Mobile Documents it's $(touch pwned); x` 의 CLI 안내 명령을 `sh -c` 로 돌리면 그 폴더로 가고 `pwned` 가 생기지 않는다. hook 비교만 빼는 변이 → "predev 추가" 에서 실패.
+  - 감지: 1009 문장 포함 10종은 잡고, 테스트·빌드·버그·질문과 위 과잉 매칭 4종을 포함한 15종은 잡지 않는다.
+  - Ctrl-C: `.command` 본문을 `sleep 30` 으로 돌려 프로세스 그룹에 SIGINT → 스크립트 exit 0 · `끝났다 (exit 130)` 출력. `trap` 을 빼면 실패한다.
+  - 대상: dev 우선 · start 대체 · pnpm 잠금 · `node_modules` 경고 · 사유 3종.
+  - 세 방식 모두 카드만 서고 Jev·지휘자·엔진 0회 · `spend` 없음.
+  - `approve()` 는 거절하고 카드는 남는다. `launchRun` 은 H8 승인 + `opened`. 카드 뒤 스크립트가 `rm -rf ~` 로 바뀌면 `refused` 이고 opener 0회. opener 가 실패하면 `failed`.
+  - chat 조립·허용 스크립트 없음·스크래치에서는 Jev 0회 · `[실행]` 절 · 명령 줄 · SUGGEST 버림.
+  - 행 지정 예고와 실패 뒤 `RUN_NEXT`, 거절, 비실행 문장의 종전 경로(Jev 1회).
+  - 인용은 `sh` 가 `'`·`$(…)`·`` ` ``·`;` 를 글자 그대로 되돌리고 `sh -n` 이 통과한다. `.command` 는 0700 · `-a <앱>`, macOS 밖은 명령을 말하며 던진다. `runScripts` 검사, GUI 서비스(모르는 터미널 거절 · 카드 유지 · `otty` 로 연다).
+- **변이 5종**(각각 되돌림): 부정어 제거 · 실행 직전 재검사 제거 · 사다리 정정 제거 · GUI 가드 제거 · INT trap 제거 → 각각 테스트 1·1·1·2·1건이 실패했다.
+- **Electron 실기 (2026-10-09 19:22~19:24, 격리 상태 폴더 · `HS_ORC_JEV=off` · CDP 조작·창 캡처, 작업 폴더 `hs-orc-test`, 엔진 호출 0 — 결정 로그·실행 기록·`spend` 없음)**:
+  - "워커 세션 만들기" → "현재 앱 실행해줘" → `앱 실행 · dev` 카드가 섰다(명령 `npm run dev` · `package.json dev: next dev` · H8 문구 · "터미널에서 실행 · 기본"·"거절", 사이드바 `승인 대기`).
+  - 누르자 `OPENED` 결과 카드("Terminal 창에서 열었다 …")가 붙었다. 실제로 Terminal 이 새로 떠 `:3000` LISTEN · `curl` 200 이었고, 계보는 `next-server` ← `npm run dev` ← `/bin/sh`(.command) ← `-zsh` ← `login` ← Terminal 이다.
+  - 기록: `user` → `run` → `approval{approved, write:false, by:user, asked:[H8]}` → `run-launch{opened, Terminal}`.
+  - 서버 프로세스들에만 SIGINT → 창의 `/bin/sh` 가 `/bin/zsh -l` 로 바뀌어 남았다. 창에서 실제로 누르는 Ctrl-C(그룹 전체)는 이 실기에서 재지 않았고, 그 경우를 위해 `trap` 을 더했다(위 단위 테스트가 그룹 SIGINT 를 잰다). 실기는 `trap` 추가 전 빌드다.
+  - 정리: Terminal·GUI 를 종료했고 `page.tsx` sha1 은 그대로다. 캡처 2장은 세션 산출물 폴더에 있다(PR 본문에 경로).
+
+**미검증·위험**
+- `HS_ORC_TERMINAL` 로 바꾼 임의 앱(iTerm 등)이 `.command` 를 실행하는지 재지 않았다 — 안 되면 그 앱이 파일을 열기만 하거나 `failed` 로 남는다.
+- macOS 밖은 지원하지 않는다(명령을 말하며 실패).
+- hs-orc 는 띄운 뒤 아무것도 모른다 — 포트 충돌·의존성 없음·컴파일 오류는 그 창에서만 보인다. 결과 카드의 `OPENED` 는 창을 열었다는 뜻이다. 같은 카드를 다시 세워 두 번 열면 서버가 둘 뜬다 — Next 는 다음 포트로 옮긴다고 알려져 있다(미검증).
+- 감지는 키워드라 넓게 잡거나 놓친다. "이 프로젝트 실행해줘" 는 실행으로 본다(의도대로), "start the project" 는 영어 대상에서 뺐다. 넓게 잡으면 카드는 사람이 거절하면 끝이고(그 문장은 분류로 넘어가지 않는다 — 다시 써서 보낸다), 카드를 못 세우는 셸에서는 지휘자 1회가 든다. 놓치면 종전 경로(Jev → 직접 답·행 선택)이고, 그 경로의 행 지정에는 예고가 붙지 않는다(같은 감지를 쓰므로). 실사용 문장 표본으로 재지 않았다.
+- `.command` 파일(폴더 경로·명령만 담는다)은 `$TMPDIR` 에 최대 한 시간 남는다.
+- Expo(`expo start` — 대화형 메뉴)·Vite 는 실측하지 않았다. 사람의 터미널(TTY)에서 돌기 때문에 A1 보다 안전한 쪽이라고 본다(추론).
+
+**영향** `core/run-app.ts`(신규) · `session.ts` · `approval.ts`(H8) · `transcript.ts`(`run`·`run-launch`) · `conductor.ts`(`[실행]`) · `context.ts` · `data/limits.json`·`limits.ts`(`runScripts`) · `shell/conversation.ts`(`runCards`) · `chat.ts` · GUI `terminal.ts`·`service.ts`·`main.ts`·`preload.cjs`·`renderer/app.ts` · SPEC §6.4.
+
+**상태** 구현됨 — R1 (같은 PR, 머지로 확정 — 전하 직접 머지). R2(A1 수명 관리)는 열지 않았다.
 
 ---
 
@@ -3786,4 +3881,4 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 | ~~Q26~~ | ~~행에 안 맞는 실제 작업이 Jev NONE 으로 빠져 처리 경로가 없다~~ → **D-082 확정** (G1b — Jev 판정 라벨 `GENERAL` + 수동 행 선택, criteria 문구 B′. G1 은 재평가 2회 K4 미달로 버림). 별견 3건 중 지휘자 도구는 D-080 으로 닫혔고, 홈 폴더 세션 · 세션 NONE 미분류 미기록은 열지 않았다 | — |
 | ~~Q27~~ | ~~지휘자(직접 답·요약·분류 폴백) claude 격리 실행의 내장 도구가 프롬프트로만 막혀 있다~~ → **D-080 확정** (T1 — `isolateArgv` 끝에 `--tools ""`, 세 역할 모두. Q26 G4 를 고르면 T2) | — |
 | ~~Q28~~ | ~~프로젝트에 오케스트레이터 세션과 워커 세션을 나눌까~~ → **D-090 확정** (화면 구분부터 — 첫 조각 S1: 역할 기록 · 칩 · `session new` 진입점. W1 워커 지휘자 유지 · T1 쓰기 워커 워크트리 · K1 종료 전파 없음 · 오케스트레이터 0~1 · 자율 지휘 열지 않음. O2·O3 는 필요가 확인된 뒤, O4·W2 버림) | — |
-| Q29 | "앱 실행해줘" 를 어떻게 처리할까 — 엔진 sandbox(codex `workspace-write`)가 listen 을 `EPERM` 으로 막고, dev 서버는 끝나지 않아 위임 모양과 맞지 않는다. 실행 주체(A0 안내 · A1 hs-orc 직접 · A2 터미널에 실어 보내기 · A3 실행 행 — 버림) · 판정(J1 결정론 감지 · J2 Jev 라벨 · J3 지휘자 절) · 허용 스크립트 · `npm install` · 자동 승인 · 셸 범위. 권장 A2(R1) → A1(R2), J1+J3 | 실행 요청 처리 (R1) |
+| ~~Q29~~ | ~~"앱 실행해줘" 를 어떻게 처리할까 — 엔진 sandbox 가 listen 을 막고 dev 서버는 위임 모양과 맞지 않는다~~ → **D-091 확정** (A2 — GUI 실행 카드가 고른 터미널 창에서 `package.json` 의 `dev`·`start` 를 연다, H8 사람 확인 · J1 결정론 감지 + J3 지휘자 `[실행]` 절 · `npm install` 은 경고만. A1 은 필요 확인 뒤, A3 버림) | — |
