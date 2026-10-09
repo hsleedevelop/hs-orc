@@ -31,7 +31,7 @@ export const lockPath = (dir: string, id: string, env: NodeJS.ProcessEnv = proce
   path.join(projectStateDir(dir, env), 'sessions', `${id}.lock`);
 
 /** EPERM 은 남의 사용자 프로세스다 — 살아 있다. */
-function alive(pid: number): boolean {
+export function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -58,7 +58,7 @@ function readHold(file: string): SessionHold | null {
 }
 
 /** 내용을 다 쓴 임시 파일을 `link` 한다 — 자리가 비어 있을 때만 성공하고, 남이 보는 순간 이미 온전한 파일이다. */
-function createAtomically(file: string, body: string): boolean {
+export function createAtomically(file: string, body: string): boolean {
   const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
   writeFileSync(tmp, body);
   try {
@@ -79,7 +79,7 @@ const TAKEOVER_ABANDONED_MS = 5000;
  * 죽은 표식을 지운다. 둘이 함께 지우면 늦은 쪽이 먼저 쥔 쪽의 새 표식을 지운다 — 가드(`.takeover`)를 쥔 하나만,
  * 다시 읽은 내용이 그때 본 죽은 표식 그대로일 때만 지운다. 가드를 못 쥐면 아무것도 하지 않는다 — 부른 쪽이 다시 본다.
  */
-function removeDead(file: string, seen: string): void {
+export function removeDead(file: string, seen: string): void {
   const guard = `${file}.takeover`;
   if (!createAtomically(guard, String(process.pid))) {
     try {
