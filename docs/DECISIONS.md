@@ -3930,6 +3930,135 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 **영향** `core/conductor.ts`(`buildSummaryPrompt`·`SUMMARY_REVIEW_CHARS`) · `core/evidence-gather.ts`(`noTests`) · `core/evidence.ts`(`EXISTING_TEST_ROWS`·`EvidenceReport.notes`·`collect` 3번째 인자) · `core/duo.ts`(`reviewPrompt` 5번째 인자·`DuoOptions.noTests`·`primaryNoTestsNote`·`noTestsEvidenceNote`) · `core/delegate.ts` · `core/project-state.ts`(`verifyConfigPath`) · `data/verify.ts`(파일 인자·`REPO_ROOT`·`REPO_VERIFY_PATH`) · `shell/cli.ts`(once·loop) · `data/verify.json` `$declared` · SPEC §5·§6.4.4 · README.
 
 **상태** 구현됨 — 같은 PR. 머지로 확정한다(전하 직접 머지).
+
+---
+
+## Q30 — 세션·once 위임에도 Core 가 검증 명령을 돌려 reviewer 에 실을까: 무엇을 · 어디서 · 보안 · 판정 · 첫 조각 (조사)
+
+**배경** 2026-10-09 실사용 `~/.hs-orc/projects/hs-orc-test-39c894d7/sessions/1009-2302-6c1.jsonl` 턴 2 (D-093 발단과 같은 기록). R01 위임에서 Haiku reviewer 는 "`npm run lint` 와 `eslint` 직접 실행이 승인 요구로 막혔습니다 … lint 결과는 산출물의 주장일 뿐 독립 확인되지 않았습니다" 라고 적었다. 세션 위임은 판정을 reviewer 의 코드 읽기에만 기댄다. D-040(Core 가 검증 명령을 돌려 reviewer 에 싣는다)은 CLI `loop` 에만 있다. 이 절은 그것을 세션·once 위임에도 둘지 결정 재료를 모은다 — **코드·정책 변경 없음, 엔진·Jev·`codex sandbox` 실행 없음.** 근거는 (사실: 코드·문서·로컬 기록으로 확인) · (추론) · (미검증)으로 적는다. 기록과 `hs-orc-test` 폴더는 읽기만 했다.
+
+**1. 사실 — 지금 무엇이 돌고 무엇이 reviewer 에 닿나**
+1. **순서 결함이 먼저다.** 세션(`core/delegate.ts`)과 CLI once(`shell/cli.ts`)는 검증 명령을 `runDuo` 가 **돌아온 뒤** 돌린다. 즉 reviewer 가 끝난 뒤다. `runDuo` 에는 primary 와 reviewer 사이에 끼울 자리가 없고, reviewer 프롬프트는 `reviewPrompt(plan, task, primary.text, undefined, options.noTests)` 로 `checks` 를 늘 비운다(`core/duo.ts`). → 무엇을 선언하든 입력하든 **Core 가 돌린 결과는 지금 어느 reviewer 에도 닿지 않는다.** 결과는 증거(`collect`)로만 간다. D-040 의 `checks` 는 loop 의 `evaluate` 만 쓴다.
+2. **세션 위임에 들어오는 명령.** `DelegateInput.verify` 는 승인할 때 받은 문자열이다. GUI 배정 카드의 자유 입력 칸("검증 명령 · 한 줄에 하나", `renderer/app.ts`), chat `--verify`, `session send --verify` 가 넣는다. **자동 승인(`autoApprove` → `start({write})`)은 `verify` 를 넘기지 않는다.** 그래서 `auto` 위임은 늘 명령 0개다. 세션 경로는 `defaultVerify` 를 부르지 않는다(D-093 확인 사실). 이번 기록에서 칸에 명령을 적었는지는 기록만으로 확정할 수 없다 — 결정 로그 2차 줄은 불일치만 보인다. 적었더라도 1-1 때문에 reviewer 에는 닿지 않았다.
+3. **실행기.** `runCommand`(`core/evidence-gather.ts`) = `spawnSync('/bin/sh', ['-c', cmd], { cwd, timeout: 300_000 })`. 셸 문자열 · 부모 env 그대로 · `AbortSignal` 없음 · 프로세스 그룹 없음. GUI 는 worker·utilityProcess 없이 Electron 메인 프로세스에서 `delegate` 를 돈다(`shell/gui/` 에 해당 코드 없음). → (추론) 명령 하나가 메인 이벤트 루프를 최대 300초 막는다. 그동안 D-066 취소 요청(IPC)을 받지 못한다. (미검증) 시간 초과 때 `sh` 만 SIGTERM 을 받고 손자(npm → node)가 남는지.
+4. **읽기 전용 위임에도 돈다.** `DelegateInput` 에는 `write` 가 없다. 사람이 칸에 적은 명령은 쓰기를 끈 위임에서도 바뀌지 않은 원본에 돈다. D-040 결정 3("읽기 전용이면 돌리지 않는다 — 원본 검사 결과가 증거처럼 쓰인다")과 어긋난다. 쓰기 행(`limits.json` `writeRows`)은 R01·R03·R04·R05·R07·R09 이고 R06 은 읽기 전용 그대로다.
+5. **reviewer 가 명령을 못 돌리는 이유는 인자다.** claude reviewer 는 `-p` 에 `--disallowedTools Edit,Write,NotebookEdit`(`engines.json` `readOnlyArgv`, D-052)만 받는다. Bash 는 승인을 물어야 하는데 `-p` 에는 물을 사람이 없다 — 기록의 "승인 요구로 막혔다" 가 그것이다. codex reviewer 는 `sandbox_mode="read-only"` 다(D-051). 모델 문제가 아니다.
+6. **primary 는 이미 돌렸다 — 그러나 그 기록은 증거가 못 된다.** `runs/1009-2303-e6f/01-Luna.stdout` 의 codex `command_execution` 6건 중 2건이 `npm run lint; git diff --check; …` 묶음이다.
+   - 첫 묶음은 lint 가 `page.tsx 9:5 error … setState synchronously within an effect` 를 냈다. 그런데 기록된 `exit_code` 는 **0** 이다 — 마지막 명령의 값이다.
+   - 둘째 묶음은 lint 출력이 깨끗하고 exit 0 이다.
+   - → 엔진 스트림의 명령 기록은 모델이 명령을 묶는 한 exit code 증거가 아니다. 한편 eslint 는 codex `workspace-write` sandbox 안에서 돌았다(n=1).
+7. **대상 프로젝트.** `hs-orc-test/package.json` `scripts` = `dev`·`build`·`start`·`lint`. typecheck·test 스크립트는 없다. 같은 기록 턴 2 의 R02 위임에서 `npm run build` 는 Google Fonts 네트워크 접근 실패로 중단됐다 — `build` 는 네트워크를 쓴다.
+8. **sandbox 실측 선례.**
+   - D-073 사실 8: `codex sandbox -P :workspace` 안에서는 DNS 가 막히고, 홈 쓰기는 `Operation not permitted`(`~/.npm/_logs` 쓰기 실패)이며, 작업 폴더 쓰기는 된다.
+   - D-091 실측 1: 같은 명령에 `--log-denials` 를 주면 `(node) network-bind local:*:0` 같은 거부 로그가 나온다. listen 은 `EPERM` 이다.
+   - `codex sandbox` 와 `codex exec -s workspace-write` 가 같은 정책이라는 것은 헤더 표기로 한 추론이다(D-073 추론 10).
+9. **재사용할 수 있는 것.**
+   - D-088 `runArgv`(`core/scaffold.ts`): `spawn(argv, {shell:false, detached:true})` · 시간 상한 · `AbortSignal` · 그룹 종료. `CommandRunner` 로 주입할 수 있어 테스트에서 프로세스를 띄우지 않는다. 엔진용 `runProcess`(`adapters/run.ts`)는 스트림 형식(`format`)이 붙어 있어 그대로는 맞지 않는다.
+   - D-091 `runTarget`·`sameRunTarget`(`core/run-app.ts`): `package.json` 스크립트와 `pre`·`post` 를 읽고 글자까지 비교한다. 잠금 파일로 패키지 매니저를 고른다.
+   - `limits.json` 이름 허용 목록(`runScripts`)도 있다.
+   - codex 바이너리는 `resolveBinary` 가 PATH 를 직접 훑어 찾는다(`adapters/resolve.ts`).
+10. **이미 같은 노출이 있다.** CLI `loop --write`(D-040)·once 와 GUI 칸의 명령은 codex primary 가 쓴 뒤의 작업 트리에서 sandbox 밖 `sh -c` 로 돈다. 범위 밖이지만 §4-3 의 판단은 이 경로들에도 걸린다.
+
+**2. 비용 근거** (사실 — 서로 다른 과제라 인과가 아니다)
+- reviewer 1회(Haiku·low): 239,974 토큰(D-036) · 146,548 토큰 $0.085(D-041). 이번 기록은 Haiku $0.013 · Sonnet·high $0.178 이다.
+- D-040 #26: Core 결과를 실었을 때 Haiku 93,749 토큰 · $0.065 · Bash 0회 · 권한 거절 0회(n=1, 대조군 없음). "다시 실행하지 말라" 는 문구가 재실행 시도를 없앴다는 것만 확인됐다.
+- 검증 명령 출력은 명령당 꼬리 1,500자를 싣는다(D-040). 명령 3개면 약 4,500자 → (추정) 3~5천 입력 토큰. 위 reviewer 1회 토큰의 1~5% 다.
+- 시간: 명령당 상한 300초(`runCommand`). eslint·tsc 의 이 프로젝트 소요는 재지 않았다.
+
+**3. 갈림길과 선택지** (구현 크기는 코드 읽기 어림 — 추론)
+
+**3-1. 무엇을 돌리나**
+
+| # | 선택지 | 효과 | 비용 · 구현 크기 | 위험 |
+|---|---|---|---|---|
+| W1 | **프로젝트 선언만** — D-093 상태 폴더 `verify.json`(`default` + 행) | SPEC §5 "제품은 추론하지 않는다" 를 지킨다. 무엇이 돌지 프로젝트가 정한다 | 작다 — `defaultVerify(row, verifyConfigPath(cwd))` 를 세션에도 부른다 | 지금 선언한 프로젝트가 없다. 만드는 명령·화면도 없다(D-093 후속). 그래서 **실사용에서 아무것도 바뀌지 않는다** |
+| W2 | **`package.json` scripts 를 이름 허용 목록으로 고른다** — `lint`·`typecheck`·`type-check`·`test`, 매니저는 잠금 파일로(D-091 과 같은 규칙) | 선언 없이 이번 기록의 `lint` 가 돈다 | 작다 ~ 중간 — `runTarget` 류 + `limits.json` 목록 + 행별로 무엇을 넣을지 표 | SPEC §5 와 부딪힌다 — 프로젝트가 정한 **이름**으로 고르는 것이라 D-091 `runScripts` 와 같은 수준의 추론이다. `test` 가 watch 모드(`jest --watch`)면 300초까지 매달린다. vitest 가 비TTY 에서 1회 실행으로 떨어지는지는 미검증. `build` 는 네트워크를 써서 뺀다(사실 1-7) |
+| W3 | **사람이 카드에서 고른다** — W1·W2 후보를 카드에 체크 목록으로 보이고, 자유 입력 칸은 그대로 둔다 | 사람이 무엇이 돌지 본다 | 중간 — 카드 UI · 기록 필드 | `auto` 는 클릭이 없다(사실 1-2). 기본값(체크 상태)이 결국 W2 의 판정이다 |
+
+행별로 무엇을 넣나 (W2 를 고를 때): `lint`·`typecheck` 는 쓰기 행 전부에 넣는다. `test` 는 운영 기준이 테스트를 말하는 행(R01·R04·R06 — D-093 `EXISTING_TEST_ROWS` + R04 회귀 suite)에만 넣는다. 테스트는 느리고 네트워크·포트·DB 를 쓸 수 있다(추론). R06 은 기본 읽기 전용이라(사실 1-4) 쓰기를 켠 위임에서만 돈다.
+
+**3-2. 어디서 · 어떤 권한으로 돌리나**
+
+| # | 선택지 | 효과 | 비용 · 구현 크기 | 위험 |
+|---|---|---|---|---|
+| X1 | **Core 가 직접**(sandbox 밖) — D-088 `runArgv` 로 argv 실행 | 지금 CLI·GUI 칸과 같다. 무엇이든 돈다 | 작다 | §3-3 S1 — 위임이 쓴 코드를 사용자 권한으로 돌린다 |
+| X2 | **엔진 sandbox 안** — `codex sandbox -P :workspace -C <폴더> [--log-denials] -- <argv>` 를 `runArgv` 로 | primary 와 같은 경계다(네트워크·홈 쓰기 차단, 작업 폴더 쓰기 허용 — 사실 1-8). 모델 호출 0 | 작다 ~ 중간 — argv 앞붙이기 + codex 없을 때의 길 + 거부 구분 | codex CLI 에 기댄다. claude primary 행(R09)도 codex 가 있어야 한다. `codex sandbox` 하위 명령의 안정성은 문서로 확인하지 않았다. 네트워크·포트·홈을 쓰는 테스트는 sandbox 때문에 실패한다 — exit 1 로는 진짜 실패와 같아 보인다(§3-4 V3). macOS 전용(seatbelt) |
+| X3 | macOS `sandbox-exec` + hs-orc 프로필 | codex 에 기대지 않는다 | 중간 — 프로필을 직접 쓰고 유지 | `sandbox-exec` 는 man page 상 deprecated(미검증 — 이 macOS 버전에서 확인하지 않았다). 정책을 hs-orc 가 소유하게 된다 |
+| X4 | reviewer 에 Bash 허용 | 모델이 골라 돌린다 | 작다 | **버린다** — D-040 기각 B 와 같다(엔진마다 다르고 reviewer 읽기 전용 원칙이 깨진다) |
+| X5 | primary 엔진 스트림의 `command_execution` 을 증거로 | 추가 실행 0 | 작다 | **버린다** — exit code 가 묶음의 마지막 값이다(사실 1-6, 이번 기록에서 lint error 가 exit 0 으로 기록됐다) |
+
+공통 조건 (X1·X2):
+- **비동기 실행.** `runArgv` 로 띄우고 위임의 `AbortSignal` 을 넘긴다. 그래야 D-066 취소가 명령 중에도 듣고, D-078 그룹 종료가 손자까지 죽인다.
+- **셸 문자열을 쓰지 않는다.** W2 의 argv 는 `[bin, 'run', 이름]` 이다. 사람이 적은 칸(W3 자유 입력)만 지금처럼 `sh -c` 다.
+- **시간 상한.** 명령당 300초(지금 값)와 위임당 합계 상한을 둔다. 합계 값은 결정 사항이다.
+- **쓰기 위임만.** 읽기 전용이면 돌리지 않고 reviewer 에 "적용되지 않았다 — 통과를 가정하지 마라" 를 싣는다. D-040 결정 3 을 세션에 옮기는 것이고, 사실 1-4 의 어긋남도 고친다.
+
+**3-3. 보안**
+- **핵심 (추론).** 쓰기 위임 뒤의 검증 명령은 primary 가 쓴 코드를 실행한다 — 테스트 파일, `eslint.config.js`, `vitest.config.*`, `package.json` 스크립트. sandbox 밖에서 돌리면 hs-orc 가 일부러 유지하는 엔진 경계(D-025 — `danger-full-access` 를 쓰지 않는다)를 **검증 단계가 넘는다.** `auto` 에서는 사람 클릭 없이 넘는다(D-086). D-091 은 바로 "프로젝트 스크립트를 sandbox 밖에서 돌린다" 에 사람 확인(H8)을 붙였다.
+
+| # | 선택지 | 막는 것 | 못 막는 것 · 비용 |
+|---|---|---|---|
+| S0 | 지금 그대로 | — | 사실 1-10 의 노출 그대로 |
+| S1 | **X1 + 승인 시점 스냅숏 비교** — D-091 처럼 승인 때 고른 스크립트 본문과 `pre`·`post` 를 남기고, 실행 직전 `sameRunTarget` 으로 대조한다. 다르면 돌리지 않고 "검증 스크립트가 위임 중 바뀌었다" 로 남긴다 | **어느 명령을 부르는지**가 사람이 본 것과 같다(`"lint": "exit 0"` 류 약화 · `prelint` 끼워 넣기) | **그 명령이 실행하는 코드**는 못 막는다 — 설정 파일·테스트 파일·`node_modules/.bin` 은 비교 밖이다. 위임이 스크립트를 정당하게 고친 작업이면 검증이 빠진다(그 사실은 남는다) |
+| S2 | **X2(sandbox 안) + S1 비교** | 실행되는 코드가 primary 와 같은 경계 안에 있다 — 네트워크·홈 쓰기 차단 | codex 의존, 테스트 오탐(V3). 비교는 약화 방지용으로 계속 쓴다 |
+| S3 | **primary 뒤 사람 확인** — diff 와 명령을 보이고 사람이 누르면 X1 로 돌린다(H8 과 같은 규칙) | 사람이 본 뒤에만 돈다 | `auto` 흐름이 끊긴다. 카드가 하나 늘고 reviewer 가 사람을 기다린다 |
+
+- **버린 것**: 스크립트 본문을 hs-orc 가 검사한다 — 셸 문자열이라 검사로 안전을 보장할 수 없다(D-091 과 같은 이유).
+
+**3-4. 판정 반영**
+- **V1 — exit ≠ 0 은 `rework`**(지금 `contradiction()` 그대로, D-043). 명령 결과는 D-040 처럼 reviewer 프롬프트의 "검증 명령 (Core 실행)" 절에 싣고, "다시 실행하지 말라" 를 함께 싣는다.
+- **V2 — 작업 전부터 빨간 경우**(D-042). 이미 lint 가 실패하는 프로젝트라면 V1 만으로는 매 위임이 `rework` 다.
+  - V2a: primary 전에 기준선을 돈다. 기준선이 빨가면 그 명령은 증거 요약에 "작업 전부터 실패" 로 싣고 불일치로 세지 않는다 → `unverified`. 시간이 두 배가 든다. 새로 생긴 실패도 기존 실패에 가려진다.
+  - V2b: 기준선이 빨가면 엔진 전에 사람에게 묻는다(D-042 loop 와 같다). 세션에 사전 단계가 하나 생긴다.
+  - V2c: 기준선 없이 V1 그대로 둔다 — 시끄럽다.
+- **V3 — sandbox 거부와 진짜 실패**(X2 일 때). 둘 다 exit 1 이고 D-046 은 출력 파싱을 금한다.
+  - `--log-denials` 의 거부 줄은 출력 문구가 아니라 sandbox 가 낸 구조화된 신호다. 거부가 있었으면 D-046 의 "돌지 못했다" 처럼 다룬다(`rework` 가 아니라 증거 요약에 "sandbox 가 막았다" → `unverified`).
+  - 그 형식이 안정적인지는 미검증이다.
+- **V4 — D-093 과의 관계** (사실 + 추론). R01 의 요구 증거는 `command` 1개다(`REQUIREMENTS`) — `lint` 도 채운다. Core 가 lint 를 돌려 통과하면 테스트 없는 프로젝트의 R01 은 `unverified` 가 아니라 **`ok`** 가 된다. D-093 결정 4 의 결과가 뒤집힌다.
+  - V4a: 받아들인다 — Core 가 돌린 대체 검증이고 산문이 아니다.
+  - V4b: R01 의 `command` 를 테스트 스크립트 명령으로 좁힌다 — `REQUIREMENTS` 변경이라 SPEC §5 를 먼저 바꾼다.
+- **V5 — 명령이 실패하면 reviewer 를 건너뛸까**(D-041). 세션은 단발이라 reviewer 의 사유가 사람에게 가는 유일한 설명이다(D-093 요약). 건너뛰면 reviewer 몫(위 §2)을 아끼는 대신 요약은 명령 출력만 전한다.
+
+**3-5. 가장 작은 end-to-end 첫 조각**
+- **P1 — 순서 + 실행기 + 읽기 전용 규칙** (무엇을 돌리나와 무관하게 지금 결함을 고친다, 엔진 0회로 검증된다):
+  - `runDuo` 에 primary 뒤·reviewer 전 단계를 둔다. 승인 때 받은 명령(GUI 칸·`--verify`)을 그 자리에서 돌려 D-040 절로 reviewer 에 싣는다.
+  - `runCommand` 를 `runArgv` 계열(비동기·취소·그룹 종료)로 바꾼다.
+  - 읽기 전용이면 돌리지 않는다.
+  - once 도 같은 경로를 탄다.
+- **P2 — 무엇을 돌리나**: W1(선언) 위에 결정된 만큼 W2 를 얹는다. 카드는 돌 명령과 스크립트 원문(`pre`·`post` 포함)을 보인다(W3 의 읽기 전용 표시).
+- **P3 — 어디서**: X2·S2 는 사전 실측(§5) 결과로 정한다. 실측이 실패하면(lint·tsc 가 sandbox 에서 거부된다) X1 + S3 이 남는다.
+- **순서를 뒤집는 조건**: W2 를 고르고 X1 이면 P1 과 P2 를 같이 내면 안 된다 — 사람이 적지 않은 명령이 sandbox 밖에서 자동으로 돈다. 그 조합은 S3 와 함께여야 한다.
+
+**4. 권장안**
+- 3-5 **P1 먼저.** 근거: 사실 1-1·1-3·1-4 는 정책 선택과 무관한 결함이다. 사람이 칸에 적은 명령조차 reviewer 에 닿지 않고, GUI 를 막고, 읽기 전용에서도 돈다.
+- 3-1 **W1 + W2(`lint`·`typecheck`, `test` 는 R01·R04·R06), W3 은 표시만.** 근거: W1 만으로는 이번 기록이 바뀌지 않는다(선언한 프로젝트가 없다). 이름 허용 목록은 D-091 `runScripts` 가 이미 연 수준의 추론이다. SPEC §5 문구는 함께 고친다.
+- 3-2·3-3 **X2 + S2**(사전 실측이 통과하면). 근거: 자동으로 도는 검증이 엔진보다 넓은 권한을 가지면 안 된다. D-091 이 sandbox 밖 실행에 사람 확인을 붙인 것과 같은 선이다. 실측이 실패하면 **X1 + S3**(사람 확인)이다. X1 + S1 단독은 권하지 않는다 — 비교는 코드 실행을 막지 못한다.
+- 3-4 **V1 + V2a + V3(거부는 `unverified`) + V4a**, V5 는 하지 않는다. 근거: 세션에서는 reviewer 사유가 사람에게 가는 설명이다(D-093). V2a 는 시간이 두 배지만 lint·tsc 는 짧다고 본다(미측정).
+- 반대 근거:
+  - (a) X2 는 codex 하위 명령에 기대는 새 의존이다. 그 하위 명령이 바뀌면 검증이 조용히 `unverified` 로 떨어진다.
+  - (b) W2 의 `test` 는 프로젝트마다 시간·환경이 달라 300초 상한과 sandbox 에서 오탐을 낼 수 있다. `test` 를 W1 선언으로만 받는 쪽이 더 보수적이다.
+  - (c) V4a 는 "테스트를 돌려라" 는 R01 운영 기준을 lint 로 채운다. 테스트가 **있는** 프로젝트는 W2 가 `test` 를 넣으니 해당이 없지만, 운영 기준의 글자와는 멀어진다.
+
+**5. 미검증·이 조사가 보장하지 않는 것**
+- `codex sandbox -P :workspace` 안에서 `npm run lint` · `npx tsc --noEmit` · 포트를 쓰는 `node --test` 가 어떻게 끝나는지 재지 않았다.
+  - npm 이 실패 로그를 홈(`~/.npm/_logs`)에 못 쓸 때 스크립트의 exit code 를 그대로 돌려주는지도 재지 않았다.
+  - 확인 수단은 모델 호출 0 이다(D-073·D-091 과 같은 방식). 대상은 **스크래치 복사본**이지 `hs-orc-test` 가 아니다. 지시(엔진 0회)에 따라 이번에는 돌리지 않았다.
+- primary sandbox 에서 eslint 가 돈 것은 n=1(사실 1-6)이다. `codex exec` 와 `codex sandbox` 의 정책이 같다는 것은 추론이다.
+- `spawnSync` 가 GUI 를 실제로 얼리는지와 시간 초과 때 손자가 남는지는 재지 않았다(사실 1-3 은 코드에서 한 추론이다).
+- vitest·jest 의 비TTY 동작, eslint·tsc 소요 시간, 이 macOS 의 `sandbox-exec` 상태는 재지 않았다.
+- §3 의 구현 크기는 코드 읽기 어림이다.
+
+**6. 결정 대기 (전하 몫)**
+1. **첫 조각**: **P1 순서·실행기·읽기 전용 규칙부터(권장)** / P1~P3 한꺼번에 / 열지 않는다.
+2. **무엇을 돌리나**: W1 선언만 / **W1 + W2 `lint`·`typecheck`(+ `test` 는 R01·R04·R06)(권장)** / W1 + W2 `lint`·`typecheck` 만(`test` 는 선언으로만) / W3 카드에서 고르기.
+3. **어디서**: **X2 sandbox 안 + S2 비교(권장, 사전 실측 통과 시)** / X1 + S3 사람 확인 / X1 + S1 비교만(권하지 않음).
+4. **빨간 기준선**: **V2a 기준선을 돌려 기존 실패는 불일치로 세지 않는다(권장)** / V2b 엔진 전에 묻는다 / V2c 그대로.
+5. **R01 을 lint 로 채우나**: **V4a 받아들인다(권장)** / V4b 테스트 명령으로 좁힌다(SPEC §5 먼저).
+6. **명령 실패 시 reviewer**: **그대로 돌린다(권장)** / D-041 처럼 건너뛴다.
+7. **사전 실측 승인**: 스크래치 복사본에서 `codex sandbox` 로 lint·tsc·포트 테스트 각 1회(모델 호출 0)를 P3 전에 할지.
+
+결정 전에는 코드·SPEC 을 바꾸지 않는다.
+
 ---
 
 ## 미해결 목록
@@ -3965,3 +4094,4 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 | ~~Q27~~ | ~~지휘자(직접 답·요약·분류 폴백) claude 격리 실행의 내장 도구가 프롬프트로만 막혀 있다~~ → **D-080 확정** (T1 — `isolateArgv` 끝에 `--tools ""`, 세 역할 모두. Q26 G4 를 고르면 T2) | — |
 | ~~Q28~~ | ~~프로젝트에 오케스트레이터 세션과 워커 세션을 나눌까~~ → **D-090 확정** (화면 구분부터 — 첫 조각 S1: 역할 기록 · 칩 · `session new` 진입점. W1 워커 지휘자 유지 · T1 쓰기 워커 워크트리 · K1 종료 전파 없음 · 오케스트레이터 0~1 · 자율 지휘 열지 않음. O2·O3 는 필요가 확인된 뒤, O4·W2 버림) | — |
 | ~~Q29~~ | ~~"앱 실행해줘" 를 어떻게 처리할까 — 엔진 sandbox 가 listen 을 막고 dev 서버는 위임 모양과 맞지 않는다~~ → **D-091 확정** (A2 — GUI 실행 카드가 고른 터미널 창에서 `package.json` 의 `dev`·`start` 를 연다, H8 사람 확인 · J1 결정론 감지 + J3 지휘자 `[실행]` 절 · `npm install` 은 경고만. A1 은 필요 확인 뒤, A3 버림) | — |
+| Q30 | 세션·once 위임에도 Core 가 검증 명령을 돌려 reviewer 에 실을까 — 지금은 reviewer 뒤에 돌아 닿지 않고, reviewer 는 읽기 전용이라 lint·테스트를 재현하지 못한다 (조사, 권장: P1 순서·실행기 먼저 · W1+W2 · X2 sandbox 안) | 세션 위임 검증 |
