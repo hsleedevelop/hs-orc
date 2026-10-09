@@ -147,15 +147,25 @@ export async function directAnswer(
   return { run, ...parseSuggest(matrix, run.text) };
 }
 
-export function buildSummaryPrompt(title: string, d: Pick<Delegated, 'text' | 'verdict' | 'outcome' | 'report'>): string {
+/** 요약에 싣는 reviewer 글의 상한 (D-093). reviewer 는 사유를 먼저 쓰고 판정을 마지막 줄에 둔다 — 앞부분이 사유다. */
+export const SUMMARY_REVIEW_CHARS = 1500;
+
+/**
+ * 위임 결과 요약 프롬프트. PASS 가 아니면 reviewer 글을 잘라 싣는다 (D-093) — 싣지 않으면 요약이
+ * "FAIL 사유가 나와 있지 않다" 고 말한다. PASS 는 싣지 않는다(요약에 바뀌는 것이 없고 비용만 는다).
+ */
+export function buildSummaryPrompt(title: string, d: Pick<Delegated, 'text' | 'verdict' | 'outcome' | 'report' | 'review'>): string {
+  const review = d.verdict !== 'pass' && d.review?.trim() ? d.review.slice(0, SUMMARY_REVIEW_CHARS) : '';
   return [
     '아래 위임 결과를 사용자에게 3줄 이내로 요약하라.',
     '새 사실을 지어내지 않는다. reviewer 판정과 증거 상태를 그대로 전한다.',
+    ...(review ? ['reviewer 가 PASS 하지 않았으면 아래 reviewer 검증 글에서 그 핵심 사유를 한두 개 전한다.'] : []),
     '',
     `[요청] ${title}`,
     `[reviewer 판정] ${d.verdict}`,
     `[증거] ${d.report.summary}`,
     `[outcome] ${d.outcome}`,
+    ...(review ? ['[reviewer 검증 글 앞부분]', review] : []),
     '[primary 출력 앞부분]',
     d.text.slice(0, 3000),
   ].join('\n');

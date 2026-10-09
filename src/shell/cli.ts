@@ -15,16 +15,17 @@ import { PingpongSession } from '../core/modes/pingpong.ts';
 import { runLoop } from '../core/modes/loop.ts';
 import { parseGraphSpec, runGraph, type GraphSpec } from '../core/modes/graph.ts';
 import { appendDecision, decisionLogPath } from '../core/decision-log.ts';
+import { verifyConfigPath } from '../core/project-state.ts';
 import { firstLine, secondLine } from '../core/decide.ts';
 import { storeRun } from '../core/run-store.ts';
 import { reportError, reportNotice } from '../core/report.ts';
-import { FAILING_PHASES, collect, contradiction, notRun, outcomeOf, type Evidence } from '../core/evidence.ts';
+import { EXISTING_TEST_ROWS, FAILING_PHASES, collect, contradiction, notRun, outcomeOf, type Evidence } from '../core/evidence.ts';
 import { readUnclassifiedWithLegacy, recordUnclassified, suggestRows } from '../core/unclassified.ts';
 import { declaredTests, defaultVerify } from '../data/verify.ts';
 import { depStatus } from './deps.ts';
-import { parseVerdict, reviewPrompt, runDuo } from '../core/duo.ts';
+import { noTestsEvidenceNote, parseVerdict, primaryNoTestsNote, reviewPrompt, runDuo } from '../core/duo.ts';
 import { Budget } from '../core/budget.ts';
-import { changedFiles, loadEvidenceFile, runCommand, snapshotTests, testChanges, type TestSnapshot } from '../core/evidence-gather.ts';
+import { changedFiles, loadEvidenceFile, noTests, runCommand, snapshotTests, testChanges, type TestSnapshot } from '../core/evidence-gather.ts';
 import { GATE_CHECKS, parseGateCheck, type GateSignals } from '../core/gatekeeper.ts';
 import { routeWithFallback } from '../core/pipeline.ts';
 import { defaultJev } from './jev.ts';
@@ -283,7 +284,7 @@ async function main(): Promise<void> {
     );
     // D-040: reviewer 는 읽기 전용이라 테스트를 못 돌린다 — 선언된 검증 명령은 Core 가 돌린다(once 와 같은 선언).
     // 읽기 전용이면 primary 의 diff 가 적용되지 않아 원본을 검사하게 되므로 돌리지 않고, 그렇다고 적는다.
-    const verifyCmds = [...defaultVerify(plan.assignment.id), ...args.verify];
+    const verifyCmds = [...defaultVerify(plan.assignment.id, verifyConfigPath(process.cwd())), ...args.verify];
     const cmdLabel = (v: { cmd: string; phase?: string }): string => (v.phase ? `${v.phase}:${v.cmd}` : v.cmd);
     const verifyList = verifyCmds.map(cmdLabel).join(' · ');
     // D-045: phase 는 **언제** 돌리는가다. before·reproduce 는 변경 전의 사실이라 기준선에서 한 번(실패 기대),
@@ -375,14 +376,14 @@ async function main(): Promise<void> {
       if (red.length > 0) process.stderr.write('       --fix-red-baseline — 기존 실패까지 고치는 것을 작업 범위로 둔다.\n');
     }
     // D-047: 선언된 기존 테스트는 줄 추가만 허용한다 — 게이트를 통과시키려는 약화를 막는다.
-    const loopTestGlobs = declaredTests();
+    const loopTestGlobs = declaredTests(verifyConfigPath(process.cwd()));
     let loopTestsBefore: TestSnapshot | undefined;
     if (args.write) {
       if (loopTestGlobs.length > 0) {
         loopTestsBefore = snapshotTests(loopTestGlobs);
         process.stderr.write(`검증   기존 테스트(${loopTestGlobs.join(' · ')})는 줄 추가만 허용 — 바뀌거나 지워지면 FAIL\n`);
       } else {
-        process.stderr.write('검증   테스트 경로 선언이 없다(verify.json tests) — 기존 테스트 약화를 막지 않는다\n');
+        process.stderr.write(`검증   테스트 경로 선언이 없다(${verifyConfigPath(process.cwd())} tests) — 기존 테스트 약화를 막지 않는다\n`);
       }
     }
     process.stderr.write('\n');
@@ -395,6 +396,9 @@ async function main(): Promise<void> {
     // 모델은 약화 없이 풀 수 없다. 재시도로 상한까지 태우지 않고 사람에게 올린다. 첫 약화는 한 번 재시도한다(형식만 바꾼 실수일 수 있다).
     let weakenedLastCycle = false;
     let testConflict = false;
+    // 기존 테스트를 전제하는 행인데 대상에 테스트가 없다 (D-093) — once·세션과 같은 사실을 primary·reviewer 에 싣는다.
+    const missingTests = EXISTING_TEST_ROWS.has(plan.assignment.id) ? noTests(process.cwd()) : null;
+    const task = missingTests ? `${args.task}\n\n${primaryNoTestsNote(missingTests)}` : args.task;
     const result = await runLoop(
       matrix,
       plan,
@@ -403,8 +407,8 @@ async function main(): Promise<void> {
         // 재시도면 직전 reviewer 의 지적을 싣는다 — 사유 없는 재시도는 같은 실수를 반복한다 (D-036).
         plan: (ctx) =>
           ctx.feedback === undefined
-            ? args.task
-            : `${args.task}\n\n직전 사이클은 독립 검증을 통과하지 못했다. 검증자의 지적:\n${ctx.feedback}\n\n이 지적을 반영해 다시 수행하라.`,
+            ? task
+            : `${task}\n\n직전 사이클은 독립 검증을 통과하지 못했다. 검증자의 지적:\n${ctx.feedback}\n\n이 지적을 반영해 다시 수행하라.`,
         // Evaluator 는 reviewer 슬롯이 돈다 (D-003). 형식·판정은 once 의 독립 리뷰와 같다 —
         // 마지막 줄 PASS/FAIL, 못 읽으면 unknown 이고 통과로 봐주지 않는다.
         evaluate: async (_ctx, output) => {
@@ -463,7 +467,7 @@ async function main(): Promise<void> {
             };
           }
           weakenedLastCycle = false; // 기계적 FAIL 이 끊겼다 — "연속" 이 아니다.
-          const check = await execute(plan.slots.reviewer, reviewPrompt(plan, args.task, output, checks));
+          const check = await execute(plan.slots.reviewer, reviewPrompt(plan, args.task, output, checks, missingTests ?? undefined));
           if (!check.ok) reviewerBroken = true;
           const verdict = check.ok ? parseVerdict(check.text) : 'unknown';
           const passed = verdict === 'pass';
@@ -540,9 +544,14 @@ async function main(): Promise<void> {
   // **두 슬롯을 실제로 돌린다** (D-009). primary 만 돌리면 이 제품은 단일 엔진 선택기다.
   // 분류 폴백이 이미 과금한 같은 budget 을 그대로 쓴다 — 합산이다 (D-034).
   // 기존 테스트의 작업 전 내용 — 쓰기일 때만 바뀔 수 있다 (D-047).
-  const testGlobs = declaredTests();
+  const testGlobs = declaredTests(verifyConfigPath(process.cwd()));
   const testsBefore = args.write && testGlobs.length > 0 ? snapshotTests(testGlobs) : undefined;
-  const duo = await runDuo(matrix, plan, execute, args.task, budget, { skipReviewer: args.skipReviewer });
+  // 기존 테스트를 전제하는 행인데 대상에 테스트가 없다 (D-093) — 작업 전에 보고 primary·reviewer·증거에 싣는다.
+  const missingTests = EXISTING_TEST_ROWS.has(plan.assignment.id) ? noTests(process.cwd()) : null;
+  const duo = await runDuo(matrix, plan, execute, missingTests ? `${args.task}\n\n${primaryNoTestsNote(missingTests)}` : args.task, budget, {
+    skipReviewer: args.skipReviewer,
+    ...(missingTests ? { noTests: missingTests } : {}),
+  });
   const run = {
     outcome: duo.primary.ok ? ('ok' as const) : ('error' as const),
     text: duo.primary.text,
@@ -591,10 +600,11 @@ async function main(): Promise<void> {
 
   // 증거 수집 (SPEC §5). 운영 기준이 요구하는 증거가 모였을 때만 완료다 (PRD G4).
   // 프로젝트가 선언한 기본 검증 + 이번 실행의 --verify. 추론은 없다 (SPEC §5).
-  const declared = defaultVerify(plan.assignment.id);
+  const verifyConfig = verifyConfigPath(process.cwd());
+  const declared = defaultVerify(plan.assignment.id, verifyConfig);
   const verify = [...declared, ...args.verify];
   if (declared.length > 0) {
-    process.stderr.write(`검증   data/verify.json 선언 ${declared.length}건: ${declared.map((v) => v.cmd).join(' · ')}\n`);
+    process.stderr.write(`검증   ${verifyConfig} 선언 ${declared.length}건: ${declared.map((v) => v.cmd).join(' · ')}\n`);
   }
   const evidence: Evidence[] = [...duo.evidence];
   for (const v of verify) evidence.push(runCommand(v.cmd, process.cwd(), v.phase));
@@ -608,7 +618,7 @@ async function main(): Promise<void> {
       process.stderr.write(`${reportError('evidence', 'load', error).display}\n`);
     }
   }
-  const report = collect(plan.assignment, evidence);
+  const report = collect(plan.assignment, evidence, missingTests ? [noTestsEvidenceNote(missingTests)] : []);
 
   process.stderr.write(
     [

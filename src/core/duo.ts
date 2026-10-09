@@ -48,7 +48,7 @@ export interface DuoResult {
  * reviewer 프롬프트. **산출물을 다시 만들라고 하지 않는다** — 반례를 먼저 내라고 한다.
  * 매트릭스의 `운영 기준`과 행별 지침을 그대로 판정 기준으로 준다 (D-010).
  */
-export function reviewPrompt(plan: AssignmentPlan, task: string, output: string, checks?: string): string {
+export function reviewPrompt(plan: AssignmentPlan, task: string, output: string, checks?: string, noTests?: string): string {
   return [
     '너는 독립 검증자다. 이 작업을 다시 수행하지 말고 아래 산출물을 검증하라.',
     '',
@@ -72,12 +72,31 @@ export function reviewPrompt(plan: AssignmentPlan, task: string, output: string,
           '',
         ]
       : []),
+    // 대상에 기존 테스트가 없다고 Core 가 결정론으로 확인했다 (D-093). 못 하는 일을 기준으로 FAIL 하지 않게 하되,
+    // primary 가 그 사실과 대체 검증을 밝혔을 때만이다. 테스트가 있으면 이 블록은 오지 않는다.
+    ...(noTests
+      ? [
+          '--- Core 확인 사실 ---',
+          `이 프로젝트에는 기존 테스트가 없다 (${noTests}). 운영 기준의 기존 test 실행은 처음부터 할 수 없다.`,
+          'primary 가 테스트가 없다는 사실을 밝히고 대체 검증(lint·타입체크·빌드 등)과 그 결과를 보고했으면, test 를 실행하지 않은 것을 이유로 FAIL 하지 마라.',
+          '밝히지 않았거나 대체 검증 보고가 없으면 그것은 누락이다. 다른 기준은 그대로 본다.',
+          '',
+        ]
+      : []),
     '다음 순서로 답하라:',
     '1. 누락된 것 / 반례 / 실패 가능성을 먼저 적는다 (없으면 "없음").',
     '2. 마지막 줄에 운영 기준 충족 여부를 PASS 또는 FAIL 한 단어로만 적는다.',
     '"성공했습니다" 같은 산문은 판정이 아니다.',
   ].join('\n');
 }
+
+/** 기존 테스트가 없을 때 primary 프롬프트 끝에 붙이는 Core 확인 사실 (D-093) — 밝히지 않으면 reviewer 가 누락으로 본다. */
+export function primaryNoTestsNote(noTests: string): string {
+  return `[Core 확인] 이 프로젝트에는 기존 테스트가 없다 (${noTests}). 결과 보고에 테스트가 없다는 사실을 밝히고, 대신 돌린 검증(lint·타입체크·빌드 등)의 명령과 결과를 적어라.`;
+}
+
+/** 증거 요약에 붙는 같은 사실 (D-093). */
+export const noTestsEvidenceNote = (noTests: string): string => `대상에 기존 테스트 없음 — ${noTests}`;
 
 /**
  * 여러 reviewer 판정을 AND 로 합친다 (D-072). FAIL 이 하나라도 있으면 fail, 배정된 reviewer 가 다 돌아 모두 PASS 일 때만 pass,
@@ -108,6 +127,8 @@ export interface DuoOptions {
   readonly resumeBaseline?: EngineReport;
   /** 신호가 서면 도는 슬롯을 종료하고 다음 슬롯을 시작하지 않는다 (D-066). */
   readonly signal?: AbortSignal;
+  /** 대상에 기존 테스트가 없다는 Core 확인 근거 (D-093, `noTests`). reviewer 프롬프트에 싣는다. */
+  readonly noTests?: string;
 }
 
 export async function runDuo(
@@ -147,7 +168,7 @@ export async function runDuo(
 
   // 사다리 ④ 배정이면 reviewer 가 둘이다 (D-072). 둘 다 읽기 전용이고 같은 산출물을 서로의 판정 없이 따로 본다. 이어 붙이지 않는다(resume 없음).
   const reviewerSlots = secondReviewer ? [reviewerSlot, secondReviewer] : [reviewerSlot];
-  const prompt = reviewPrompt(plan, task, primary.text);
+  const prompt = reviewPrompt(plan, task, primary.text, undefined, options.noTests);
   const reviews: ReviewRun[] = [];
   // 위에서 `signal?.aborted` 를 이미 본 탓에 TS 가 false 로 좁혀 둔다 — reviewer 실행(await) 뒤에는 다시 읽어야 한다.
   const aborted = (): boolean => signal?.aborted === true;

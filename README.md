@@ -121,7 +121,7 @@ hs-orc session new --role orchestrator --name hub   # 부른 폴더에 세션 �
 
 증거로 인정하는 것은 실제로 돌린 명령의 **exit code**, git이 보고한 **변경 파일**, reviewer의 **판정**, 그리고 사람이 적어 주는 `--evidence <file.json>`이다. exit code 없는 명령, `file:line` 아닌 인용, 환경 표기 없는 측정값은 거절한다.
 
-**프로젝트마다 검증 명령을 선언해야 한다.** `data/verify.json`이 비어 있으면 무엇을 해도 `unverified`로 닫힌다 — 제품 결함이 아니라 선언 부재다.
+**프로젝트마다 검증 명령을 선언해야 한다.** 선언은 그 프로젝트의 `~/.hs-orc/projects/<키>/verify.json`에 둔다(이 저장소의 `data/verify.json`은 hs-orc 자기 선언이라 다른 폴더에는 쓰이지 않는다, D-093). 선언이 없으면 무엇을 해도 `unverified`로 닫힌다 — 제품 결함이 아니라 선언 부재다.
 
 ```json
 { "default": [], "R01": ["npm test"], "R04": ["npm run gate"] }

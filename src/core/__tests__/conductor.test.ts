@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadMatrix } from '../../data/matrix.ts';
 import { loadEngines } from '../../data/engines.ts';
-import { LEGACY_ORCHESTRATOR, StepsError, buildDirectPrompt, buildSummaryPrompt, conductorSlot, defaultOrchestrator, directAnswer, nextSuggestion, orchestratorOptions, parseSteps, parseSuggest } from '../conductor.ts';
+import { LEGACY_ORCHESTRATOR, StepsError, buildDirectPrompt, buildSummaryPrompt, SUMMARY_REVIEW_CHARS, conductorSlot, defaultOrchestrator, directAnswer, nextSuggestion, orchestratorOptions, parseSteps, parseSuggest } from '../conductor.ts';
 import { buildInvocation } from '../../adapters/resolve.ts';
 import type { SlotExecutor } from '../executor.ts';
 
@@ -120,6 +120,16 @@ describe('지휘자 — 결과 처리 (SPEC §6.4.4)', () => {
     assert.match(prompt, /\[reviewer 판정\] pass/);
     assert.match(prompt, /\[증거\] 증거 0\/1/);
     assert.match(prompt, /\[outcome\] unverified/);
+  });
+
+  it('PASS 가 아니면 reviewer 글을 상한까지 싣고, PASS 면 싣지 않는다 (D-093)', () => {
+    const report = { satisfied: false, contradictions: ['reviewer FAIL'], missing: [], rejected: [], accepted: [], summary: '완료가 아니다' };
+    const review = `사유: 날짜가 하루 늦다\n${'x'.repeat(5000)}\nFAIL`;
+    const failed = buildSummaryPrompt('날짜 넣어줘', { text: '넣었다', verdict: 'fail', outcome: 'rework', report, review });
+    assert.match(failed, /\[reviewer 검증 글 앞부분\]\n사유: 날짜가 하루 늦다/);
+    assert.ok(!failed.includes('x'.repeat(SUMMARY_REVIEW_CHARS)), '상한에서 자른다');
+    const passed = buildSummaryPrompt('날짜 넣어줘', { text: '넣었다', verdict: 'pass', outcome: 'ok', report, review: '반례 없음\nPASS' });
+    assert.doesNotMatch(passed, /reviewer 검증 글/);
   });
 
   it('검증된 통과면 다음 제안이 없다', () => {

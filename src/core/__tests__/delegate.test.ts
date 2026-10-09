@@ -11,6 +11,8 @@ import { readDecisions } from '../decision-log.ts';
 import { delegate } from '../delegate.ts';
 import type { SlotExecutor } from '../executor.ts';
 import { Journal } from '../journal.ts';
+import { projectStateDir, verifyConfigPath } from '../project-state.ts';
+import { REPO_ROOT, REPO_VERIFY_PATH } from '../../data/verify.ts';
 
 const matrix = loadMatrix();
 const catalog = loadEngines();
@@ -125,5 +127,109 @@ describe('위임 1건 (SPEC §4 5~7단계)', () => {
     } finally {
       delete process.env['HS_ORC_VERIFY_CONFIG'];
     }
+  });
+});
+
+/** reviewer 는 `slot.role` 로 가른다. 프롬프트를 슬롯별로 모으고, reviewer 판정을 고를 수 있다. */
+const spy = (reviewer: string, primaryDo?: () => void) => {
+  const prompts = { primary: [] as string[], reviewer: [] as string[] };
+  const execute: SlotExecutor = (slot, prompt) => {
+    if (slot.role === 'reviewer') prompts.reviewer.push(prompt);
+    else {
+      prompts.primary.push(prompt);
+      primaryDo?.();
+    }
+    return Promise.resolve({ ok: true, text: slot.role === 'reviewer' ? reviewer : 'ran', rawStdout: '', rawStderr: '', durationMs: 1 });
+  };
+  return { execute, prompts };
+};
+
+const project = (files: Record<string, string>): string => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-delegate-proj-'));
+  process.env['HS_ORC_DECISION_LOG'] = path.join(dir, '.log.jsonl');
+  process.env['HS_ORC_RUN_STORE'] = path.join(dir, '.runs');
+  for (const [file, body] of Object.entries(files)) {
+    mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+    writeFileSync(path.join(dir, file), body, 'utf8');
+  }
+  return dir;
+};
+
+const run = (id: string, dir: string, execute: SlotExecutor) =>
+  delegate({
+    matrix, plan: assign(matrix, catalog, row(id)), reason: `수동 지정 ${id}`, title: '날짜 넣어줘', prompt: '날짜 넣어줘',
+    verify: [], cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
+  });
+
+describe('테스트 없는 프로젝트 (D-093)', () => {
+  const nextApp = { 'package.json': JSON.stringify({ scripts: { dev: 'next dev', lint: 'eslint' } }), 'app/page.tsx': 'export default 1\n' };
+
+  it('test 스크립트도 테스트 파일도 없으면 primary·reviewer·증거에 그 사실이 실린다 (R01)', async () => {
+    const dir = project(nextApp);
+    const s = spy('없음\nPASS');
+    const d = await run('R01', dir, s.execute);
+    assert.match(s.prompts.primary[0] ?? '', /\[Core 확인\] 이 프로젝트에는 기존 테스트가 없다/);
+    assert.match(s.prompts.reviewer[0] ?? '', /test 를 실행하지 않은 것을 이유로 FAIL 하지 마라/);
+    assert.match(d.report.summary, /대상에 기존 테스트 없음/);
+    // 판정은 바꾸지 않는다 — 산문은 증거가 아니라 대체 검증 보고만으로 ok 가 되지 않는다.
+    assert.equal(d.outcome, 'unverified');
+  });
+
+  it('npm init 자리표시 test 스크립트는 테스트가 아니다', async () => {
+    const dir = project({ 'package.json': JSON.stringify({ scripts: { test: 'echo "Error: no test specified" && exit 1' } }) });
+    const s = spy('PASS');
+    await run('R06', dir, s.execute);
+    assert.match(s.prompts.reviewer[0] ?? '', /Core 확인 사실/);
+  });
+
+  for (const [why, files] of [
+    ['test 스크립트가 있다', { 'package.json': JSON.stringify({ scripts: { test: 'vitest run' } }) }],
+    ['테스트 파일이 있다', { ...nextApp, 'app/page.test.tsx': 'it(1)\n' }],
+    ['_test 이름의 테스트 파일이 있다', { ...nextApp, 'lib/date_test.ts': 'it(1)\n' }],
+    ['package.json 이 없다 — 판정하지 않는다', { 'Package.swift': '// swift\n' }],
+  ] as const) {
+    it(`${why}면 면제가 없다 — 테스트를 안 돌린 위임은 reviewer FAIL 그대로 rework 다`, async () => {
+      const dir = project(files);
+      const s = spy('→ 기존 test 를 실행하지 않았다\nFAIL');
+      const d = await run('R01', dir, s.execute);
+      assert.doesNotMatch(s.prompts.primary[0] ?? '', /Core 확인/);
+      assert.doesNotMatch(s.prompts.reviewer[0] ?? '', /Core 확인 사실/);
+      assert.doesNotMatch(d.report.summary, /기존 테스트 없음/);
+      assert.equal(d.outcome, 'rework');
+    });
+  }
+
+  it('기존 테스트를 전제하지 않는 행은 건드리지 않는다', async () => {
+    const dir = project(nextApp);
+    const s = spy('PASS');
+    const d = await run('R02', dir, s.execute);
+    assert.doesNotMatch(s.prompts.reviewer[0] ?? '', /Core 확인 사실/);
+    assert.doesNotMatch(d.report.summary, /기존 테스트 없음/);
+  });
+});
+
+describe('검증 선언은 대상 폴더의 것이다 (D-093)', () => {
+  it('hs-orc 저장소의 선언(tests glob)을 다른 프로젝트에 대지 않는다', async () => {
+    // hs-orc 의 tests 는 `src/**/__tests__/**/*.ts` 다 — 같은 모양의 남의 파일을 고쳐도 hs-orc 게이트로 막지 않는다.
+    const dir = project({ 'src/x/__tests__/a.ts': 'expect(1)\n' });
+    const s = spy('PASS', () => writeFileSync(path.join(dir, 'src/x/__tests__/a.ts'), 'skip\n', 'utf8'));
+    const d = await run('R01', dir, s.execute);
+    assert.equal(d.report.accepted.some((e) => e.kind === 'test-files'), false);
+    assert.notEqual(d.outcome, 'rework');
+  });
+
+  it('그 프로젝트의 선언(상태 폴더 verify.json)은 쓴다', async () => {
+    const dir = project({ 'src/x/__tests__/a.ts': 'expect(1)\n' });
+    mkdirSync(projectStateDir(dir), { recursive: true });
+    writeFileSync(path.join(projectStateDir(dir), 'verify.json'), JSON.stringify({ tests: ['src/**/__tests__/**/*.ts'] }), 'utf8');
+    const s = spy('PASS', () => writeFileSync(path.join(dir, 'src/x/__tests__/a.ts'), 'skip\n', 'utf8'));
+    const d = await run('R01', dir, s.execute);
+    assert.equal(d.outcome, 'rework');
+    assert.match(d.report.summary, /기존 테스트가 약해졌다/);
+  });
+
+  it('hs-orc 저장소 자신은 저장소의 data/verify.json 을 쓴다', () => {
+    assert.equal(verifyConfigPath(REPO_ROOT, { ...process.env, HS_ORC_VERIFY_CONFIG: undefined }), REPO_VERIFY_PATH);
+    assert.notEqual(verifyConfigPath(os.tmpdir(), { ...process.env, HS_ORC_VERIFY_CONFIG: undefined }), REPO_VERIFY_PATH);
   });
 });
