@@ -89,7 +89,7 @@ const withUpdateLock = <T>(file: string, fn: () => T): T =>
 /**
  * 프로젝트(상태 키)의 역할 잠금 `sessions/roles.lock` (D-090). 오케스트레이터 0~1 은 다른 세션들을 보고 판정하므로 세션 점유(`<id>.lock`)로는
  * 못 막는다 — 두 프로세스가 각자 다른 세션을 쥐고 같은 순간 검사를 지나면 둘 다 쓴다(PR #126 리뷰). 오케스트레이터를 **늘리는** 쓰기
- * (만들기·지정·종료한 오케스트레이터 다시 열기)는 모두 이 안에서 다시 검사하고 쓴다. 줄이는 쓰기(해제·종료)는 계약을 깨지 않아 잡지 않는다.
+ * (만들기·지정·project 세션의 다시 열기·복원 — 숨은 워커도 그 사이 지정될 수 있어 역할까지 잠금 안에서 읽는다)는 모두 이 안에서 다시 검사하고 쓴다. 줄이는 쓰기(해제·종료)는 계약을 깨지 않아 잡지 않는다.
  */
 export const roleLockPath = (dir: string, env: NodeJS.ProcessEnv = process.env): string =>
   path.join(projectStateDir(dir, env), 'sessions', 'roles.lock');

@@ -66,15 +66,15 @@ export function assertNameFree(cwd: string, name: string, self: { readonly dir: 
 
 /**
  * 프로젝트당 오케스트레이터는 0~1 개다 (D-090 결정 6). 같은 폴더(상태 키)의 다른 세션이 이미 오케스트레이터면 던진다 — 이름 겹침과 같은 자리에서 본다.
- * **종료한 오케스트레이터는 세지 않는다** — 종료는 쓰기 잠금이라 그 세션을 워커로 되돌릴 수 없고, K1(D-090 결정 5)은 새 오케스트레이터가
- * 같은 워커를 다시 보기를 기대한다. **보관은 센다** — 숨김일 뿐 보내고 쓸 수 있는 세션이다. 종료한 오케스트레이터를 다시 열 때도 이것으로 본다.
+ * **종료·보관한 오케스트레이터는 세지 않는다** — 종료는 쓰기 잠금이라 그 세션을 워커로 되돌릴 수 없고, 보관은 사이드바에서 치운 세션이다.
+ * K1(D-090 결정 5)은 새 오케스트레이터가 같은 워커를 다시 보기를 기대한다. 그래서 다시 열기·복원으로 숨김이 풀릴 때 이것으로 다시 본다.
  */
 export function assertOrchestratorFree(self: { readonly dir: string; readonly id: string }, env: NodeJS.ProcessEnv = process.env): void {
   const taken = listSessions(self.dir, 'project').find(
-    (s) => s.role === 'orchestrator' && s.id !== self.id && !sessionEnded(s.dir, s.id, env),
+    (s) => s.role === 'orchestrator' && s.id !== self.id && !s.archived && !sessionEnded(s.dir, s.id, env),
   );
   if (taken) {
-    const who = `${taken.name ? `${taken.name} · ` : ''}${taken.id}${taken.archived ? ' · 보관됨' : ''}`;
-    throw new Error(`오케스트레이터는 프로젝트당 하나다 — 이 폴더에는 이미 ${who} 가 있다. 그 세션을 워커로 되돌리거나 종료한 뒤 지정한다 (D-090).`);
+    const who = `${taken.name ? `${taken.name} · ` : ''}${taken.id}`;
+    throw new Error(`오케스트레이터는 프로젝트당 하나다 — 이 폴더에는 이미 ${who} 가 있다. 그 세션을 워커로 되돌리거나 종료·보관한 뒤에 한다 (D-090).`);
   }
 }

@@ -683,24 +683,34 @@ export class GuiService {
   /** 종료를 푼다 (D-089). 표식만 지운다 — 기록은 종료 전 그대로라 이어 쓸 수 있다. */
   reopenSession(ref: SessionRef): SessionView | null {
     const { dir, id, kind } = this.target(ref);
-    // 종료한 오케스트레이터는 0~1 에 세지 않는다 (D-090) — 그 사이 새 오케스트레이터가 섰으면 다시 열어 둘이 되지 않게 막는다.
-    // 역할 잠금 안에서 검사하고 표식을 지운다 — 다른 프로세스의 지정·만들기와 같은 순간 검사를 지나지 않게.
-    if (kind === 'project' && sessionRole(readSessionLog(dir, id).records) === 'orchestrator') {
-      withRoleLock(dir, () => {
-        assertOrchestratorFree({ dir, id });
-        setEnded(dir, id, false);
-      });
-    } else setEnded(dir, id, false);
+    this.unhide({ dir, id, kind }, 'archivedAt', () => setEnded(dir, id, false));
     return this.openView(dir, id);
   }
 
   /** 보관하거나(`on`) 복원한다 (D-089). 숨김일 뿐 기록·대화는 그대로다. 다른 프로세스가 쥔 세션은 보관하지 않는다. */
   archiveSession(ref: SessionRef, on: boolean): SessionView | null {
-    const { dir, id } = this.target(ref);
+    const { dir, id, kind } = this.target(ref);
     const other = on ? foreignHold(dir, id) : null;
     if (other) throw new Error(`보관하지 않는다 — ${busyMessage(other, lockPath(dir, id))}`);
-    setArchived(dir, id, on);
+    if (on) setArchived(dir, id, true);
+    else this.unhide({ dir, id, kind }, 'endedAt', () => setArchived(dir, id, false));
     return this.openView(dir, id);
+  }
+
+  /**
+   * 숨김 표식(종료·보관)을 지운다. 종료·보관한 오케스트레이터는 0~1 에 세지 않으므로 (D-090), 지운 뒤 다시 세지는 오케스트레이터면
+   * 그 사이 선 다른 오케스트레이터와 둘이 되지 않게 거절한다 — 워커로 바꿔 풀지 않는다. 남은 표식(`still`)이 있으면 여전히 숨어 있어 보지 않는다.
+   * project 세션은 워커여도 역할 잠금을 **먼저** 쥐고 그 안에서 역할·남은 표식을 읽는다 — 밖에서 워커로 읽고 지우면, 그 틈에 다른 프로세스가
+   * 숨은 이 세션을 지정하고(숨어 있어 0~1 을 지난다) 새 오케스트레이터까지 만든 뒤 숨김이 풀려 둘이 된다(PR #132 리뷰).
+   */
+  private unhide(ref: SessionRef, still: 'endedAt' | 'archivedAt', clear: () => void): void {
+    const { dir, id, kind } = ref;
+    if (kind !== 'project') return clear();
+    withRoleLock(dir, () => {
+      const counts = sessionRole(readSessionLog(dir, id).records) === 'orchestrator' && readSessionMeta(dir, id)[still] === undefined;
+      if (counts) assertOrchestratorFree({ dir, id });
+      clear();
+    });
   }
 
   /** 화면이 넘긴 세션을 확인한다 — id 는 파일 이름이 되고, 기록이 있어야 세션이다. 첫 메시지 전 세션은 목록에도 없다. */

@@ -4,7 +4,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { SETTING_KINDS as CORE_SETTING_KINDS } from '../../core/transcript.ts';
-import { SETTING_KINDS, askedNote, cardAsked, compactLines, cutLine, lastEvent } from '../transcript-lines.ts';
+import { SETTING_KINDS, askedNote, cardAsked, compactLines, cutLine, ipcErrorText, lastEvent } from '../transcript-lines.ts';
 
 describe('transcript-lines', () => {
   it('컷이 없으면 줄이 없고, 있으면 잘린 턴·글자 수를 한 줄로 알린다', () => {
@@ -40,5 +40,12 @@ describe('transcript-lines', () => {
 
   it('건너뛰는 설정 줄 목록이 Core(`transcript.ts`)와 같다 — 한쪽에만 더하면 화면과 Core 가 다른 카드를 살아 있다고 본다', () => {
     assert.deepEqual([...SETTING_KINDS].sort(), [...CORE_SETTING_KINDS].sort());
+  });
+
+  it('IPC 거절은 Electron 머리(채널·예외 이름)를 떼고 문구만 남긴다 — 그 모양이 아니면 그대로다', () => {
+    // 실제 Electron 이 렌더러에 넘긴 문자열 그대로다 (GUI 실기, conv-archive).
+    assert.equal(ipcErrorText("Error invoking remote method 'conv-archive': Error: 세션 id 모양이 아니다: bad id"), '세션 id 모양이 아니다: bad id');
+    assert.equal(ipcErrorText("Error invoking remote method 'conv-start': TokenBudgetExceeded: 예산을 넘었다"), '예산을 넘었다');
+    assert.equal(ipcErrorText('폴더가 없다: /x'), '폴더가 없다: /x');
   });
 });
