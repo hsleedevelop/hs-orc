@@ -6,7 +6,7 @@ import { Journal } from '../core/journal.ts';
 import { listScratchSessions, listSessions, prepareSession, type SessionKind } from '../core/transcript.ts';
 import { assembleSession, restoreBudget } from './conversation.ts';
 import { defaultJev } from './jev.ts';
-import { CHAT_HELP, CHAT_USAGE, findSession, interruptGuard, openingLines, parseChatArgs, runChat } from './chat.ts';
+import { CHAT_HELP, CHAT_USAGE, interruptGuard, openingLines, parseChatArgs, resumeTarget, runChat } from './chat.ts';
 
 async function main(): Promise<void> {
   const args = parseChatArgs(process.argv.slice(2));
@@ -24,9 +24,7 @@ async function main(): Promise<void> {
   let dir: string;
   let id: string;
   if (args.resume !== undefined) {
-    const found = findSession(cwd, args.resume);
-    if (!found) throw new Error(`그런 세션이 없다: ${args.resume} — hs-orc chat --list`);
-    ({ kind, dir, id } = found);
+    ({ kind, dir, id } = resumeTarget(cwd, args.resume));
   } else {
     kind = args.scratch ? 'scratch' : 'project';
     ({ dir, id } = prepareSession(kind, cwd));

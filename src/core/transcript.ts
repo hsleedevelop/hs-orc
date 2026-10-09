@@ -11,6 +11,7 @@ import path from 'node:path';
 import { newDecisionId } from './decision-log.ts';
 import { legacyStateDir, projectStateDir } from './project-state.ts';
 import { sessionHold, type HoldBy } from './session-lock.ts';
+import { readSessionMeta, sessionEnded } from './session-meta.ts';
 import type { Budget, Spend } from './budget.ts';
 import type { ContextCut } from './context.ts';
 import type { SettledOutcome } from './evidence.ts';
@@ -302,6 +303,8 @@ export interface SessionSummary {
   readonly name?: string;
   /** 목록 한 칸의 상태 (D-085). 기록을 못 읽은 세션에는 없다. */
   readonly status?: SessionStatus;
+  /** 보관했다 (D-089) — 사이드바 기본 목록에서 숨는다. 찾기(`hs-orc session`)·이름 겹침 검사에는 그대로 잡힌다. */
+  readonly archived?: true;
 }
 
 /**
@@ -311,8 +314,9 @@ export interface SessionSummary {
  * - `done` 완료 — 마지막 턴이 위임 결과(·요약)로 끝났다. `outcome` 이 그 결과다.
  * - `interrupted` 끊김 — 승인 뒤 결과가 없고 쥔 프로세스도 없다.
  * - `idle` — 그 밖의 입력 대기(직접 답·거절·오류 뒤, 빈 세션).
+ * - `ended` 종료 — 사람이 끝냈다 (D-089, 사이드카 표식). 열람만 되고 아무것도 보내지 않는다.
  */
-export type SessionActivity = 'working' | 'blocked' | 'done' | 'interrupted' | 'idle';
+export type SessionActivity = 'working' | 'blocked' | 'done' | 'interrupted' | 'idle' | 'ended';
 
 export interface SessionStatus {
   readonly state: SessionActivity;
@@ -340,10 +344,11 @@ export function recordedStatus(records: readonly TranscriptRecord[]): SessionSta
   return { state: 'idle' };
 }
 
-/** 점유 표식이 기록보다 앞선다 — 도는 위임의 결과는 아직 기록에 없다. */
+/** 점유 표식 → 종료 표식(D-089) → 기록 순이다. 도는 위임의 결과는 아직 기록에 없고, 살아 있는 점유가 가장 정확한 사실이다. */
 export function sessionStatus(dir: string, id: string, records: readonly TranscriptRecord[], env: NodeJS.ProcessEnv = process.env): SessionStatus {
   const hold = sessionHold(dir, id, env);
-  return hold ? { state: hold.state, holder: { pid: hold.pid, by: hold.by } } : recordedStatus(records);
+  if (hold) return { state: hold.state, holder: { pid: hold.pid, by: hold.by } };
+  return sessionEnded(dir, id, env) ? { state: 'ended' } : recordedStatus(records);
 }
 
 /**
@@ -415,6 +420,7 @@ export function listSessions(dir: string, kind: SessionKind): SessionSummary[] {
       const first = records.find((r) => r.kind === 'user');
       const usage = sessionUsage(records);
       const name = sessionName(records);
+      const archived = readSessionMeta(dir, id).archivedAt !== undefined;
       return {
         id,
         dir,
@@ -424,6 +430,7 @@ export function listSessions(dir: string, kind: SessionKind): SessionSummary[] {
         ...(usage ? { usage } : {}),
         ...(name ? { name } : {}),
         status: sessionStatus(dir, id, records),
+        ...(archived ? { archived: true as const } : {}),
       };
     })
     .sort((a, b) => b.lastAt.localeCompare(a.lastAt));

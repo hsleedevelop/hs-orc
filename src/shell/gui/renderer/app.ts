@@ -38,6 +38,8 @@ const TERMINALS: { id: string; label: string }[] = [
 // 고른 터미널은 이 기기의 화면 선호라 세션·프로젝트 상태에 두지 않는다.
 const TERMINAL_KEY = 'hs-orc.terminal';
 const FOLDED_KEY = 'hs-orc.sidebar.folded';
+// 보관함(D-089)은 기본으로 접혀 있다 — 숨긴 세션이 기본 목록에 다시 드러나지 않게. 펼침 여부만 이 기기에 남긴다.
+const ARCHIVE_KEY = 'hs-orc.sidebar.archive';
 
 const MODES: { id: ApprovalMode; label: string; hint: string }[] = [
   { id: 'manual', label: 'manual', hint: '모든 배정을 묻는다' },
@@ -65,11 +67,13 @@ type Rec =
   | { kind: 'summary'; turn: number; text: string; next: string; by?: string }
   | { kind: 'error'; turn: number; text: string };
 interface Hold { pid: number; by: string; state: 'working' | 'blocked' }
-interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; progress: string[]; mode: ApprovalMode; ladder: { stage: string; label: string; changes: string[] } | null; orchestrator: OrchestratorChoice & { engine: string; line: string }; stepsPending: boolean; scaffoldPending: boolean; gitInitOffered: boolean; name?: string; external: Hold | null }
+interface SessionView { id: string; kind: SessionKind; dir: string; state: SessionState; records: Rec[]; broken: number; budget: string; appBudget: string; interrupted: boolean; cancellable: boolean; progress: string[]; mode: ApprovalMode; ladder: { stage: string; label: string; changes: string[] } | null; orchestrator: OrchestratorChoice & { engine: string; line: string }; stepsPending: boolean; scaffoldPending: boolean; gitInitOffered: boolean; name?: string; external: Hold | null; ended: boolean; archived: boolean }
 interface SessionUsage { tokens: number; cacheReadTokens: number; cacheReadPartial?: true; billedUsd: number; convertedUsd: number }
-type Activity = 'working' | 'blocked' | 'done' | 'interrupted' | 'idle';
+type Activity = 'working' | 'blocked' | 'done' | 'interrupted' | 'idle' | 'ended';
 interface SessionStatus { state: Activity; outcome?: string; holder?: { pid: number; by: string } }
-interface SessionSummary { id: string; dir: string; kind: SessionKind; lastAt: string; preview: string; usage?: SessionUsage; name?: string; status?: SessionStatus }
+// `placeholder` 는 렌더러만 붙인다 — 첫 메시지 전이라 기록이 없는 열린 세션의 자리다. 종료·보관할 것이 없다.
+interface SessionSummary { id: string; dir: string; kind: SessionKind; lastAt: string; preview: string; usage?: SessionUsage; name?: string; status?: SessionStatus; archived?: true; placeholder?: true }
+interface SessionRef { kind: SessionKind; dir: string; id: string }
 interface ConversationTree { projects: { project: ProjectInfo; sessions: SessionSummary[] }[]; scratch: SessionSummary[] }
 
 interface Bridge {
@@ -94,6 +98,10 @@ interface Bridge {
   convTerminal(terminal: string): Promise<string>;
   convRename(name: string): Promise<SessionView>;
   convClose(): Promise<void>;
+  // 종료·보관 (D-089). 열린 세션이면 그 뷰, 아니면 null 이다.
+  convEnd(ref: SessionRef): Promise<SessionView | null>;
+  convReopen(ref: SessionRef): Promise<SessionView | null>;
+  convArchive(ref: SessionRef, on: boolean): Promise<SessionView | null>;
   tasks(): Promise<TaskRow[]>;
   projects(): Promise<ProjectState>;
   pickProject(): Promise<ProjectState | null>;
@@ -356,10 +364,12 @@ function Sidebar(props: {
   open: SessionView | null;
   refresh: string;
   onOpen: (v: SessionView) => void;
+  /** 열린 세션을 사이드바에서 종료·보관했을 때 받은 뷰 (D-089). */
+  onView: (v: SessionView) => void;
   onProject: (s: ProjectState) => void;
   onError: (m: string) => void;
 }): ReactElement {
-  const { current, open, onOpen, onProject, onError } = props;
+  const { current, open, onOpen, onView, onProject, onError } = props;
   // 다른 세션의 상태(D-085)는 다른 프로세스·도는 위임이 바꾼다 — 화면 밖 변화라 주기적으로 다시 읽는다.
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -386,6 +396,10 @@ function Sidebar(props: {
     return n;
   });
   const toggle = (key: string) => fold(key, !folded.has(key));
+  const [showArchive, setShowArchive] = useState(() => localStorage.getItem(ARCHIVE_KEY) === '1');
+  const flipArchive = () => setShowArchive((on) => { localStorage.setItem(ARCHIVE_KEY, on ? '0' : '1'); return !on; });
+  // 종료는 두 번 누르게 한다 — 첫 클릭은 이 행을 확인 대기로 둔다. 다른 행으로 가면 풀린다.
+  const [confirmEnd, setConfirmEnd] = useState('');
 
   const run = <T>(p: Promise<T>, done: (v: T) => void) => {
     setBusy(true);
@@ -404,10 +418,19 @@ function Sidebar(props: {
       onOpen,
     );
 
-  const item = (s: SessionSummary): ReactElement => {
+  // 종료·보관·복원 (D-089). 목록을 바로 다시 읽고, 열린 세션이면 그 화면도 받은 뷰로 바꾼다.
+  const manage = (p: Promise<SessionView | null>) =>
+    run(p, (v) => { setConfirmEnd(''); setTick((n) => n + 1); if (v) onView(v); });
+  const refOf = (s: SessionSummary): SessionRef => ({ kind: s.kind, dir: s.dir, id: s.id });
+
+  const item = (s: SessionSummary, where?: string): ReactElement => {
     const usage = s.usage ? usageLine(s.usage) : null;
-    return h('button', {
-      key: `${s.dir}::${s.id}`, className: 'sb-item', disabled: busy, title: s.dir,
+    const key = `${s.dir}::${s.id}`;
+    const ended = s.status?.state === 'ended';
+    // 다른 프로세스(chat·cli)가 쥔 세션은 막는다 (D-089 · D-085). gui 점유는 이 앱일 수 있어 서비스가 가린다 — 다른 창이면 서비스가 거절한다.
+    const held = (s.status?.state === 'working' || s.status?.state === 'blocked') && s.status.holder?.by !== 'gui';
+    const row = h('button', {
+      className: `sb-item${s.archived ? ' archived' : ''}`, disabled: busy, title: s.dir,
       'aria-current': sameSession(open, s), onClick: () => openSession(s),
     },
     h('span', { className: 'p' }, s.preview || '(빈 세션)'),
@@ -418,14 +441,34 @@ function Sidebar(props: {
         title: s.status?.holder ? `${s.status.holder.by} · pid ${s.status.holder.pid}` : '',
       }, statusLabel(s.status)),
       h('span', { className: 'ref', title: `id ${s.id}${s.name ? ` · 이름 ${s.name}` : ''}` }, s.name ? `${s.name} · ${s.id}` : s.id)),
-    h('span', { className: 't' }, s.lastAt ? s.lastAt.slice(0, 16).replace('T', ' ') : '—'),
+    h('span', { className: 't' }, `${s.lastAt ? s.lastAt.slice(0, 16).replace('T', ' ') : '—'}${where ? ` · ${where}` : ''}`),
     usage ? h('span', { className: 'u', title: usage.title }, usage.line) : null);
+    if (s.placeholder) return h('div', { key, className: 'sb-row' }, row);
+    // hover·포커스에만 드러난다 — 행 자체가 버튼이라 그 안에 버튼을 넣지 않고 옆에 겹쳐 둔다.
+    return h('div', { key, className: 'sb-row', onMouseLeave: () => { if (confirmEnd === key) setConfirmEnd(''); } },
+      row,
+      h('div', { className: 'sb-actions' },
+        s.archived
+          ? h('button', { className: 'sb-act', disabled: busy, title: '보관함에서 꺼내 기본 목록에 다시 보인다', onClick: () => manage(orc.convArchive(refOf(s), false)) }, '복원')
+          : h('button', {
+              className: 'sb-act', disabled: busy || held,
+              title: held ? '다른 곳에서 쥔 세션은 보관하지 않는다' : '기본 목록에서 숨긴다 — 기록은 그대로다. 보관함에서 복원한다',
+              onClick: () => manage(orc.convArchive(refOf(s), true)),
+            }, '보관'),
+        ended
+          ? h('button', { className: 'sb-act', disabled: busy, title: '종료를 풀고 이어 쓸 수 있게 한다', onClick: () => manage(orc.convReopen(refOf(s))) }, '다시 열기')
+          : h('button', {
+              className: `sb-act danger${confirmEnd === key ? ' confirm' : ''}`,
+              disabled: busy || held,
+              title: confirmEnd === key ? '한 번 더 누르면 종료한다 — 도는 위임은 취소하고, 입력이 잠긴다' : '세션을 끝낸다 — 열람만 된다. 다시 열 수 있다',
+              onClick: () => (confirmEnd === key ? manage(orc.convEnd(refOf(s))) : setConfirmEnd(key)),
+            }, confirmEnd === key ? '정말 종료' : '종료')));
   };
 
   // 첫 메시지 전의 세션은 기록 파일이 없어 목록에 안 잡힌다 — 열려 있는 동안은 자리를 보여 준다.
-  const withOpen = (dir: string | null, sessions: SessionSummary[]): SessionSummary[] =>
-    open && (dir === null ? open.kind === 'scratch' : open.kind === 'project' && open.dir === dir) && !sessions.some((s) => sameSession(open, s))
-      ? [{ id: open.id, dir: open.dir, kind: open.kind, lastAt: '', preview: '(새 세션)', status: { state: 'idle' as const } }, ...sessions]
+  const withOpen = (dir: string | null, sessions: SessionSummary[], all: SessionSummary[]): SessionSummary[] =>
+    open && (dir === null ? open.kind === 'scratch' : open.kind === 'project' && open.dir === dir) && !all.some((s) => sameSession(open, s))
+      ? [{ id: open.id, dir: open.dir, kind: open.kind, lastAt: '', preview: '(새 세션)', status: { state: 'idle' as const }, placeholder: true as const }, ...sessions]
       : sessions;
 
   const group = (key: string, head: ReactNode, addTitle: string, addDir: string | null, sessions: SessionSummary[], extra = ''): ReactElement => {
@@ -436,15 +479,25 @@ function Sidebar(props: {
         head,
         h('span', { className: 'sb-count' }, String(sessions.length)),
         h('button', { className: 'sb-add', disabled: busy, title: addTitle, onClick: () => startIn(addDir) }, '＋')),
-      ...shown.map(item),
+      ...shown.map((s) => item(s)),
       !folded.has(key) && sessions.length === 0 ? h('div', { className: 'sb-empty' }, '세션 없음') : null);
   };
+
+  // 보관한 세션(D-089)은 기본 목록에서 빼고 맨 아래 보관함에 모은다. 서비스는 다 주고 여기서 가른다 —
+  // 빼고 받으면 열린 보관 세션이 "(새 세션)" 자리로 다시 생긴다.
+  const active = (sessions: SessionSummary[]) => sessions.filter((s) => !s.archived);
+  const archived = tree
+    ? [
+        ...tree.projects.flatMap(({ project, sessions }) => sessions.filter((s) => s.archived).map((s) => ({ s, where: project.name }))),
+        ...tree.scratch.filter((s) => s.archived).map((s) => ({ s, where: '스크래치' })),
+      ].sort((a, b) => b.s.lastAt.localeCompare(a.s.lastAt))
+    : [];
 
   return h('aside', { className: 'sidebar' },
     h('div', { className: 'sb-title' }, '프로젝트'),
     !tree ? text('불러오는 중…', 'dim')
     : [
-        ...tree.projects.map(({ project, sessions }) =>
+        ...tree.projects.map(({ project, sessions: all }) =>
           group(project.dir,
             // 다른 폴더는 펼치면서 옮긴다. 옮길 게 없으면(이미 현재 폴더·도는 중·없는 폴더) 접고 편다 — 도는 중에도 막히지 않는다.
             h('button', {
@@ -455,9 +508,16 @@ function Sidebar(props: {
                 useDir(project.dir);
               },
             }, project.name),
-            '이 폴더에서 새 세션', project.dir, withOpen(project.dir, sessions),
+            '이 폴더에서 새 세션', project.dir, withOpen(project.dir, active(all), all),
             `${project.dir === current ? ' current' : ''}${project.exists ? '' : ' missing'}`)),
-        group('::scratch', h('span', { className: 'sb-name static' }, '스크래치'), '새 스크래치 세션', null, withOpen(null, tree.scratch)),
+        group('::scratch', h('span', { className: 'sb-name static' }, '스크래치'), '새 스크래치 세션', null, withOpen(null, active(tree.scratch), tree.scratch)),
+        h('div', { key: '::archive', className: 'sb-group' },
+          h('div', { className: 'sb-head' },
+            h('button', { className: 'sb-caret', 'aria-label': showArchive ? '보관함 접기' : '보관함 펼치기', onClick: flipArchive }, showArchive ? '▾' : '▸'),
+            h('button', { className: 'sb-name', title: '보관한 세션 — 기록은 그대로다. 복원하면 원래 묶음으로 돌아간다', onClick: flipArchive }, '보관함'),
+            h('span', { className: 'sb-count' }, String(archived.length))),
+          ...(showArchive ? archived.map(({ s, where }) => item(s, where)) : []),
+          showArchive && archived.length === 0 ? h('div', { className: 'sb-empty' }, '보관한 세션 없음') : null),
       ]);
 }
 
@@ -514,6 +574,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
   const [error, setError] = useState('');
   // 이름 편집 중이면 입력값 (D-085). null = 편집 안 함.
   const [naming, setNaming] = useState<string | null>(null);
+  // 종료 확인 대기 (D-089) — 첫 클릭은 확인을 묻고, 두 번째가 종료한다.
+  const [ending, setEnding] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   // 요청이 도는 동안 뷰를 다시 읽는다 — 서비스의 뷰는 읽기뿐이라 도는 실행을 건드리지 않는다. 끝나면 요청이 돌려준 뷰가 이긴다.
@@ -533,7 +595,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     const t = setInterval(() => {
       orc.convView().then((v) => {
         const changed = v.records.length !== cur.records.length || v.state !== cur.state || v.name !== cur.name
-          || v.external?.pid !== cur.external?.pid || v.external?.state !== cur.external?.state;
+          || v.external?.pid !== cur.external?.pid || v.external?.state !== cur.external?.state
+          || v.ended !== cur.ended || v.archived !== cur.archived;
         if (live && changed) onChange(v);
       }, () => undefined);
     }, 2000);
@@ -563,10 +626,22 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
 
   // 설정 줄(이름 D-085 · 승인 방식 · 지휘자 D-087)은 건너뛴다 — Core 와 같은 규칙이다.
   const last = lastEvent(view.records);
-  // 다른 프로세스가 쥐었으면(D-085) 이 화면의 모든 조작을 막는다 — 눌러도 서비스가 거절한다.
-  const locked = busy || !!view.external;
+  // 다른 프로세스가 쥐었거나(D-085) 종료한 세션이면(D-089) 이 화면의 모든 조작을 막는다 — 눌러도 서비스가 거절한다.
+  const locked = busy || !!view.external || view.ended;
   // 배정 카드가 선 채 보내면 그 배정은 거절로 남는다 (D-064) — 제안 카드가 대화를 막지 않는다.
-  const canType = (view.state === 'waiting_input' || view.state === 'blocked') && !busy && !view.external;
+  const canType = (view.state === 'waiting_input' || view.state === 'blocked') && !locked;
+  const ref: SessionRef = { kind: view.kind, dir: view.dir, id: view.id };
+  // 보관·다시 열기는 도는 요청과 겹쳐도 된다 — `act` 로 돌리면 끝날 때 도는 위임의 busy 표시를 지운다.
+  const quick = (p: Promise<SessionView | null>) => {
+    setError('');
+    p.then((v) => { if (v) onChange(v); }, (e: unknown) => setError(why(e)));
+  };
+  // 종료는 도는 위임을 취소한다 (D-066 경로) — 취소 버튼과 같이 도는 요청과 겹쳐 부른다.
+  const end = () => {
+    setEnding(false);
+    if (busy) setDelegation('cancelling');
+    act(orc.convEnd(ref).then((v) => v ?? orc.convView()));
+  };
 
   const planCard = (r: Extract<Rec, { kind: 'plan' }>, i: number, active: boolean): ReactNode =>
     h('section', { key: i, className: 'card' },
@@ -828,14 +903,34 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
           onChange: (e: { target: { value: string } }) => { setTerminal(e.target.value); localStorage.setItem(TERMINAL_KEY, e.target.value); },
         }, ...TERMINALS.map((t) => h('option', { key: t.id, value: t.id }, t.label))),
         h('button', { className: 'btn', title: `${view.dir} 에서 터미널 열기`, onClick: () => { orc.convTerminal(terminal).catch((e: unknown) => setError(why(e))); } }, '터미널'),
-        h('button', { className: 'btn', onClick: props.onClose }, '세션 닫기'))),
+        h('button', { className: 'btn', title: '화면에서만 닫는다 — 세션은 그대로고 사이드바에서 다시 연다', onClick: props.onClose }, '세션 닫기'),
+        // 닫기와 다른 무게의 조작이다 (D-089) — 세로 선 너머에 따로 둔다. 보관은 숨김, 종료는 쓰기 잠금이다. 둘 다 기록을 지우지 않는다.
+        h('div', { className: 'head-end' },
+          h('button', {
+            className: 'btn', disabled: !view.archived && !!view.external,
+            title: view.archived ? '보관함에서 꺼내 기본 목록에 다시 보인다' : '사이드바 기본 목록에서 숨긴다 — 기록·대화는 그대로다',
+            onClick: () => quick(orc.convArchive(ref, !view.archived)),
+          }, view.archived ? '보관 해제' : '보관'),
+          view.ended
+            ? h('button', { className: 'btn', title: '종료를 풀고 이어 쓸 수 있게 한다', onClick: () => quick(orc.convReopen(ref)) }, '다시 열기')
+            : ending
+              ? [
+                  h('button', { key: 'end', className: 'btn danger', autoFocus: true, onClick: end }, busy ? '정말 종료 · 도는 위임을 취소한다' : '정말 종료 · 입력이 잠긴다'),
+                  h('button', { key: 'keep', className: 'btn', onClick: () => setEnding(false) }, '취소'),
+                ]
+              : h('button', {
+                  className: 'btn danger', disabled: !!view.external || delegation === 'cancelling',
+                  title: '세션을 끝낸다 — 열람만 되고 보내기를 막는다. 도는 위임은 취소하고 선 카드는 거절한다. 다시 열 수 있다',
+                  onClick: () => setEnding(true),
+                }, '종료')))),
     // 예산 글은 머리 줄 밖에 둔다 — 조작과 한 줄이면 남는 폭으로 밀려 세로로 접힌다. 여기선 본문 폭으로 감긴다.
     h('div', { className: 'hint mono' }, view.budget, ' · ', view.appBudget),
     view.broken > 0 ? h('div', { className: 'banner error' }, `기록에 깨진 줄 ${view.broken}개 — 건너뛰고 보여준다`) : null,
+    view.ended ? h('div', { className: 'banner note' }, '종료한 세션이다 — 읽기만 된다. 이어 쓰려면 위의 "다시 열기" 를 누른다. 다른 곳(hs-orc session send·chat --resume)에서도 거절한다.') : null,
     view.interrupted ? h('div', { className: 'banner error' }, '승인한 위임의 결과가 기록되지 않았다 — 실행 중 앱이 끊겼다. 결정 로그 1차 줄만 남아 있을 수 있다.') : null,
     ...view.records.map(record),
     // 미검증·실패 뒤 사다리 다음 단계 (D-068) — 누르면 배정 카드만 선다. 시작은 카드의 승인이다(어느 방식에서도 A3 로 묻는다).
-    view.ladder && view.state === 'waiting_input' && !busy
+    view.ladder && view.state === 'waiting_input' && !busy && !view.ended
       ? h('div', { className: 'row' },
           h('button', { className: 'btn accent', onClick: () => act(orc.convEscalate()) }, '사다리 다음 단계로 다시 위임'),
           h('span', { className: 'hint' }, view.ladder.changes.at(-1) ?? view.ladder.label))
@@ -869,7 +964,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     h('section', { className: 'card composer' },
       h('textarea', {
         rows: 3, value: draft, disabled: !canType,
-        placeholder: view.state === 'blocked' ? '배정을 승인·거절하거나, 메시지를 보내면 이 배정은 거절로 남는다 · ⌘↵ 전송' : '메시지 · ⌘↵ 전송',
+        placeholder: view.ended ? '종료한 세션 — 보낼 수 없다'
+          : view.state === 'blocked' ? '배정을 승인·거절하거나, 메시지를 보내면 이 배정은 거절로 남는다 · ⌘↵ 전송' : '메시지 · ⌘↵ 전송',
         onChange: (e: { target: { value: string } }) => setDraft(e.target.value),
         onKeyDown: (e: { key: string; metaKey: boolean; ctrlKey: boolean; preventDefault: () => void }) => {
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }
@@ -1015,8 +1111,9 @@ function App(): ReactElement {
       h(Sidebar, {
         current: projects?.current.dir,
         open: conv,
-        refresh: `${projects?.current.dir ?? ''}|${conv ? `${conv.dir}::${conv.id}::${conv.records.length}` : ''}`,
+        refresh: `${projects?.current.dir ?? ''}|${conv ? `${conv.dir}::${conv.id}::${conv.records.length}::${conv.ended}::${conv.archived}` : ''}`,
         onOpen: opened,
+        onView: accept,
         onProject: moved,
         onError: setError,
       }),

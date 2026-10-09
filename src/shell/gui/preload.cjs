@@ -35,4 +35,7 @@ contextBridge.exposeInMainWorld('orc', {
   convTerminal: (terminal) => ipcRenderer.invoke('conv-terminal', terminal),
   convRename: (name) => ipcRenderer.invoke('conv-rename', name),
   convClose: () => ipcRenderer.invoke('conv-close'),
+  convEnd: (ref) => ipcRenderer.invoke('conv-end', ref),
+  convReopen: (ref) => ipcRenderer.invoke('conv-reopen', ref),
+  convArchive: (ref, on) => ipcRenderer.invoke('conv-archive', ref, on),
 });

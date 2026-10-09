@@ -51,6 +51,7 @@ import type { RowClassifier } from '../../adapters/jev.ts';
 import { isTerminalId, openTerminal, terminalCommand, type TerminalId } from './terminal.ts';
 import { assembleSession, restoreBudget } from '../conversation.ts';
 import { busyMessage, claimSession, foreignHold, lockPath, releaseSession, syncHold, type SessionHold } from '../../core/session-lock.ts';
+import { assertNotEnded, readSessionMeta, setArchived, setEnded } from '../../core/session-meta.ts';
 import { assertNameFree } from '../session-registry.ts';
 
 export { skipGitCheck } from '../conversation.ts';
@@ -142,7 +143,21 @@ export interface SessionView {
   readonly name?: string;
   /** 다른 프로세스(`chat`·`hs-orc session`)가 이 세션을 쥐고 있다 (D-085). 화면은 입력을 막고 도는 중으로 보인다. */
   readonly external: SessionHold | null;
+  /** 종료했다 (D-089). 화면은 열람만 하고 입력·조작을 막는다 — 보내도 서비스가 거절한다. */
+  readonly ended: boolean;
+  /** 보관했다 (D-089). 사이드바 기본 목록에서 숨는다 — 대화는 그대로 된다. */
+  readonly archived: boolean;
 }
+
+/** 사이드바·세션 머리가 종료·보관할 세션을 가리키는 값 (D-089). 목록 한 줄의 그것이다. */
+export interface SessionRef {
+  readonly kind: SessionKind;
+  readonly dir: string;
+  readonly id: string;
+}
+
+/** id 는 파일 이름이 된다 — 경로 문자가 섞이면 상태 폴더 밖에 쓴다. */
+const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
 
 export interface WorktreeState {
   /** **본체** 작업 트리. git 저장소가 아니면 null — 화면은 "저장소가 아니다"를 그대로 보여준다. */
@@ -434,6 +449,10 @@ export class GuiService {
       gitInitOffered: s.gitInitOffered,
       ...(s.name ? { name: s.name } : {}),
       external: foreignHold(s.dir, s.id),
+      ...(() => {
+        const meta = readSessionMeta(s.dir, s.id);
+        return { ended: meta.endedAt !== undefined, archived: meta.archivedAt !== undefined };
+      })(),
     };
   }
 
@@ -522,13 +541,20 @@ export class GuiService {
   /**
    * 엔진을 부르지 않고 기록만 붙이는 호출 (D-085). 다른 프로세스가 쥐었으면 거절한다 — 그쪽이 같은 파일에 쓰는 중이다.
    * 도는 우리 위임(`live`)에는 그대로 붙는다(방식 변경은 도는 중에도 된다, D-064). 끝나면 카드가 섰는지에 맞춰 점유를 맞춘다.
+   * 쓰는 동안 점유를 쥐고, 종료(D-089)는 쥔 **뒤에** 본다 — 검사만 하고 쓰면 그 틈에 다른 GUI 가 종료해도 기록이 붙는다.
+   * 도는 위임은 이미 쥐고 있어 다시 쥐지도 놓지도 않는다 — 끝날 때 `running` 이 놓는다.
    */
   private recording(op: (s: ConversationSession) => unknown): void {
     const s = this.requireConversation();
-    const other = foreignHold(s.dir, s.id);
-    if (other) throw new Error(busyMessage(other, lockPath(s.dir, s.id)));
-    op(s);
-    if (!this.live.has(`${s.dir}::${s.id}`)) syncHold(s.dir, s.id, s.state === 'blocked' ? 'blocked' : null, 'gui');
+    const key = `${s.dir}::${s.id}`;
+    // 다른 곳이 쥐었으면 여기서 던진다(같은 거절 문구) — 그 점유는 건드리지 않는다.
+    if (!this.live.has(key)) claimSession(s.dir, s.id, 'working', 'gui');
+    try {
+      assertNotEnded(s.dir, s.id);
+      op(s);
+    } finally {
+      if (!this.live.has(key)) syncHold(s.dir, s.id, s.state === 'blocked' ? 'blocked' : null, 'gui');
+    }
   }
 
   async converseAsk(): Promise<SessionView> {
@@ -542,6 +568,13 @@ export class GuiService {
     const key = `${s.dir}::${s.id}`;
     // 도는 동안 세션을 쥔다 (D-085) — `chat`·`hs-orc session send` 가 같은 기록에 끼어 쓰지 않게. 다른 곳이 쥐었으면 여기서 던진다.
     claimSession(s.dir, s.id, 'working', 'gui');
+    // 종료(D-089)는 쥔 뒤에 본다 — 종료는 점유를 쥔 채 표식을 쓴다.
+    try {
+      assertNotEnded(s.dir, s.id);
+    } catch (error) {
+      syncHold(s.dir, s.id, s.state === 'blocked' ? 'blocked' : null, 'gui');
+      throw error;
+    }
     this.live.set(key, s);
     let call: Promise<unknown>;
     try {
@@ -575,6 +608,68 @@ export class GuiService {
     if (!existsSync(dir)) throw new Error(`세션 폴더가 없다: ${dir}`);
     await open(dir, terminal);
     return dir;
+  }
+
+  /**
+   * 세션을 종료한다 (D-089) — 화면만 닫는 `closeConversation` 과 다르다. 이 앱이 돌리는 위임은 취소(D-066)하고 끝나기를 기다리며,
+   * 선 카드는 거절로 닫은 뒤 종료 표식을 쓴다. 기록은 고치지 않는다. 다른 프로세스가 쥐었으면 거절한다 — 그 pid 에 신호를 보내지 않는다(D-085).
+   * 지휘자 호출(직접 답·요약·단계 계획)은 취소할 수 없어 거절한다 — 끝난 뒤 다시 누른다. 열린 세션이면 그 뷰를 돌려준다.
+   */
+  async endSession(ref: SessionRef): Promise<SessionView | null> {
+    const { dir, id } = this.target(ref);
+    const key = `${dir}::${id}`;
+    const other = foreignHold(dir, id);
+    if (other) throw new Error(`종료하지 않는다 — ${busyMessage(other, lockPath(dir, id))}`);
+    const live = this.live.get(key);
+    if (live) {
+      if (!live.cancel()) throw new Error('지휘자 호출이 도는 중이라 취소할 수 없다 — 끝난 뒤 종료한다.');
+      await this.liveCalls.get(key)?.catch(() => undefined);
+    }
+    // 쥔 채 카드를 닫고 표식을 쓴다 — `session send`·`chat` 은 쥔 뒤에 종료를 본다. 그 틈에 남이 먼저 쥐었으면 여기서 던진다.
+    claimSession(dir, id, 'working', 'gui');
+    try {
+      const open = this.openSession(dir, id);
+      if (open?.state === 'blocked') open.reject();
+      setEnded(dir, id, true);
+    } finally {
+      releaseSession(dir, id);
+    }
+    return this.openView(dir, id);
+  }
+
+  /** 종료를 푼다 (D-089). 표식만 지운다 — 기록은 종료 전 그대로라 이어 쓸 수 있다. */
+  reopenSession(ref: SessionRef): SessionView | null {
+    const { dir, id } = this.target(ref);
+    setEnded(dir, id, false);
+    return this.openView(dir, id);
+  }
+
+  /** 보관하거나(`on`) 복원한다 (D-089). 숨김일 뿐 기록·대화는 그대로다. 다른 프로세스가 쥔 세션은 보관하지 않는다. */
+  archiveSession(ref: SessionRef, on: boolean): SessionView | null {
+    const { dir, id } = this.target(ref);
+    const other = on ? foreignHold(dir, id) : null;
+    if (other) throw new Error(`보관하지 않는다 — ${busyMessage(other, lockPath(dir, id))}`);
+    setArchived(dir, id, on);
+    return this.openView(dir, id);
+  }
+
+  /** 화면이 넘긴 세션을 확인한다 — id 는 파일 이름이 되고, 기록이 있어야 세션이다. 첫 메시지 전 세션은 목록에도 없다. */
+  private target(ref: SessionRef): SessionRef {
+    if (!SESSION_ID.test(ref.id)) throw new Error(`세션 id 모양이 아니다: ${ref.id}`);
+    if (ref.kind === 'scratch' && !insideScratchRoot(ref.dir)) throw new Error(`스크래치 뿌리 밖의 폴더다: ${ref.dir}`);
+    if (readSessionLog(ref.dir, ref.id).records.length === 0) {
+      throw new Error('첫 메시지 전의 빈 세션이다 — 종료·보관할 기록이 없다. 세션 닫기를 쓴다.');
+    }
+    return ref;
+  }
+
+  private openSession(dir: string, id: string): ConversationSession | null {
+    const s = this.session;
+    return s && s.id === id && samePath(s.dir, dir) ? s : null;
+  }
+
+  private openView(dir: string, id: string): SessionView | null {
+    return this.openSession(dir, id) ? this.conversation() : null;
   }
 
   closeConversation(): void {

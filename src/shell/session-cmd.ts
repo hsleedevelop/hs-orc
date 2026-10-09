@@ -14,6 +14,7 @@ import { Journal } from '../core/journal.ts';
 import { H6_BLOCKED, type ConversationSession } from '../core/session.ts';
 import { uncommittedFiles } from '../core/evidence-gather.ts';
 import { claimSession, releaseSession } from '../core/session-lock.ts';
+import { assertNotEnded } from '../core/session-meta.ts';
 import { readSessionLog, recordedStatus, sessionStatus, type SessionSummary, type TranscriptRecord } from '../core/transcript.ts';
 import { renderRecord } from './chat.ts';
 import { assembleSession, restoreBudget } from './conversation.ts';
@@ -34,7 +35,7 @@ export const SESSION_USAGE = [
   '실행하지 않고 거절로 남긴다(exit 1) — 커밋하거나 --write 로 명시한다.',
   '--write 는 읽기 행 카드에도 쓰기를 켠다(미커밋 변경이 있어도 켠다 — 명시한 쓰기다).',
   '예외로 끝난 위임의 재시도 카드·스캐폴딩 카드(D-088)는 --run 이 있어도 승인하지 않는다. git 밖 쓰기 행(H6)은 --write 없이는 승인하지 않는다.',
-  '다른 곳(GUI·chat)이 그 세션을 쥐고 있으면 거절한다.',
+  '다른 곳(GUI·chat)이 그 세션을 쥐고 있으면 거절한다. 종료된 세션(D-089)에는 send·name 을 거절한다 — show 는 된다.',
 ].join('\n');
 
 export type SessionCommand =
@@ -104,7 +105,7 @@ export function listLines(sessions: readonly SessionSummary[]): string[] {
   if (sessions.length === 0) return ['세션 없음'];
   const width = Math.max(4, ...sessions.map((s) => (s.name ?? '-').length));
   return sessions.map((s) =>
-    [s.id, (s.name ?? '-').padEnd(width), statusLabel(s.status).padEnd(12), s.kind.padEnd(7), shortTime(s.lastAt), s.dir, s.preview].join('  '),
+    [s.id, (s.name ?? '-').padEnd(width), `${statusLabel(s.status)}${s.archived ? ' · 보관' : ''}`.padEnd(12), s.kind.padEnd(7), shortTime(s.lastAt), s.dir, s.preview].join('  '),
   );
 }
 
@@ -155,6 +156,8 @@ export async function sendToSession(input: SendInput): Promise<SendOutcome> {
   const { dir, id, kind } = target;
   claimSession(dir, id, 'working', 'cli');
   try {
+    // 쥔 뒤에 본다 (D-089) — GUI 는 점유를 쥔 채 종료 표식을 쓴다.
+    assertNotEnded(dir, id);
     const budget = restoreBudget(dir, id);
     const session = assembleSession({
       kind,
@@ -226,6 +229,7 @@ export function nameSession(cwd: string, ref: string, name: string): { target: S
   assertNameFree(cwd, next, target);
   claimSession(target.dir, target.id, 'working', 'cli');
   try {
+    assertNotEnded(target.dir, target.id);
     const session = assembleSession({ kind: target.kind, dir: target.dir, id: target.id, budget: restoreBudget(target.dir, target.id), journal: new Journal() });
     const out = session.rename(next);
     return { target, line: out.length === 0 ? `이름   그대로 (${next || '없음'})` : renderRecord(out[0] as TranscriptRecord).join('\n') };
