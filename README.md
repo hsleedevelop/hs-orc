@@ -7,8 +7,8 @@
 ```
 $ hs-orc "이 타입 에러 고쳐줘"
 업무   R01 짧은 구현 / 타입 수정  (키워드 타입 에러, 타입 (점수 7))
-배정   primary  Luna · medium  → codex / gpt-5.6-luna
-       reviewer Haiku · low  → claude / claude-haiku-4-5-20251001
+배정   primary  Luna · medium  → codex / gpt-6-luna
+       reviewer Haiku · low  → claude / claude-haiku-5-5
 기준   빠르게 수정하고 기존 test만 실행
 비용   $0.39 = primary $0.18 + reviewer $0.21  [INDEPENDENT]
        Artificial Analysis max-effort 벤치마크 작업당 비용. 실제 지출이 아니다.
@@ -152,7 +152,7 @@ hs-orc session new --role orchestrator --name hub   # 부른 폴더에 세션 �
 `codex`·`cursor`는 토큰만 주므로 기본은 `estimate`다. `data/pricing.json`에 단가를 적으면 그 모델이 `metered`로 바뀐다 — **저장소 기본값은 비어 있다. 제품은 단가를 추측하지 않는다.**
 
 ```json
-{ "models": { "gpt-5.6-luna": { "inputPerMTok": 0.25, "outputPerMTok": 2 } } }
+{ "models": { "gpt-6-luna": { "inputPerMTok": 0.1, "outputPerMTok": 0.5 } } }
 ```
 
 기본 상한은 $20이고 넘으면 다음 슬롯을 시작하지 않는다.

@@ -5,9 +5,10 @@
     "refresh0929": "2026-09-29 모델 표 갱신: claude 2.1.284 · codex 0.159.0 · cursor-agent 2026.09.18-9a7762b. Sonnet 슬롯 claude-sonnet-5 → claude-sonnet-5-5 (platform.claude.com/docs/en/models/overview: $2/$10 per MTok, 기본 effort high, adaptive thinking, 1M 창). claude -p --model claude-sonnet-5-5 \"Reply with exactly: ok\" → ok (orc 어댑터, low, $0.1175). cursor-agent --list-models 에 claude-sonnet-5-5-{low|medium|high|xhigh|max} 5종이 있고 -thinking·-fast 변형은 없다 → idTemplate 를 claude-sonnet-5-5-{effort}, thinking:false 로 바꿨고 어댑터로 claude-sonnet-5-5-low 1회 ok. codex 0.159.0 어댑터 실행(gpt-5.6-luna low)은 unparsed 0. codex 슬롯 4개(gpt-5.6-luna·terra·sol, gpt-6-astra)의 slug 는 캐시에 그대로 있어 무변경. 미반영(보고만): 캐시에 gpt-6-sol·gpt-6-luna 가 새로 보이고, sol·terra·astra 의 supported_reasoning_levels 에 'ultra' 가 있다(Effort 유니온 밖).",
     "refresh0930": "2026-09-30 Opus 슬롯 갱신: claude 2.1.284 · cursor-agent 2026.09.28-64d2043. Opus 슬롯 claude-opus-5 → claude-opus-5-5 (작업 지시서 인용: $4/$20 per MTok, 기본 effort medium, 1M 창 — 공식 문서 원문은 본 세션에서 미확인). claude -p --model claude-opus-5-5 --effort low \"Reply with exactly: ok\" → ok (modelUsage 에 claude-opus-5-5 확인, $0.2693 — 전역 컨텍스트 미격리 실행이라 Haiku 보조 호출 포함). cursor-agent --list-models 에 claude-opus-5-5-{low|medium|high|xhigh|max} 5종과 각 -fast 5종이 있고 -thinking 변형은 없다 → idTemplate 를 claude-opus-5-5-{effort}, thinking:false 로 바꿨고 fast 는 유지, cursor-agent -p --model claude-opus-5-5-low --trust → ok. 옛 claude-opus-5-thinking-* 는 목록에 남아 있으나 슬롯에서 뺐다. 미반영(보고만): codex 캐시(client 0.158.0, 2026-09-30) 의 gpt-6-sol·gpt-6-luna, ultra effort — PR 본문 참조.",
     "refresh0930b": "2026-09-30 sol 슬롯 codex id gpt-5.6-sol → gpt-6.1-sol (D-067 권장안, 전하 결정). codex 0.159.2 models_cache.json: gpt-6.1-sol supported_reasoning_levels = low·medium·high·xhigh·max·ultra (\"Latest workhorse\", 기본 low) — 슬롯 efforts 는 ultra 를 뺀 5종 그대로(ultra 는 D-067 보류). cursor-agent 2026.09.28-64d2043 --list-models 에 gpt-6.1-sol 변형이 없다(gpt-5.6-sol-{none|low|medium|high|xhigh|max}·-fast 만) → cursor idTemplate gpt-5.6-sol-{effort} 유지. luna·terra·astra 무변경.",
-    "codex": "~/.codex/models_cache.json (client 0.154.0, fetched 2026-09-20T11:52:52Z; 2026-09-29 재대조는 refresh0929, sol 슬롯은 refresh0930b) 의 slug·supported_reasoning_levels",
+    "refresh1009": "2026-10-09 Haiku·Luna 슬롯 갱신 (전하 요청): claude 2.1.295 · codex-cli 0.160.0(PATH) · models_cache.json client_version 0.162.0, fetched 2026-10-09T08:56:20Z · cursor-agent 2026.10.01-e373342. Haiku 슬롯 claude claude-haiku-4-5-20251001 → claude-haiku-5-5: 빈 mktemp 폴더에서 어댑터 순서(-p 프롬프트 뒤에 --model)와 isolateArgv·isolateEnv 그대로 --effort low \"Reply with exactly: ok\" → ok, modelUsage 키 claude-haiku-5-5 · contextWindow 1000000 · $0.00046955(입력 2 · 출력 4 · 캐시 읽기 535 · 캐시 쓰기 2,310 — 아래 정가에 1h 캐시 쓰기 $0.20 로 정확히 재계산된다). 정가(platform.claude.com/docs/en/about-claude/pricing, 2026-10-09 조회): 프롬프트 100k 이하 $0.10 입력 · $0.125/$0.20 캐시 쓰기(5m/1h) · $0.01 캐시 읽기 · $0.50 출력, 100k 초과 $0.50 · $0.625/$1 · $0.05 · $2.50 — 프롬프트 길이 2단 가격이다. Luna 슬롯 codex gpt-5.6-luna → gpt-6-luna: 캐시 supported_reasoning_levels = low·medium·high·xhigh·max(ultra 없음, 기본 medium, \"Fast and affordable model for easier tasks.\"), 슬롯 efforts 5종 그대로. codex exec --json --skip-git-repo-check -m gpt-6-luna -c model_reasoning_effort=low -c agents.enabled=false -c sandbox_mode=read-only → ok (입력 35,224 · 캐시 2,816 · 출력 5). cursor: --list-models 에 gpt-6-luna 변형이 없어(gpt-5.6-luna-{none|low|medium|high|xhigh|max}·-fast 만) idTemplate gpt-5.6-luna-{effort} 유지, Haiku 의 cursor 는 null 그대로. 미반영(보고만): cursor 목록에 claude-haiku-5-5-{low..max} 와 -thinking-{low..max} 가 새로 있다(슬롯 가용성 변경이라 범위 밖). terra: 캐시에 gpt-5.6-terra 후속 slug 가 없다(gpt-5.6-terra 설명은 \"Older balanced model\"), 공식 가격표에도 없다 — 무변경.",
+    "codex": "~/.codex/models_cache.json (client 0.154.0, fetched 2026-09-20T11:52:52Z; 2026-09-29 재대조는 refresh0929, sol 슬롯은 refresh0930b, luna 슬롯은 refresh1009) 의 slug·supported_reasoning_levels",
     "cursor": "cursor-agent --list-models (2026.09.15-d2fe57e)",
-    "claude": "claude -p --model <id> \"Reply with exactly: ok\" 를 4개 id로 실제 실행해 응답 확인 (claude 2.1.278; Sonnet 은 2026-09-29 claude-sonnet-5-5 로 2.1.284 에서 재확인)",
+    "claude": "claude -p --model <id> \"Reply with exactly: ok\" 를 4개 id로 실제 실행해 응답 확인 (claude 2.1.278; Sonnet 은 2026-09-29 claude-sonnet-5-5 로 2.1.284 에서 재확인, Haiku 는 2026-10-09 claude-haiku-5-5 로 2.1.295 에서 재확인)",
     "stream": "claude/cursor는 --output-format stream-json (claude는 --verbose 동반), codex는 --output-format 자체가 없고 --json(JSONL). 2026-09-20 실행 캡처로 확인.",
     "stdin": "세 CLI 모두 stdin이 TTY가 아니면 입력을 기다린다. codex는 무기한 블록, claude는 3초 경고 후 진행. 어댑터는 stdin을 닫는다.",
     "cursorFast": "cursor-agent --list-models (2026-09-21) 실측: -fast 변형은 luna/terra/sol 각 6종, opus 8종에 있고 sonnet·fable-5-1 에는 0종이다. D-023.",
@@ -175,7 +176,7 @@
       "defaultEngine": "codex",
       "availability": {
         "codex": {
-          "id": "gpt-5.6-luna",
+          "id": "gpt-6-luna",
           "efforts": [
             "low",
             "medium",
@@ -276,7 +277,7 @@
       "defaultEngine": "claude",
       "availability": {
         "claude": {
-          "id": "claude-haiku-4-5-20251001",
+          "id": "claude-haiku-5-5",
           "efforts": [
             "low",
             "medium",

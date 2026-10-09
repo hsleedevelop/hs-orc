@@ -151,7 +151,7 @@ describe('codex 하위 에이전트 끄기 (Q25 S1, D-078)', () => {
   it('resume 인자와 충돌하지 않는다 — exec resume <id> <prompt> 순서가 그대로이고 effort·읽기 전용과 같이 붙는다', () => {
     const { argv } = buildInvocation(catalog, 'luna', 'low', 'hi', { engine: 'codex', resume: 'T1' });
     assert.deepEqual(argv, [
-      'exec', 'resume', 'T1', 'hi', '-m', 'gpt-5.6-luna', '-c', 'model_reasoning_effort="low"', '-c', 'agents.enabled=false',
+      'exec', 'resume', 'T1', 'hi', '-m', 'gpt-6-luna', '-c', 'model_reasoning_effort="low"', '-c', 'agents.enabled=false',
       '-c', 'sandbox_mode="read-only"',
     ]);
   });

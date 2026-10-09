@@ -183,11 +183,11 @@ cursor는 `cursor-agent --list-models`, claude는 4개 id를 실제로 `-p` 실�
 
 | 매트릭스 모델 | 기본 엔진 | 기본 엔진의 모델 id | 대체 엔진 (`cursor-cli -p`) |
 |---|---|---|---|
-| Luna | codex | `gpt-5.6-luna` | `gpt-5.6-luna-{effort}` ✅ |
+| Luna | codex | `gpt-6-luna` | `gpt-5.6-luna-{effort}` ✅ (cursor 목록에 6 변형이 없어 5.6 유지, 2026-10-09) |
 | Terra | codex | `gpt-5.6-terra` | `gpt-5.6-terra-{effort}` ✅ |
 | Sol | codex | `gpt-6.1-sol` | `gpt-5.6-sol-{effort}` ✅ (cursor 목록에 6.1 변형이 없어 5.6 유지, 2026-09-30) |
 | **Astra** | codex | `gpt-6-astra` | **없음 ❌** |
-| **Haiku** | claude | `claude-haiku-4-5-20251001` | **없음 ❌** |
+| **Haiku** | claude | `claude-haiku-5-5` | **없음 ❌** |
 | Sonnet | claude | `claude-sonnet-5-5` | `claude-sonnet-5-5-{effort}` ✅ |
 | Opus | claude | `claude-opus-5-5` | `claude-opus-5-5-{effort}` ✅ |
 | Fable | claude | `claude-fable-5-1` | `claude-fable-5-1-thinking-{effort}` ✅ |
