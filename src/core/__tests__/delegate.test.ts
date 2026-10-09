@@ -186,6 +186,10 @@ describe('테스트 없는 프로젝트 (D-093)', () => {
     ['test 스크립트가 있다', { 'package.json': JSON.stringify({ scripts: { test: 'vitest run' } }) }],
     ['테스트 파일이 있다', { ...nextApp, 'app/page.test.tsx': 'it(1)\n' }],
     ['_test 이름의 테스트 파일이 있다', { ...nextApp, 'lib/date_test.ts': 'it(1)\n' }],
+    // Node test runner 기본 이름 — scripts.test 없이 `node --test` 로 돈다.
+    ['루트에 test.js 가 있다', { ...nextApp, 'test.js': 'it(1)\n' }],
+    ['date-test.js 가 있다', { ...nextApp, 'date-test.js': 'it(1)\n' }],
+    ['test-date.js 가 있다', { ...nextApp, 'test-date.js': 'it(1)\n' }],
     ['package.json 이 없다 — 판정하지 않는다', { 'Package.swift': '// swift\n' }],
   ] as const) {
     it(`${why}면 면제가 없다 — 테스트를 안 돌린 위임은 reviewer FAIL 그대로 rework 다`, async () => {

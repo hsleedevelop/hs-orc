@@ -47,6 +47,10 @@ const TEST_TRACES = [
   '**/*.spec.*',
   '**/*_test.*',
   '**/test_*.*',
+  // Node test runner 기본 탐색 이름 — npm script 없이 `node --test` 로 돈다.
+  '**/test.*',
+  '**/*-test.*',
+  '**/test-*.*',
   '**/__tests__',
   '**/test',
   '**/tests',
