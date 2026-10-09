@@ -5,6 +5,7 @@
  * Electron 을 import 하지 않는다 (`worktree.ts` 와 같은 이유). shell 안에만 있다 (D-001).
  */
 import { spawn } from 'node:child_process';
+import { runCommandText, shellQuote } from '../../core/run-app.ts';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -74,8 +75,8 @@ export function openTerminal(dir: string, command: TerminalCommand = terminalCom
   });
 }
 
-/** POSIX 셸 작은따옴표 인용 — 안의 `'` 만 `'\''` 로 끊는다. 작은따옴표 안에서는 `$`·`` ` ``·`\` 가 글자 그대로다. */
-export const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
+/** 인용은 Core 와 같은 함수다 — 지휘자 안내 명령(`runCommandText`)과 터미널 스크립트가 같은 규칙을 쓴다. */
+export { shellQuote };
 
 /**
  * 터미널이 실행할 `.command` 스크립트 본문 (D-091). 폴더로 가서 argv 를 돌리고, 끝나면(Ctrl-C 포함) 그 폴더의 로그인 셸로 남는다 —
@@ -116,7 +117,7 @@ export async function runInTerminal(
   env: NodeJS.ProcessEnv = process.env,
   open: (command: TerminalCommand) => Promise<void> = (command) => openTerminal(command.cwd, command),
 ): Promise<string> {
-  if (platform !== 'darwin') throw new Error(`터미널 창에 명령을 실어 여는 것은 macOS 만 된다 — 터미널에서 직접 실행한다: cd ${dir} && ${argv.join(' ')}`);
+  if (platform !== 'darwin') throw new Error(`터미널 창에 명령을 실어 여는 것은 macOS 만 된다 — 터미널에서 직접 실행한다: ${runCommandText(dir, argv)}`);
   const base = terminalCommand(dir, platform, env, terminal);
   const app = base.args[1] ?? 'Terminal';
   mkdirSync(RUN_DIR, { recursive: true, mode: 0o700 });

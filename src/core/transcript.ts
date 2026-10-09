@@ -189,6 +189,8 @@ export type TranscriptEntry =
       /** 스크립트 이름과 `package.json` 의 본문 원문 — 무엇이 도는지 사람이 본다. */
       readonly script: string;
       readonly body: string;
+      /** 함께 돌 수 있는 `pre<이름>`·`post<이름>` 스크립트 원문 — 실행 직전 비교에도 든다. 없으면 빠진다. */
+      readonly hooks?: readonly { readonly name: string; readonly body: string }[];
       readonly asked: readonly AskReason[];
       /** 알릴 것 — `node_modules` 없음 등. 설치는 하지 않는다. */
       readonly warnings?: readonly string[];

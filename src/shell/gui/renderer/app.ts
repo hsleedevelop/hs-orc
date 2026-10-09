@@ -60,7 +60,7 @@ type Rec =
   | { kind: 'approval'; turn: number; approved: boolean; write: boolean; by?: 'user' | 'auto'; mode?: ApprovalMode; asked?: string[] }
   | { kind: 'scaffold'; turn: number; scaffolder: string; label: string; argv: string[]; asked: { code: string; text: string }[] }
   | { kind: 'scaffold-run'; turn: number; step: 'scaffold' | 'git-init'; commands: string[][]; outcome: string; exitCode: number | null; tail: string; durationMs: number; git?: 'existing' | 'scaffolder' | 'offer'; created?: string[] }
-  | { kind: 'run'; turn: number; argv: string[]; script: string; body: string; asked: { code: string; text: string }[]; warnings?: string[] }
+  | { kind: 'run'; turn: number; argv: string[]; script: string; body: string; hooks?: { name: string; body: string }[]; asked: { code: string; text: string }[]; warnings?: string[] }
   | { kind: 'run-launch'; turn: number; argv: string[]; outcome: 'opened' | 'failed' | 'refused'; terminal?: string; detail?: string }
   | { kind: 'mode'; turn: number; mode: ApprovalMode }
   | { kind: 'orchestrator'; turn: number; model: string; effort: string }
@@ -789,6 +789,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       h('div', { className: 'hint' }, `엔진 없이 터미널 창에서 연다 · 엔진 비용 0 · 폴더 ${view.dir}`),
       h('pre', { className: 'plain mono', style: { marginTop: 8 } }, r.argv.join(' ')),
       h('div', { className: 'hint mono' }, `package.json ${r.script}: ${r.body}`),
+      // pre/post 스크립트는 패키지 매니저가 앞뒤로 함께 돌릴 수 있다 — 무엇이 도는지 다 보인다 (PR #130 리뷰).
+      ...(r.hooks ?? []).map((k, j) => h('div', { key: `k${j}`, className: 'hint mono' }, `package.json ${k.name}: ${k.body} · 함께 돌 수 있다`)),
       ...(r.warnings ?? []).map((w, j) => h('div', { key: `w${j}`, className: 'hint warn' }, w)),
       active ? h('div', { className: 'hint warn' }, `묻는 이유: ${r.asked.map((a) => a.text).join(' · ')}`) : null,
       active

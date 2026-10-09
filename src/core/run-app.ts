@@ -45,6 +45,18 @@ const LOCKFILES: readonly (readonly [string, PackageManager])[] = [
   ['package-lock.json', 'npm'],
 ];
 
+/** POSIX 셸 작은따옴표 인용 — 안의 `'` 만 `'\''` 로 끊는다. 작은따옴표 안에서는 공백·`$`·`` ` ``·`;`·`\` 가 글자 그대로다. */
+export const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
+
+/** 사람이 터미널에 칠 한 줄 — 폴더는 인용한다(경로의 공백·`$(…)`·`;` 가 명령이 되지 않게). argv 는 고정 bin·`run`·허용 이름이라 인용이 필요 없다. */
+export const runCommandText = (dir: string, argv: readonly string[]): string => `cd ${shellQuote(dir)} && ${argv.join(' ')}`;
+
+/** 스크립트와 함께 도는 lifecycle 스크립트(`pre<이름>`·`post<이름>`) — npm 은 `npm run dev` 에 `predev`·`postdev` 를 앞뒤로 돌린다. */
+export interface RunHook {
+  readonly name: string;
+  readonly body: string;
+}
+
 export interface RunTarget {
   readonly pm: PackageManager;
   /** 허용 목록에서 고른 스크립트 이름 (`dev`·`start`). */
@@ -52,6 +64,11 @@ export interface RunTarget {
   /** `package.json` 의 그 스크립트 본문 원문 — 무엇이 도는지 사람이 카드에서 본다. hs-orc 는 검사하지 않는다(셸 문자열이다). */
   readonly body: string;
   readonly argv: readonly string[];
+  /**
+   * 정의된 `pre<스크립트>`·`post<스크립트>` (PR #130 리뷰). 패키지 매니저·설정에 따라 함께 돌 수 있어 **있으면 모두** 카드에 보이고 실행 직전 비교에 넣는다 —
+   * 돌지 않는 매니저라도 비교가 더 엄격해질 뿐이다. 빠지면 dev 를 그대로 둔 채 predev 만 바꿔 사람이 보지 않은 명령을 열 수 있다.
+   */
+  readonly hooks: readonly RunHook[];
   /** `node_modules` 가 없다 — 대개 `command not found` 로 바로 끝난다. 설치는 하지 않고 알리기만 한다(D-091 결정 4). */
   readonly missingDeps: boolean;
 }
@@ -73,10 +90,13 @@ export function runTarget(dir: string, scripts: readonly string[]): RunTarget | 
   const script = scripts.find((name) => { const body = table[name]; return typeof body === 'string' && body.trim() !== ''; });
   if (!script) return { why: `package.json 에 허용 스크립트(${scripts.join('·')})가 없다` };
   const pm = LOCKFILES.find(([lock]) => existsSync(path.join(dir, lock)))?.[1] ?? 'npm';
-  return { pm, script, body: table[script] as string, argv: [pm, 'run', script], missingDeps: !existsSync(path.join(dir, 'node_modules')) };
+  const hooks = [`pre${script}`, `post${script}`].flatMap((name) => (typeof table[name] === 'string' ? [{ name, body: table[name] }] : []));
+  return { pm, script, body: table[script] as string, argv: [pm, 'run', script], hooks, missingDeps: !existsSync(path.join(dir, 'node_modules')) };
 }
 
-/** 카드가 선 뒤 바뀌었나 — argv·본문이 글자까지 같아야 같은 실행이다. 바뀌었으면 사람이 본 것과 다른 것이 돈다. */
+/** 카드가 선 뒤 바뀌었나 — argv·본문·pre/post 스크립트가 글자까지 같아야 같은 실행이다. 바뀌었으면 사람이 본 것과 다른 것이 돈다. */
 export function sameRunTarget(a: RunTarget, b: RunTarget): boolean {
-  return a.body === b.body && a.argv.length === b.argv.length && a.argv.every((x, i) => x === b.argv[i]);
+  const same = (x: readonly string[], y: readonly string[]): boolean => x.length === y.length && x.every((v, i) => v === y[i]);
+  const hooks = (t: RunTarget): string[] => t.hooks.flatMap((h) => [h.name, h.body]);
+  return a.body === b.body && same(a.argv, b.argv) && same(hooks(a), hooks(b));
 }

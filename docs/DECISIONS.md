@@ -3796,6 +3796,7 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
    - `package.json` `scripts` 에서 허용 이름 중 처음 있는 것을 고른다.
    - bin 은 잠금 파일로 고른다(`pnpm-lock.yaml`→pnpm · `yarn.lock`→yarn · `bun.lock(b)`→bun · `package-lock.json`·없음→npm). argv 는 `[bin, 'run', 스크립트]` 다.
    - 사용자 문장은 argv 에 들어가지 않는다. 스크립트 본문은 검사하지 않고 카드에 원문으로 보인다 — 사람이 터미널에서 직접 칠 때와 같은 신뢰다.
+   - **`pre<이름>`·`post<이름>` 도 카드에 보이고 실행 직전 비교에 넣는다** (PR #130 리뷰 P2). `npm run dev` 는 `predev`·`postdev` 를 앞뒤로 돌린다(npm 문서 — pre/post scripts). 처음 구현은 `dev` 본문만 비교해, 카드가 선 뒤 `dev` 를 그대로 두고 `predev` 만 더하거나 바꾸면 사람이 보지 않은 명령이 sandbox 밖에서 돌았다. 다른 매니저가 그 스크립트를 돌리는지와 무관하게 있으면 모두 싣는다 — 돌지 않는 매니저라도 비교가 엄격해질 뿐이다.
 3. **카드** `run` 기록(argv·script·body·asked `[H8]`·`warnings`(`node_modules` 없음)).
    - 조건: project 세션 · `SessionDeps.runCards`(GUI 조립만 true) · 허용 스크립트가 있음. 엔진·Jev·지휘자 0회, `spend` 없음.
    - 쓰기 게이트(D-086)·H5 를 묻지 않는다 — 소스를 고치지 않는다. git 밖 폴더도 막지 않는다.
@@ -3807,7 +3808,7 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
    - 결과는 `run-launch{opened, terminal}` 이다. 다음 위임 맥락에는 `orc(앱 실행): npm run dev → Terminal 창에서 열었다 (서버 상태는 그 창에 있다)` 한 줄이 실린다.
 5. **카드를 못 세우면** — chat·`session send`(`runCards` 없음) · 스크래치 · `package.json` 없음 · 허용 스크립트 없음.
    - Jev 없이 지휘자 직접 답으로 간다. 분류 줄 `앱 실행 요청 — 실행 카드를 세우지 않았다: <사유>` 를 붙인다.
-   - 프롬프트 `[실행]` 절: 카드가 서는 길 · 사유 · 알면 `cd <폴더> && <argv>` 와 스크립트 원문 · `node_modules` 없음 · "위임 엔진으로는 실행하지 않는다".
+   - 프롬프트 `[실행]` 절: 카드가 서는 길 · 사유 · 알면 `cd '<폴더>' && <argv>` 와 스크립트 원문(pre/post 포함) · `node_modules` 없음 · "위임 엔진으로는 실행하지 않는다". **폴더는 터미널 스크립트와 같은 POSIX 작은따옴표 인용이다**(`core/run-app.ts` `shellQuote`·`runCommandText` — 셸이 같은 함수를 쓴다, PR #130 리뷰 P2). 처음 구현은 인용하지 않아 `Mobile Documents` 같은 공백 경로에서 `cd` 가 실패했고, 경로의 `;`·`$(…)` 가 명령이 될 수 있었다.
    - 지휘자 규칙은 "행을 고르라고 안내하지 않는다 · 명령은 [실행] 에 적힌 것만" 이다. SUGGEST 는 `NONE` 으로 고정하고 버린다.
    - D-088 과 다른 점: 스캐폴딩은 카드를 못 세워도 분류를 탄다. 실행은 감지가 좁아 Jev 를 건너뛴다 — 외부 전송 0, 그리고 "행을 골라 위임" 길이 이번 실패의 원인이었다.
 6. **Q29 4-2 의 작은 둘.**
@@ -3816,7 +3817,8 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 7. 화면·기록: chat·`session show` 는 `run`·`run-launch`·H8 승인 줄을 읽기만 한다. SPEC §6.4 에 경로·H8·기록 종류를 적었다.
 
 **검증**
-- `npm run gate` 통과 — 테스트 791개, 새 18건(`run-app.test.ts` 12 · `terminal.test.ts` 4 · `limits.test.ts` 1 · `service.test.ts` 1). 엔진 호출 0.
+- `npm run gate` 통과 — 테스트 793개, 새 20건(`run-app.test.ts` 14 · `terminal.test.ts` 4 · `limits.test.ts` 1 · `service.test.ts` 1). 엔진 호출 0.
+  - PR #130 리뷰 회귀 2건(수정 전 실패 확인): `dev` 그대로 · `predev` 추가/변경 · `postdev` 삭제 → 셋 다 `refused` · opener 0회, 카드 `hooks` 표시. 폴더 `Mobile Documents it's $(touch pwned); x` 의 CLI 안내 명령을 `sh -c` 로 돌리면 그 폴더로 가고 `pwned` 가 생기지 않는다. hook 비교만 빼는 변이 → "predev 추가" 에서 실패.
   - 감지: 1009 문장 포함 10종은 잡고, 테스트·빌드·버그·질문과 위 과잉 매칭 4종을 포함한 15종은 잡지 않는다.
   - Ctrl-C: `.command` 본문을 `sleep 30` 으로 돌려 프로세스 그룹에 SIGINT → 스크립트 exit 0 · `끝났다 (exit 130)` 출력. `trap` 을 빼면 실패한다.
   - 대상: dev 우선 · start 대체 · pnpm 잠금 · `node_modules` 경고 · 사유 3종.

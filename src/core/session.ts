@@ -12,7 +12,7 @@ import type { Matrix } from '../data/matrix.ts';
 import { isApprovalMode, loadLimits, type ApprovalMode, type OrchestratorChoice } from '../data/limits.ts';
 import type { AssignmentPlan } from './assign.ts';
 import { dirtyWriteRisk, evaluateApproval, evaluateRead, nonGitWriteRefusal, readOnlyWriteRow, runAsk, scaffoldAsk, type ApprovalCheck, type AskReason } from './approval.ts';
-import { detectRun, runTarget, sameRunTarget, type RunTarget } from './run-app.ts';
+import { detectRun, runCommandText, runTarget, sameRunTarget, type RunTarget } from './run-app.ts';
 import { loadScaffolders, type Scaffolder, type Scaffolders } from '../data/scaffolders.ts';
 import { GIT_INIT_COMMANDS, allowedArgv, commandLine, detectScaffold, folderEntries, runArgv, runSequence, type CommandRunner, type ScaffoldRequest } from './scaffold.ts';
 import type { Budget, BudgetMark } from './budget.ts';
@@ -821,7 +821,8 @@ export class ConversationSession {
     return [
       'hs-orc GUI 는 project 폴더의 package.json 에 허용 스크립트(' + this.runScripts.join('·') + ')가 있으면, 사람이 실행 카드에서 확인한 뒤 고른 터미널 창(기본·Ghostty·Otty)에서 그 스크립트를 연다. 서버의 로그·중지는 그 터미널 창에 있다.',
       `지금 카드를 세우지 않은 이유: ${run.why}`,
-      ...(run.target ? [`사람이 터미널에서 칠 명령: \`cd ${this.deps.dir} && ${run.target.argv.join(' ')}\` (스크립트 ${run.target.script}: ${run.target.body})`] : []),
+      ...(run.target ? [`사람이 터미널에서 칠 명령: \`${runCommandText(this.deps.dir, run.target.argv)}\` (스크립트 ${run.target.script}: ${run.target.body})`] : []),
+      ...(run.target && run.target.hooks.length > 0 ? [`함께 돌 수 있는 스크립트: ${run.target.hooks.map((h) => `${h.name}: ${h.body}`).join(' · ')}`] : []),
       ...(run.target?.missingDeps ? ['node_modules 가 없다 — 먼저 의존성을 설치해야 한다(hs-orc 는 설치하지 않는다).'] : []),
       '위임 엔진(업무 행)으로는 실행하지 않는다 — 샌드박스가 포트를 막는다.',
     ].join('\n');
@@ -832,7 +833,11 @@ export class ConversationSession {
     this.pendingRun = target;
     this.stateValue = 'blocked';
     const warnings = target.missingDeps ? [`node_modules 가 없다 — ${target.pm} install 을 먼저 하지 않으면 바로 실패한다 (hs-orc 는 설치하지 않는다)`] : [];
-    return this.append({ kind: 'run', argv: [...target.argv], script: target.script, body: target.body, asked: [runAsk()], ...(warnings.length > 0 ? { warnings } : {}) });
+    return this.append({
+      kind: 'run', argv: [...target.argv], script: target.script, body: target.body, asked: [runAsk()],
+      ...(target.hooks.length > 0 ? { hooks: target.hooks.map((h) => ({ ...h })) } : {}),
+      ...(warnings.length > 0 ? { warnings } : {}),
+    });
   }
 
   /**
@@ -849,7 +854,7 @@ export class ConversationSession {
     try {
       const now = runTarget(this.deps.dir, this.runScripts);
       if ('why' in now || !sameRunTarget(now, pending)) {
-        const detail = 'why' in now ? `${now.why} — 열지 않았다` : `카드가 선 뒤 스크립트가 바뀌었다 (지금: ${now.argv.join(' ')} · ${now.body}) — 열지 않았다. 다시 보낸다`;
+        const detail = 'why' in now ? `${now.why} — 열지 않았다` : `카드가 선 뒤 스크립트가 바뀌었다 (지금: ${now.argv.join(' ')} · ${[`${now.script}: ${now.body}`, ...now.hooks.map((h) => `${h.name}: ${h.body}`)].join(' · ')}) — 열지 않았다. 다시 보낸다`;
         out.push(this.append({ kind: 'run-launch', argv: [...pending.argv], outcome: 'refused', detail }));
         return out;
       }

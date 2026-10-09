@@ -69,6 +69,7 @@ export function renderRecord(r: TranscriptRecord, card?: ReturnType<typeof cardA
       return [
         `실행   앱 실행 카드 (GUI) — 고른 터미널 창에서 이 폴더의 스크립트를 연다 · 엔진 비용 0`,
         `명령   ${r.argv.join(' ')}  (${r.script}: ${r.body})`,
+        ...(r.hooks ?? []).map((k) => `함께   ${k.name}: ${k.body}`),
         ...(r.warnings ?? []).map((w) => `안내   ${w}`),
       ];
     case 'run-launch':

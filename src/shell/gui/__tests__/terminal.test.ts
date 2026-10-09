@@ -69,6 +69,6 @@ describe('터미널에서 앱 실행 (D-091)', () => {
   });
 
   it('macOS 밖은 열지 않고 칠 명령을 말하며 던진다', async () => {
-    await assert.rejects(runInTerminal('/w', ['npm', 'run', 'dev'], 'default', 'linux', {}, () => Promise.resolve()), /macOS 만.*cd \/w && npm run dev/);
+    await assert.rejects(runInTerminal('/w', ['npm', 'run', 'dev'], 'default', 'linux', {}, () => Promise.resolve()), /macOS 만.*cd '\/w' && npm run dev/);
   });
 });
