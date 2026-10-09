@@ -12,7 +12,7 @@
  */
 import { createElement as h, useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { compactLines, cutLine, lastEvent, ladderLines, retryLines, roleLabel, statusLabel } from '../../transcript-lines.ts';
+import { askedNote, cardAsked, compactLines, cutLine, lastEvent, ladderLines, retryLines, roleLabel, statusLabel } from '../../transcript-lines.ts';
 
 const SCREENS = ['Session', 'Dashboard', 'Agents', 'Reviews', 'Debug'] as const;
 type Screen = (typeof SCREENS)[number];
@@ -844,7 +844,9 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       case 'approval':
         if (r.approved && r.asked?.includes('H7')) return h('div', { key: i, className: 'hint' }, '스캐폴딩 실행 확인');
         // 자동 승인도 카드·비용은 그대로 위에 보인다 (G2·FR-5) — 승인 클릭만 없다 (D-064 결정 7).
-        return h('div', { key: i, className: 'hint' }, r.approved && r.by === 'auto' ? `자동 승인 · ${r.mode ?? ''} · 묻는 조건 없음` : r.approved ? `승인${r.write ? ' · 쓰기 켜짐' : ''}` : '거절');
+        if (r.approved && r.by === 'auto') return h('div', { key: i, className: 'hint' }, `자동 승인 · ${r.mode ?? ''} · 묻는 조건 없음`);
+        // 카드의 묻는 이유는 살아 있을 때만 보인다 — 승인 줄에 남겨 auto 인데 왜 물었는지 승인 뒤에도 읽힌다.
+        return h('div', { key: i, className: 'hint' }, r.approved ? [`승인${r.write ? ' · 쓰기 켜짐' : ''}`, askedNote(r, cardAsked(view.records, i))].filter(Boolean).join(' · ') : '거절');
       case 'mode':
         return h('div', { key: i, className: 'hint' }, `승인 방식 → ${r.mode}`);
       case 'orchestrator':

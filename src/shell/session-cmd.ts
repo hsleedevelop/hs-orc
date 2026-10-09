@@ -27,7 +27,7 @@ import {
   type SessionSummary,
   type TranscriptRecord,
 } from '../core/transcript.ts';
-import { renderRecord } from './chat.ts';
+import { renderRecord, renderRecords } from './chat.ts';
 import { assembleSession, restoreBudget } from './conversation.ts';
 import { assertNameFree, assertOrchestratorFree, resolveSession } from './session-registry.ts';
 import { roleLabel, statusLabel } from './transcript-lines.ts';
@@ -146,7 +146,7 @@ export function showLines(target: SessionSummary, tail: number): string[] {
     `누적   ${restoreBudget(target.dir, target.id).summary()}`,
     ...(broken > 0 ? [`경고   기록에 깨진 줄 ${broken}개 — 건너뛰고 보여준다`] : []),
     ...(visible.length > tail ? [`       (앞 기록 ${visible.length - tail}개 생략)`] : []),
-    ...(tail > 0 ? visible.slice(-tail).flatMap(renderRecord) : []),
+    ...(tail > 0 ? renderRecords(visible, visible.length - tail) : []),
   ];
 }
 
@@ -236,7 +236,7 @@ export async function sendToSession(input: SendInput): Promise<SendOutcome> {
     }
     const failed = out.some((r) => r.kind === 'error' || (r.kind === 'result' && r.outcome !== 'ok' && r.outcome !== 'unverified'));
     const lines = [
-      ...out.flatMap(renderRecord),
+      ...renderRecords(out),
       ...notes,
       `상태   ${statusLabel(recordedStatus(session.records()))} · ${id}${session.name ? ` (${session.name})` : ''}`,
       `누적   ${budget.summary()}`,

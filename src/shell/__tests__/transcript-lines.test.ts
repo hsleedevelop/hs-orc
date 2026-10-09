@@ -4,7 +4,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { SETTING_KINDS as CORE_SETTING_KINDS } from '../../core/transcript.ts';
-import { SETTING_KINDS, compactLines, cutLine, lastEvent } from '../transcript-lines.ts';
+import { SETTING_KINDS, askedNote, cardAsked, compactLines, cutLine, lastEvent } from '../transcript-lines.ts';
 
 describe('transcript-lines', () => {
   it('컷이 없으면 줄이 없고, 있으면 잘린 턴·글자 수를 한 줄로 알린다', () => {
@@ -29,6 +29,13 @@ describe('transcript-lines', () => {
   it('역할·비용 줄도 건너뛴다 — 승인 대기 중 오케스트레이터로 지정해도 카드 버튼이 남는다 (D-090)', () => {
     const plan = { kind: 'plan', turn: 1 };
     assert.equal(lastEvent([{ kind: 'user', turn: 1 }, plan, { kind: 'role', turn: 1 }, { kind: 'spend', turn: 1 }]), plan);
+  });
+
+  it('승인 줄은 앞 카드가 물은 이유를 코드로 찾아 첫 문장만 남긴다 — auto 인데 왜 물었는지 승인 뒤에도 읽힌다 (1009-1733-a12)', () => {
+    const plan = { kind: 'plan', asked: [{ code: 'H5', text: '미커밋 변경 1개가 있는 폴더에 쓰기 — 위임이 덮을 수 있다 (app/page.tsx). 커밋하거나 확인하고 승인하라' }] };
+    const approval = { kind: 'approval', approved: true, mode: 'auto', asked: ['H5', 'A4'] };
+    assert.equal(askedNote(approval, cardAsked([plan, { kind: 'spend' }, approval], 2)), '물은 이유 H5 미커밋 변경 1개가 있는 폴더에 쓰기 — 위임이 덮을 수 있다 (app/page.tsx) · A4');
+    assert.equal(askedNote({ ...approval, mode: 'manual' }, plan.asked), null);
   });
 
   it('건너뛰는 설정 줄 목록이 Core(`transcript.ts`)와 같다 — 한쪽에만 더하면 화면과 Core 가 다른 카드를 살아 있다고 본다', () => {
