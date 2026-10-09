@@ -56,7 +56,9 @@ export function buildContext(
   limits: ContextLimits,
   range: { readonly before: number; readonly after?: number },
 ): { readonly text: string; readonly cut: ContextCut | null } {
-  const after = range.after ?? 0;
+  // 비운 대화(D-092) 앞은 싣지 않는다 — resume 이 가진 턴처럼 버린 양(`cut`)에도 세지 않는다.
+  const cleared = records.findLast((r) => r.kind === 'clear' && r.turn < range.before)?.turn ?? 0;
+  const after = Math.max(range.after ?? 0, cleared);
   const picked = records.filter((r) => r.turn < range.before && r.turn > after && line(r, records) !== null);
   const all = [...new Set(picked.map((r) => r.turn))];
   const turns = new Set(all.slice(-limits.contextTurns));

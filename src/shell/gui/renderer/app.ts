@@ -12,7 +12,7 @@
  */
 import { createElement as h, useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { askedNote, cardAsked, compactLines, cutLine, lastEvent, ladderLines, retryLines, roleLabel, statusLabel } from '../../transcript-lines.ts';
+import { askedNote, cardAsked, compactLines, cutLine, lastEvent, ladderLines, retryLines, roleLabel, SETTING_KINDS, statusLabel } from '../../transcript-lines.ts';
 
 const SCREENS = ['Session', 'Dashboard', 'Agents', 'Reviews', 'Debug'] as const;
 type Screen = (typeof SCREENS)[number];
@@ -67,6 +67,7 @@ type Rec =
   | { kind: 'steps'; turn: number; title: string; steps: Step[]; estimateUsd: number; by: string; cost: string; cut?: Cut; write?: true; asked?: { code: string; text: string }[]; guide?: string[]; readOnlyBlocked?: true }
   | { kind: 'name'; turn: number; name: string }
   | { kind: 'role'; turn: number; role: SessionRole }
+  | { kind: 'clear'; turn: number }
   | { kind: 'result'; turn: number; outcome: string; verdict: string; text: string; review: string; evidence: string; decisionId: string; cut?: Cut; compacted?: Compaction[]; step?: string }
   | { kind: 'summary'; turn: number; text: string; next: string; by?: string }
   | { kind: 'error'; turn: number; text: string };
@@ -97,6 +98,7 @@ interface Bridge {
   convCancel(): Promise<SessionView>;
   convEscalate(): Promise<SessionView>;
   convReject(): Promise<SessionView>;
+  convClear(): Promise<SessionView>;
   convAsk(): Promise<SessionView>;
   convGitInit(): Promise<SessionView>;
   // 앱 실행 카드를 고른 터미널 창에서 연다 (D-091) — 이 클릭이 승인(H8)이다.
@@ -590,6 +592,8 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
   const [naming, setNaming] = useState<string | null>(null);
   // 종료 확인 대기 (D-089) — 첫 클릭은 확인을 묻고, 두 번째가 종료한다.
   const [ending, setEnding] = useState(false);
+  // 비운 대화(D-092) 앞 기록을 펼쳐 볼지 — 화면 선호일 뿐이라 기록에 남기지 않는다.
+  const [showCleared, setShowCleared] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   // 요청이 도는 동안 뷰를 다시 읽는다 — 서비스의 뷰는 읽기뿐이라 도는 실행을 건드리지 않는다. 끝나면 요청이 돌려준 뷰가 이긴다.
@@ -645,6 +649,9 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
   // 배정 카드가 선 채 보내면 그 배정은 거절로 남는다 (D-064) — 제안 카드가 대화를 막지 않는다.
   const canType = (view.state === 'waiting_input' || view.state === 'blocked') && !locked;
   const ref: SessionRef = { kind: view.kind, dir: view.dir, id: view.id };
+  // 마지막 비우기(D-092) 앞은 접는다 — 지우지 않았으니 펼쳐 볼 수 있다. 접힌 턴 수는 설정 줄을 빼고 센다.
+  const clearAt = view.records.findLastIndex((r) => r.kind === 'clear');
+  const clearedTurns = new Set(view.records.slice(0, Math.max(clearAt, 0)).filter((r) => !SETTING_KINDS.has(r.kind)).map((r) => r.turn)).size;
   // 보관·다시 열기는 도는 요청과 겹쳐도 된다 — `act` 로 돌리면 끝날 때 도는 위임의 busy 표시를 지운다.
   const quick = (p: Promise<SessionView | null>) => {
     setError('');
@@ -895,6 +902,12 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
         return h('div', { key: i, className: 'hint' }, r.name ? `이름 → ${r.name}` : '이름 지움');
       case 'role':
         return h('div', { key: i, className: 'hint' }, `역할 → ${roleLabel(r.role)}`);
+      case 'clear':
+        return h('div', { key: i, className: 'row hint', style: { borderTop: '1px solid var(--border-2)', paddingTop: 8 } },
+          h('span', null, '여기서 대화를 비웠다 — 다음 턴부터 앞 대화를 맥락에 싣지 않는다'),
+          i === clearAt && clearedTurns > 0
+            ? h('button', { className: 'btn', onClick: () => setShowCleared(!showCleared) }, showCleared ? '앞 대화 접기' : `앞 대화 ${clearedTurns}턴 펼치기`)
+            : null);
       case 'result':
         return h('section', { key: i, className: 'card' },
           h('span', { className: 'label' }, `위임 결과${r.step ? ` · 단계 ${r.step}` : ''} · ${r.decisionId}`),
@@ -971,6 +984,12 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
               onClick: () => { orc.convStart('project').then(props.onOpen, (e: unknown) => setError(why(e))); },
             }, '워커 세션 만들기')
           : null,
+        // 대화 비우기 (D-092) — 기록은 남고 화면이 접는다. 선 카드는 거절로 남는다. 도는 동안·비울 대화가 없으면 끈다.
+        h('button', {
+          className: 'btn', disabled: locked || view.state === 'working' || !last || last.kind === 'clear',
+          title: '이 아래부터 새 대화로 본다 — 다음 턴부터 앞 대화를 맥락에 싣지 않는다. 앞 기록은 접힐 뿐 지워지지 않는다. 선 카드는 거절한다',
+          onClick: () => { setShowCleared(false); act(orc.convClear()); },
+        }, '대화 비우기'),
         h('button', { className: 'btn', title: '화면에서만 닫는다 — 세션은 그대로고 사이드바에서 다시 연다', onClick: props.onClose }, '세션 닫기'),
         // 닫기와 다른 무게의 조작이다 (D-089) — 세로 선 너머에 따로 둔다. 보관은 숨김, 종료는 쓰기 잠금이다. 둘 다 기록을 지우지 않는다.
         h('div', { className: 'head-end' },
@@ -996,7 +1015,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     view.broken > 0 ? h('div', { className: 'banner error' }, `기록에 깨진 줄 ${view.broken}개 — 건너뛰고 보여준다`) : null,
     view.ended ? h('div', { className: 'banner note' }, '종료한 세션이다 — 읽기만 된다. 이어 쓰려면 위의 "다시 열기" 를 누른다. 다른 곳(hs-orc session send·chat --resume)에서도 거절한다.') : null,
     view.interrupted ? h('div', { className: 'banner error' }, '승인한 위임의 결과가 기록되지 않았다 — 실행 중 앱이 끊겼다. 결정 로그 1차 줄만 남아 있을 수 있다.') : null,
-    ...view.records.map(record),
+    ...view.records.map((r, i) => (i < clearAt && !showCleared ? null : record(r, i))),
     // 미검증·실패 뒤 사다리 다음 단계 (D-068) — 누르면 배정 카드만 선다. 시작은 카드의 승인이다(어느 방식에서도 A3 로 묻는다).
     view.ladder && view.state === 'waiting_input' && !busy && !view.ended
       ? h('div', { className: 'row' },

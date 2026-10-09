@@ -102,6 +102,8 @@ export function renderRecord(r: TranscriptRecord, card?: ReturnType<typeof cardA
       return [r.name ? `이름   → ${r.name}` : '이름   지움'];
     case 'role':
       return [`역할   → ${roleLabel(r.role)}`];
+    case 'clear':
+      return ['비움   ── 여기서 대화를 비웠다 — 다음 턴부터 앞 대화를 맥락에 싣지 않는다 (기록은 남는다) ──'];
     case 'result':
       // 취소는 결과가 아니라 멈춤이다 (D-066) — reviewer 판정·검증이 없다. 받은 출력은 남겨 보여준다.
       if (r.outcome === 'cancelled') return [`결과   ${r.step ? `단계 ${r.step} · ` : ''}취소됨 · 결정 ${r.decisionId}`, `증거   ${r.evidence}`, ...(r.text ? [r.text] : [])];
@@ -137,7 +139,7 @@ function scaffoldRunLines(r: Extract<TranscriptRecord, { kind: 'scaffold-run' }>
 }
 
 export const CHAT_HELP = [
-  '명령   메시지를 그냥 쓰면 보낸다 · /write <문장> 쓰기 위임으로 보낸다 · /task Rxx 마지막 메시지를 그 행으로 배정 · /read 마지막 메시지를 읽기 전용 1슬롯이 코드를 읽고 답한다(카드 없이 바로) · /ladder 실패·미검증 뒤 사다리 다음 단계로 다시 위임(카드만 선다) · /steps 마지막 메시지를 지휘자가 위임 단계로 나눈 계획으로 세운다(승인하면 단계마다 차례로 위임) · /git-init 스캐폴딩이 git 없이 끝났으면 git init + 첫 커밋 · /mode [방식] · /orc [claude|모델] [effort] 지휘자 바꾸기(claude 만 — codex 는 막았다) · /help · /quit (Ctrl-D)',
+  '명령   메시지를 그냥 쓰면 보낸다 · /write <문장> 쓰기 위임으로 보낸다 · /task Rxx 마지막 메시지를 그 행으로 배정 · /read 마지막 메시지를 읽기 전용 1슬롯이 코드를 읽고 답한다(카드 없이 바로) · /ladder 실패·미검증 뒤 사다리 다음 단계로 다시 위임(카드만 선다) · /steps 마지막 메시지를 지휘자가 위임 단계로 나눈 계획으로 세운다(승인하면 단계마다 차례로 위임) · /git-init 스캐폴딩이 git 없이 끝났으면 git init + 첫 커밋 · /clear 대화를 비운다(다음 턴부터 앞 대화를 맥락에 싣지 않는다 · 기록은 남는다) · /mode [방식] · /orc [claude|모델] [effort] 지휘자 바꾸기(claude 만 — codex 는 막았다) · /help · /quit (Ctrl-D)',
   '방식   /mode manual 매번 묻는다 · auto-ask 쓰기·모델이 고른 행·비싼 조합·상한 근접·첫 위임만 묻는다 · auto 쓰기·모델이 고른 행만 묻는다 — 자동은 이 메시지의 배정 1건만 시작한다',
   '승인   배정이 뜨면 y 읽기 전용 · w 쓰기 · n 거절 · a 지휘자에게 묻기 · 문장을 쓰면 거절하고 그 메시지를 보낸다',
   '취소   위임이 도는 중 Ctrl-C 한 번 — 그 위임만 멈추고 세션은 남는다 · 한 번 더 누르면 나간다',
@@ -261,6 +263,11 @@ export async function runChat(
             if (out.length === 0) say(`지휘   이미 ${slotLine(session.conductor())}`);
             else say(`지휘   → ${slotLine(session.conductor())}`);
           }
+        } else if (line === '/clear') {
+          // 대화를 비운다 (D-092) — 선 카드는 거절로 남는다. 기록은 지우지 않는다.
+          const out = session.clear();
+          if (out.length === 0) say('비움   비울 대화가 없다');
+          else show(out);
         } else if (line === '/steps') {
           // 카드만 세운다 — 시작은 y·w 로 따로 한다 (D-087). 배정 카드가 선 채 부르면 그 배정은 거절로 남는다.
           show(await session.planSteps());

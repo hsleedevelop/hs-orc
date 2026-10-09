@@ -1277,6 +1277,48 @@ describe('세션 역할 (D-090)', () => {
   });
 });
 
+describe('대화 비우기 (D-092)', () => {
+  it('비운 뒤 직접 답에는 앞 대화가 없고 기록은 그대로다 — 첫 메시지 전·이미 비운 직후에는 아무것도 하지 않는다', async () => {
+    isolate();
+    const c = conductSpy();
+    const { session } = make(c.exec);
+    assert.deepEqual(session.clear(), []);
+    await session.send('넌 누구니');
+    assert.deepEqual(session.clear().map((r) => r.kind), ['clear']);
+    assert.deepEqual(session.clear(), []);
+    await session.send('다시 인사해');
+    assert.doesNotMatch(c.prompts.at(-1) ?? '', /넌 누구니/);
+    assert.deepEqual(session.records().filter((r) => r.kind === 'user').map((r) => r.text), ['넌 누구니', '다시 인사해']);
+  });
+
+  it('비운 앞의 메시지는 "마지막 메시지" 가 아니다 — 행 지정·읽고 답하기·단계 계획이 다시 받지 않는다', async () => {
+    isolate();
+    const { session } = make(conductSpy().exec);
+    await session.send('넌 누구니');
+    session.clear();
+    await assert.rejects(session.planAs('R01'), /배정할 메시지가 없다/);
+    await assert.rejects(session.readAnswer(), /답할 메시지가 없다/);
+    await assert.rejects(session.planSteps(), /나눌 메시지가 없다/);
+  });
+
+  it('비운 뒤 같은 슬롯 위임도 엔진 세션을 잇지 않는다 — 선 카드는 거절로 남는다', async () => {
+    isolate();
+    const r = resumeSpy();
+    const { session } = make(conductSpy().exec, undefined, r.exec);
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    await session.send('이 타입 에러 고쳐줘');
+    assert.equal(session.state, 'blocked');
+    assert.deepEqual(session.clear().map((x) => (x.kind === 'approval' ? `approval:${x.approved}` : x.kind)), ['approval:false', 'clear']);
+    assert.equal(session.state, 'waiting_input');
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve();
+    const primaries = r.calls.filter((c) => c.role === 'primary');
+    assert.deepEqual(primaries.map((c) => c.resume), [undefined, undefined]);
+    assert.equal(primaries[1]?.prompt, '이 타입 에러 고쳐줘', '비운 앞 대화를 싣지 않는다');
+  });
+});
+
 function readSessionLogLength(dir: string): number {
   try {
     return readFileSync(transcriptPath(dir, '0923-1200-aaa'), 'utf8').split('\n').filter(Boolean).length;

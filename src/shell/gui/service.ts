@@ -546,6 +546,12 @@ export class GuiService {
     return this.conversation();
   }
 
+  /** 대화를 비운다 (D-092). 기록만 붙이므로 `recording` 이다 — 도는 위임 중에는 Core 가 막고, 선 카드는 거절로 남는다. */
+  converseClear(): SessionView {
+    this.recording((s) => s.clear());
+    return this.conversation();
+  }
+
   converseReject(): SessionView {
     this.recording((s) => s.reject());
     return this.conversation();

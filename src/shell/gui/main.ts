@@ -81,6 +81,7 @@ ipcMain.handle('conv-approve', (_e, p: { verify: string[]; write: boolean }) => 
 ipcMain.handle('conv-cancel', () => service.converseCancel());
 ipcMain.handle('conv-escalate', () => service.converseEscalate());
 ipcMain.handle('conv-reject', () => service.converseReject());
+ipcMain.handle('conv-clear', () => service.converseClear());
 ipcMain.handle('conv-ask', () => service.converseAsk());
 ipcMain.handle('conv-git-init', () => service.converseGitInit());
 ipcMain.handle('conv-run', (_e, terminal: unknown) => service.converseRun(terminal));

@@ -670,6 +670,17 @@ describe('GUI — 세션 상태·이름·외부 조작 (D-085)', () => {
     assert.equal(existsSync(lockPath(view.dir, view.id)), false);
   });
 
+  it('대화 비우기는 선 카드를 거절하고 clear 한 줄을 남긴 뒤 점유를 놓는다 (D-092)', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    const view = service.startConversation('scratch');
+    await service.converse('이 타입 에러 고쳐줘');
+    const after = service.converseClear();
+    assert.equal(after.state, 'waiting_input');
+    assert.deepEqual(after.records.slice(-2).map((r) => r.kind), ['approval', 'clear']);
+    assert.equal(existsSync(lockPath(view.dir, view.id)), false);
+  });
+
   it('다른 프로세스가 보낸 턴을 열린 화면이 다시 조립해 잇는다 — 턴 번호가 겹치지 않는다', async () => {
     isolated();
     const service = new GuiService(fake, 20, process.cwd());

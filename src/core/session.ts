@@ -455,7 +455,7 @@ export class ConversationSession {
     this.require('waiting_input', '행 지정');
     const write = options.write === true;
     if (write && this.deps.kind === 'scratch') throw new SessionStateError('스크래치 세션은 쓰기를 켤 수 없다 (SPEC §6.4.1).');
-    const last = this.records().findLast((r) => r.kind === 'user');
+    const last = this.lastUser();
     if (last?.kind !== 'user') throw new SessionStateError('배정할 메시지가 없다.');
     // 마지막 기록이 그 행을 제안한 직접 답이면 고른 것은 지휘자다 — 카드 합치기(D-064) 전 기록을 다시 열었을 때의 경로다.
     const tail = this.lastEvent();
@@ -484,6 +484,25 @@ export class ConversationSession {
    */
   private lastEvent(): TranscriptRecord | undefined {
     return this.log.findLast((r) => !isSettingRecord(r));
+  }
+
+  /** 행 지정·읽고 답하기·단계 계획이 다시 받는 "마지막 메시지" — 비운 대화(D-092) 앞의 메시지는 없는 것이다. */
+  private lastUser(): Extract<TranscriptRecord, { kind: 'user' }> | undefined {
+    const last = this.log.findLast((r) => r.kind === 'user' || r.kind === 'clear');
+    return last?.kind === 'user' ? last : undefined;
+  }
+
+  /**
+   * 대화를 비운다 (D-092) — `clear` 한 줄을 남긴다. 다음 턴부터 맥락·엔진 resume·사다리가 이 줄 앞을 보지 않는다.
+   * 기록은 지우지 않고 Budget·이름·방식·지휘자·역할은 그대로다. 카드가 선 채 비우면 그 배정은 거절로 남긴다(`send` 와 같다, D-064 결정 3).
+   * 도는 동안은 막는다. 비울 대화가 없으면(첫 메시지 전 · 이미 비운 직후) 아무것도 하지 않는다.
+   */
+  clear(): TranscriptRecord[] {
+    if (this.stateValue === 'working') throw new SessionStateError('도는 실행이 끝난 뒤 비운다 (지금: working).');
+    const declined = this.stateValue === 'blocked' ? this.reject() : [];
+    const last = this.lastEvent();
+    if (!last || last.kind === 'clear') return declined;
+    return [...declined, this.append({ kind: 'clear' })];
   }
 
   /**
@@ -705,7 +724,7 @@ export class ConversationSession {
    */
   async readAnswer(): Promise<TranscriptRecord[]> {
     this.require('waiting_input', '읽고 답하기');
-    const last = this.records().findLast((r) => r.kind === 'user');
+    const last = this.lastUser();
     if (last?.kind !== 'user') throw new SessionStateError('답할 메시지가 없다.');
     // send() 와 같은 이유로 첫 await 전에 바로 바꾼다 (final-review #2).
     this.stateValue = 'working';
@@ -1175,7 +1194,8 @@ export class ConversationSession {
    * 새 실행이면 orc 의 최근 대화가 원문으로 실린다 (D-059).
    */
   private resumable(plan: AssignmentPlan, write: boolean): { id: string; turn: number; baseline?: EngineReport } | null {
-    const last = this.records().findLast((r) => r.kind === 'result');
+    // 비운 대화(D-092) 너머의 엔진 세션은 잇지 않는다 — 이으면 엔진이 비운 대화를 그대로 들고 온다.
+    const last = this.records().findLast((r) => r.kind === 'result' || r.kind === 'clear');
     if (last?.kind !== 'result' || !last.engineSession || last.compacted) return null;
     const p = plan.slots.primary;
     const s = last.engineSession;
@@ -1211,7 +1231,8 @@ export class ConversationSession {
     const result = this.log[i];
     // 단계 결과(D-087)는 사다리를 세우지 않는다 — 앞 기록의 배정 카드가 그 단계의 배정이 아니다.
     if (result?.kind !== 'result' || result.step !== undefined || nextSuggestion(result.outcome, result.verdict) === '') return null;
-    if (this.log.slice(i + 1).some((r) => r.kind === 'user')) return null;
+    // 비운 대화(D-092)도 끊는다 — 비운 뒤 사다리를 누르면 화면에 없는 앞 요청을 다시 위임한다.
+    if (this.log.slice(i + 1).some((r) => r.kind === 'user' || r.kind === 'clear')) return null;
     const before = this.log.slice(0, i);
     const plan = before.findLast((r) => r.kind === 'plan');
     const user = before.findLast((r) => r.kind === 'user');
@@ -1301,7 +1322,7 @@ export class ConversationSession {
     if (this.pendingSteps) throw new SessionStateError('이미 선 단계 계획이 있다 — 먼저 승인하거나 거절한다.');
     const declined = this.stateValue === 'blocked' ? this.reject() : [];
     this.require('waiting_input', '단계 계획');
-    const last = this.records().findLast((r) => r.kind === 'user');
+    const last = this.lastUser();
     if (last?.kind !== 'user') throw new SessionStateError('나눌 메시지가 없다.');
     const { matrix, catalog, budget, conduct } = this.deps;
     // send() 와 같은 이유로 첫 await 전에 바로 바꾼다 (final-review #2).
