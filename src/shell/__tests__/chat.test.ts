@@ -12,7 +12,8 @@ import { Journal } from '../../core/journal.ts';
 import { appendRecord, prepareSession, transcriptPath, type TranscriptRecord } from '../../core/transcript.ts';
 import { assembleSession, restoreBudget } from '../conversation.ts';
 import type { ApprovalMode } from '../../data/limits.ts';
-import { findSession, interruptGuard, openingLines, parseChatArgs, parseOrchestratorArgs, renderRecord, runChat } from '../chat.ts';
+import { findSession, interruptGuard, openingLines, parseChatArgs, parseOrchestratorArgs, renderRecord, resumeTarget, runChat } from '../chat.ts';
+import { setEnded } from '../../core/session-meta.ts';
 
 const at = { v: 1 as const, at: '2026-09-26T00:00:00.000Z', turn: 1 };
 
@@ -235,6 +236,19 @@ describe('chat — 입력 루프', () => {
     await runChat(session, restoreBudget(session.dir, session.id), { input: Readable.from(['또\n']), output }, { verify: [] });
     assert.match(out, /다른 곳에서 이 세션에 기록이 붙었다 — \/quit 하고 hs-orc chat --resume/);
     assert.equal(session.records().filter((r) => r.kind === 'user').length, 1);
+  });
+
+  it('열어 둔 사이 종료된 세션(D-089)에는 보내지 않고, --resume 도 거절한다', async () => {
+    const { session, calls } = await drive(['넌 누구니']);
+    setEnded(session.dir, session.id, true);
+    calls.length = 0;
+    let out = '';
+    const output = new Writable({ write(chunk: Buffer, _enc, cb) { out += chunk.toString(); cb(); } });
+    await runChat(session, restoreBudget(session.dir, session.id), { input: Readable.from(['또\n']), output }, { verify: [] });
+    assert.match(out, /종료됐다 — 읽기만 된다/);
+    assert.deepEqual(calls, []);
+    assert.equal(session.records().filter((r) => r.kind === 'user').length, 1);
+    assert.throws(() => resumeTarget(process.cwd(), session.id), /종료됐다.*hs-orc session show/);
   });
 
   it('/quit 뒤의 줄은 처리하지 않는다', async () => {

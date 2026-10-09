@@ -12,7 +12,7 @@ import { BrowserWindow, app, dialog, ipcMain } from 'electron';
 import { titleInfo } from '../view-model.ts';
 import { claudeSessions, codexSessions, reviews } from '../integrations.ts';
 import { defaultJev } from '../jev.ts';
-import { GuiService } from './service.ts';
+import { GuiService, type SessionRef } from './service.ts';
 import type { SessionKind } from '../../core/transcript.ts';
 import type { ApprovalMode, OrchestratorChoice } from '../../data/limits.ts';
 
@@ -86,6 +86,9 @@ ipcMain.handle('conv-git-init', () => service.converseGitInit());
 ipcMain.handle('conv-terminal', (_e, terminal: unknown) => service.openSessionTerminal(terminal));
 ipcMain.handle('conv-rename', (_e, name: string) => service.converseRename(name));
 ipcMain.handle('conv-close', () => service.closeConversation());
+ipcMain.handle('conv-end', (_e, ref: SessionRef) => service.endSession(ref));
+ipcMain.handle('conv-reopen', (_e, ref: SessionRef) => service.reopenSession(ref));
+ipcMain.handle('conv-archive', (_e, ref: SessionRef, on: boolean) => service.archiveSession(ref, on === true));
 
 void app.whenReady().then(() => {
   createWindow();

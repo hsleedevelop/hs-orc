@@ -12,6 +12,7 @@ import type { Budget } from '../core/budget.ts';
 import { H6_BLOCKED, type ConversationSession } from '../core/session.ts';
 import { readSessionLog, type SessionSummary, type TranscriptRecord } from '../core/transcript.ts';
 import { busyMessage, claimSession, foreignHold, lockPath, releaseSession, syncHold } from '../core/session-lock.ts';
+import { endedMessage, sessionEnded } from '../core/session-meta.ts';
 import { ambiguous, matchSessions } from './session-registry.ts';
 import { compactLines, cutLine, lastEvent, ladderLines, retryLines } from './transcript-lines.ts';
 import { commandLine } from '../core/scaffold.ts';
@@ -197,6 +198,13 @@ export async function runChat(
             ask();
             continue;
           }
+          // 종료(D-089)는 쥔 뒤에 본다 — GUI 는 점유를 쥔 채 표식을 쓰므로, 쥐기 전에만 보면 그 틈에 종료된 세션에 쓴다.
+          if (sessionEnded(session.dir, session.id)) {
+            releaseSession(session.dir, session.id);
+            say(`오류   ${endedMessage(session.id)}`);
+            ask();
+            continue;
+          }
         } else {
           say(`오류   ${refusal}`);
           ask();
@@ -333,6 +341,14 @@ export function findSession(cwd: string, ref: string): SessionSummary | undefine
   const hits = matchSessions(cwd, ref);
   if (hits.length > 1) throw ambiguous(ref, hits);
   return hits[0];
+}
+
+/** `chat --resume` 의 대상 — 없거나 종료됐으면(D-089) 던진다. 종료된 세션은 `hs-orc session show` 로 읽는다. */
+export function resumeTarget(cwd: string, ref: string): SessionSummary {
+  const found = findSession(cwd, ref);
+  if (!found) throw new Error(`그런 세션이 없다: ${ref} — hs-orc chat --list`);
+  if (sessionEnded(found.dir, found.id)) throw new Error(endedMessage(found.id));
+  return found;
 }
 
 export function openingLines(session: ConversationSession, budget: Budget, tail = 10): string[] {

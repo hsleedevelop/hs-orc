@@ -698,3 +698,90 @@ describe('GUI — 세션 상태·이름·외부 조작 (D-085)', () => {
     assert.equal(service.converseRename('beta').name, 'beta');
   });
 });
+
+describe('GUI — 세션 종료·보관 (D-089)', () => {
+  const kinds = (v: { records: readonly { kind: string }[] }) => v.records.map((r) => r.kind).filter((k) => k !== 'mode' && k !== 'orchestrator');
+
+  it('선 카드는 거절로 닫고 종료한다 — 그 뒤 보내기·방식 바꾸기는 거절하고, 다시 열면 이어 쓴다', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    const view = service.startConversation('scratch');
+    service.converseMode('manual');
+    await service.converse('이 타입 에러 고쳐줘');
+    assert.equal(service.conversation().state, 'blocked');
+    const ref = { kind: view.kind, dir: view.dir, id: view.id };
+
+    const ended = await service.endSession(ref);
+    assert.equal(ended?.ended, true);
+    assert.equal(ended?.state, 'waiting_input');
+    assert.deepEqual(kinds(ended ?? { records: [] }), ['user', 'plan', 'approval'], '종료는 거절 한 줄 말고는 기록에 아무것도 붙이지 않는다');
+    assert.equal(existsSync(lockPath(view.dir, view.id)), false);
+    assert.equal(service.conversations().scratch.find((s) => s.id === view.id)?.status?.state, 'ended');
+    await assert.rejects(service.converse('또'), /종료됐다/);
+    assert.throws(() => service.converseMode('auto'), /종료됐다/);
+    assert.throws(() => service.converseRename('late'), /종료됐다/);
+
+    assert.equal(service.reopenSession(ref)?.ended, false);
+    await service.converse('넌 누구니');
+    assert.equal(service.conversation().records.at(-1)?.kind, 'direct');
+  });
+
+  it('도는 위임은 취소(D-066)하고 끝나기를 기다린 뒤 종료한다', async () => {
+    isolated();
+    const roles: string[] = [];
+    const exec: SlotExecutor = (slot, prompt, options) => {
+      roles.push(slot.role);
+      if (slot.role !== 'primary') return fake(slot, prompt);
+      return new Promise((resolve) => {
+        options?.signal?.addEventListener('abort', () => resolve({ ok: false, cancelled: true, text: '', rawStdout: '', rawStderr: '', durationMs: 1 }), { once: true });
+      });
+    };
+    const service = new GuiService(exec, 20, process.cwd());
+    const view = service.startConversation('scratch');
+    service.converseMode('manual');
+    await service.converse('이 타입 에러 고쳐줘');
+    const running = service.converseApprove({ verify: [], write: false });
+    assert.equal(service.conversation().cancellable, true);
+
+    const ended = await service.endSession({ kind: view.kind, dir: view.dir, id: view.id });
+    assert.equal(ended?.ended, true);
+    const result = ended?.records.at(-1);
+    assert.ok(result?.kind === 'result' && result.outcome === 'cancelled');
+    assert.deepEqual(roles, ['primary'], '취소 뒤 reviewer 를 띄우지 않는다');
+    await running;
+    assert.equal(existsSync(lockPath(view.dir, view.id)), false);
+  });
+
+  it('다른 프로세스가 쥔 세션은 종료·보관하지 않는다 — 그 점유는 그대로 둔다', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    const view = service.startConversation('scratch');
+    await service.converse('넌 누구니');
+    const held = JSON.stringify({ pid: process.ppid, by: 'chat', state: 'working', at: '' });
+    writeFileSync(lockPath(view.dir, view.id), held);
+    const ref = { kind: view.kind, dir: view.dir, id: view.id };
+    await assert.rejects(service.endSession(ref), /종료하지 않는다 — 다른 곳\(chat/);
+    assert.throws(() => service.archiveSession(ref, true), /보관하지 않는다 — 다른 곳\(chat/);
+    assert.equal(readFileSync(lockPath(view.dir, view.id), 'utf8'), held);
+    assert.equal(service.conversation().ended, false);
+    assert.equal(service.conversation().archived, false);
+  });
+
+  it('보관은 숨김 표식일 뿐이다 — 목록에 표식이 서고, 대화는 그대로 되고, 복원하면 지워진다. 빈 세션·모양이 틀린 id 는 거절한다', async () => {
+    isolated();
+    const service = new GuiService(fake, 20, process.cwd());
+    const view = service.startConversation('scratch');
+    const ref = { kind: view.kind, dir: view.dir, id: view.id };
+    assert.throws(() => service.archiveSession(ref, true), /빈 세션/);
+    await service.converse('넌 누구니');
+    const before = service.conversation().records.length;
+    assert.equal(service.archiveSession(ref, true)?.archived, true);
+    assert.equal(service.conversation().records.length, before);
+    assert.equal(service.conversations().scratch.find((s) => s.id === view.id)?.archived, true, '목록은 보관 세션도 표식과 함께 준다 — 화면이 가른다');
+    await service.converse('보관한 채 보낸다');
+    assert.equal(service.conversation().archived, true);
+    assert.equal(service.archiveSession(ref, false)?.archived, false);
+    assert.equal(service.conversations().scratch.find((s) => s.id === view.id)?.archived, undefined);
+    assert.throws(() => service.archiveSession({ ...ref, id: '../x' }, true), /id 모양이 아니다/);
+  });
+});

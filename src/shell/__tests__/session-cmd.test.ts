@@ -13,6 +13,7 @@ import type { RowClassifier } from '../../adapters/jev.ts';
 import type { ApprovalMode } from '../../data/limits.ts';
 import { Journal } from '../../core/journal.ts';
 import { lockPath } from '../../core/session-lock.ts';
+import { setEnded } from '../../core/session-meta.ts';
 import { prepareSession, readSessionLog } from '../../core/transcript.ts';
 import { assembleSession, restoreBudget } from '../conversation.ts';
 import { knownSessions, resolveSession } from '../session-registry.ts';
@@ -127,6 +128,19 @@ describe('session — send', () => {
     const before = readSessionLog(dir, id).records.length;
     await assert.rejects(sendToSession({ cwd: dir, ref: 'held', message: '넌 누구니', write: false, run: false, verify: [], execute: fake }), /배정 카드가 승인을 기다리는 중/);
     assert.equal(readSessionLog(dir, id).records.length, before);
+  });
+
+  it('종료된 세션(D-089)에는 보내지도 이름을 붙이지도 않는다 — 엔진 0회, 점유를 놓고, show 는 된다', async () => {
+    const { dir, id } = fixture('over');
+    setEnded(dir, id, true);
+    const before = readSessionLog(dir, id).records.length;
+    calls.length = 0;
+    await assert.rejects(sendToSession({ cwd: dir, ref: 'over', message: '넌 누구니', write: false, run: true, verify: [], execute: fake }), /종료됐다 — 읽기만 된다/);
+    assert.throws(() => nameSession(dir, 'over', 'again'), /종료됐다/);
+    assert.deepEqual(calls, []);
+    assert.equal(readSessionLog(dir, id).records.length, before);
+    assert.equal(readdirSync(path.dirname(lockPath(dir, id))).some((f) => f.endsWith('.lock')), false);
+    assert.match(listLines(knownSessions(dir)).join('\n'), new RegExp(`${id} +over +종료`));
   });
 });
 

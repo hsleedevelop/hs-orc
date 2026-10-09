@@ -90,6 +90,23 @@
       .st.done { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, transparent); }
       .st.done.bad { color: var(--orange); border-color: color-mix(in srgb, var(--orange) 45%, transparent); }
       .st.interrupted { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, transparent); }
+      .st.ended { color: var(--dim-2); border-style: dashed; }
+      /* 행 동작 (D-089) — 행 자체가 버튼이라 그 안에 넣지 않고 오른쪽 위에 겹친다. hover·키보드 포커스에만 드러난다. */
+      .sb-row { position: relative; }
+      .sb-actions { position: absolute; top: 3px; right: 4px; display: none; gap: 3px; }
+      .sb-row:hover .sb-actions, .sb-row:focus-within .sb-actions { display: flex; }
+      .sb-act {
+        font: inherit; font-size: 10px; line-height: 1.5; padding: 0 6px; cursor: pointer;
+        background: var(--bg-elev); color: var(--dim-2);
+        border: 1px solid var(--border-2); border-radius: 4px;
+      }
+      .sb-act:hover { color: var(--fg-strong); border-color: var(--blue); }
+      .sb-act.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, transparent); }
+      .sb-act.danger.confirm { background: color-mix(in srgb, var(--red) 20%, var(--bg-elev)); color: var(--fg-strong); }
+      .sb-act[disabled] { opacity: .35; cursor: default; }
+      .sb-item.archived .p { color: var(--dim-2); }
+      /* 세션 머리의 보관·종료 — 닫기와 세로 선으로 가른다. */
+      .head-end { display: flex; align-items: center; gap: 6px; padding-left: 10px; border-left: 1px solid var(--border-2); }
       .sb-item .u { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 10px; color: var(--dim); }
       .sb-empty { padding: 2px 8px 4px 24px; font-size: 11px; color: var(--dim); }
       .sidebar button[disabled] { cursor: default; opacity: .6; }
