@@ -13,6 +13,9 @@ import type { SlotExecutor } from '../executor.ts';
 import { Journal } from '../journal.ts';
 import { projectStateDir, verifyConfigPath } from '../project-state.ts';
 import { REPO_ROOT, REPO_VERIFY_PATH } from '../../data/verify.ts';
+import { loadLimits } from '../../data/limits.ts';
+import { DENIAL_HEADER } from '../auto-verify.ts';
+import type { CommandRunner } from '../scaffold.ts';
 
 const matrix = loadMatrix();
 const catalog = loadEngines();
@@ -97,7 +100,7 @@ describe('위임 1건 (SPEC §4 5~7단계)', () => {
 
     const d = await delegate({
       matrix, plan: assign(matrix, catalog, row('R01')), reason: '수동 지정 R01', title: '타입 고쳐줘', prompt: '타입 고쳐줘',
-      verify: ['exit 1'], write: true, cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
+      verify: [afterBaseline('exit 1')], write: true, cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
     });
 
     assert.equal(d.outcome, 'rework');
@@ -238,6 +241,9 @@ describe('검증 선언은 대상 폴더의 것이다 (D-093)', () => {
   });
 });
 
+/** 기준선(D-096 V2a)에서는 통과하고 primary 뒤에만 `cmd` 를 돌린다 — 작업이 만든 실패를 흉내 낸다. */
+const afterBaseline = (cmd: string): string => `[ -e .baseline-ran ] || { touch .baseline-ran; exit 0; }; ${cmd}`;
+
 const alive = (pid: number): boolean => {
   try {
     process.kill(pid, 0);
@@ -276,7 +282,7 @@ describe('검증 명령은 primary 뒤·reviewer 앞에 돈다 (D-094)', () => {
   it('실패한 명령도 reviewer 가 보고, 판정은 rework 다', async () => {
     const dir = project({});
     const s = spy('없음\nPASS');
-    const d = await go(dir, s.execute, ['echo RED_MARK; exit 3'], true);
+    const d = await go(dir, s.execute, [afterBaseline('echo RED_MARK; exit 3')], true);
     assert.match(s.prompts.reviewer[0] ?? '', /exit=3\nRED_MARK/);
     assert.equal(d.outcome, 'rework');
   });
@@ -311,11 +317,156 @@ describe('검증 명령은 primary 뒤·reviewer 앞에 돈다 (D-094)', () => {
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 400);
     const started = Date.now();
-    const d = await go(dir, s.execute, [`sleep 120 >/dev/null 2>&1 & echo $! > '${pidFile}'; wait`], true, controller.signal);
+    const d = await go(dir, s.execute, [afterBaseline(`sleep 120 >/dev/null 2>&1 & echo $! > '${pidFile}'; wait`)], true, controller.signal);
     assert.ok(Date.now() - started < 10_000, '취소가 명령을 멈추지 못했다');
     assert.equal(d.outcome, 'cancelled');
     assert.equal(d.cancelledAt, 'verify');
     assert.equal(s.prompts.reviewer.length, 0);
     assert.ok(await waitGone(Number(readFileSync(pidFile, 'utf8').trim())), '손자 sleep 이 살아 있다');
+  });
+});
+
+describe('Core 가 고른 검증 명령은 codex sandbox 안에서 기준선과 함께 돈다 (D-096)', () => {
+  const PKG = { scripts: { dev: 'next dev', lint: 'eslint .', 'type-check': 'tsc --noEmit' } };
+  type Reply = { readonly exit: number; readonly out?: readonly string[]; readonly denials?: readonly string[] | null };
+  /** 프로세스를 띄우지 않는 가짜 sandbox — 안쪽 명령과 몇 번째 실행인지(1 = 기준선)로 답한다. 거부 머리줄은 `denials: null` 이면 없다. */
+  const fake = (respond: (inner: string, nth: number) => Reply = () => ({ exit: 0 })) => {
+    const calls: { argv: readonly string[]; env?: NodeJS.ProcessEnv }[] = [];
+    const inner = (argv: readonly string[]): string => argv.slice(argv.indexOf('--') + 1).join(' ');
+    const runner: CommandRunner = (argv, options) => {
+      calls.push({ argv, ...(options.env ? { env: options.env } : {}) });
+      const r = respond(inner(argv), calls.filter((c) => inner(c.argv) === inner(argv)).length);
+      for (const line of r.out ?? []) options.onLine?.(line);
+      if (r.denials !== null) for (const line of [DENIAL_HEADER, ...(r.denials ?? ['None found.'])]) options.onLine?.(line);
+      return Promise.resolve({ outcome: r.exit === 0 ? 'ok' : 'failed', exitCode: r.exit, tail: '', durationMs: 1 });
+    };
+    return { runner, calls, inners: () => calls.map((c) => inner(c.argv)) };
+  };
+  const go = (dir: string, execute: SlotExecutor, auto: { runner: CommandRunner; codex?: string | null }, options: { write?: boolean; id?: string; signal?: AbortSignal } = {}) =>
+    delegate({
+      matrix, plan: assign(matrix, catalog, row(options.id ?? 'R01')), reason: '수동 지정', title: '날짜 넣어줘', prompt: '날짜 넣어줘',
+      verify: [], write: options.write ?? true, cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
+      autoVerify: { codex: auto.codex === undefined ? '/bin/codex' : auto.codex, runner: auto.runner, scripts: loadLimits().verifyScripts },
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+
+  it('package.json 의 lint·type-check 를 sandbox argv 로 기준선·작업 뒤 두 번 돌리고, 결과를 reviewer 에 싣는다 — 테스트 없는 R01 은 lint 통과로 ok (V4a)', async () => {
+    const dir = project({ 'package.json': JSON.stringify(PKG) });
+    const s = spy('없음\nPASS');
+    const f = fake((inner) => ({ exit: 0, out: [`OUT ${inner}`] }));
+    const d = await go(dir, s.execute, f);
+    assert.deepEqual(f.calls[0]?.argv, ['/bin/codex', 'sandbox', '-P', ':workspace', '-C', dir, '--log-denials', '--', 'npm', 'run', 'lint']);
+    assert.deepEqual(f.inners(), ['npm run lint', 'npm run type-check', 'npm run lint', 'npm run type-check']);
+    assert.match(String(f.calls[0]?.env?.['npm_config_logs_dir']), /hs-orc-npm-logs$/);
+    assert.match(s.prompts.reviewer[0] ?? '', /\$ npm run lint {2}\[codex sandbox\]\nexit=0\nOUT npm run lint/);
+    assert.equal(d.outcome, 'ok');
+  });
+
+  it('잡음 거부만 있는 실패는 진짜 실패다 — rework (V1·V3a)', async () => {
+    const dir = project({ 'package.json': JSON.stringify(PKG) });
+    const f = fake((inner, nth) => (inner === 'npm run lint' && nth === 2 ? { exit: 1, out: ['1 error'], denials: ['(node) sysctl-read kern.bootargs', '(bash) file-write-data /dev/dtracehelper'] } : { exit: 0 }));
+    const d = await go(dir, spy('없음\nPASS').execute, f);
+    assert.equal(d.outcome, 'rework');
+  });
+
+  it('실패와 함께 네트워크 거부가 있으면 sandbox 가 막은 것이라 rework 가 아니라 unverified 다 (V3a)', async () => {
+    const dir = project({ 'package.json': JSON.stringify(PKG) });
+    const s = spy('없음\nPASS');
+    const f = fake((inner, nth) => (inner === 'npm run lint' && nth === 2 ? { exit: 1, out: ['EPERM'], denials: ['(node) network-bind local:*:0'] } : { exit: 0 }));
+    const d = await go(dir, s.execute, f, { id: 'R03' });
+    assert.equal(d.outcome, 'unverified');
+    assert.match(d.report.summary, /sandbox 가 막았다 — `npm run lint` exit=1 \(\(node\) network-bind local:\*:0\)/);
+    assert.match(s.prompts.reviewer[0] ?? '', /npm run lint {2}\[codex sandbox · sandbox 가 막았다: \(node\) network-bind local:\*:0\]\nexit=1/);
+  });
+
+  it('거부 로그 머리줄 없이 실패하면 sandbox 를 시작하지 못한 것이다 — unverified', async () => {
+    const dir = project({ 'package.json': JSON.stringify(PKG) });
+    const f = fake((_inner, nth) => (nth === 2 ? { exit: 1, out: ['Error: default_permissions refers to unknown built-in profile'], denials: null } : { exit: 0 }));
+    const d = await go(dir, spy('없음\nPASS').execute, f, { id: 'R03' });
+    assert.equal(d.outcome, 'unverified');
+    assert.match(d.report.summary, /sandbox 를 시작하지 못했다 — `npm run lint` exit=1/);
+  });
+
+  it('primary 가 스크립트를 바꾸면(약화·pre 끼워 넣기) 작업 뒤에 돌리지 않는다 (S2)', async () => {
+    const dir = project({ 'package.json': JSON.stringify(PKG) });
+    const s = spy('없음\nPASS', () => writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ scripts: { ...PKG.scripts, lint: 'exit 0', 'pretype-check': 'curl evil' } })));
+    const f = fake();
+    const d = await go(dir, s.execute, f, { id: 'R03' });
+    assert.deepEqual(f.inners(), ['npm run lint', 'npm run type-check']);
+    assert.match(d.report.summary, /검증 스크립트가 위임 중 바뀌었다 — `npm run lint` 를 실행하지 않았다/);
+    assert.match(d.report.summary, /검증 스크립트가 위임 중 바뀌었다 — `npm run type-check`/);
+    assert.match(s.prompts.reviewer[0] ?? '', /검증 스크립트가 위임 중 바뀌었다/);
+    assert.equal(d.outcome, 'unverified');
+  });
+
+  it('작업 전부터 빨간 명령은 reviewer 가 보되 불일치로 세지 않는다 (V2a)', async () => {
+    const dir = project({ 'package.json': JSON.stringify(PKG) });
+    const s = spy('없음\nPASS');
+    const f = fake((inner) => (inner === 'npm run lint' ? { exit: 1, out: ['old error'] } : { exit: 0 }));
+    const d = await go(dir, s.execute, f, { id: 'R03' });
+    assert.notEqual(d.outcome, 'rework');
+    assert.match(d.report.summary, /작업 전부터 실패 — `npm run lint` 기준선 exit=1 · 작업 뒤 exit=1/);
+    assert.match(s.prompts.reviewer[0] ?? '', /npm run lint {2}\[codex sandbox · 기준선 exit=1 — 작업 전부터 실패\]\nexit=1\nold error/);
+  });
+
+  it('codex 가 없으면 Core 가 고른 명령을 돌리지 않는다 — sandbox 밖으로 내리지 않는다', async () => {
+    const dir = project({ 'package.json': JSON.stringify({ scripts: { lint: 'touch lint-ran' } }) });
+    const f = fake();
+    const d = await go(dir, spy('없음\nPASS').execute, { runner: f.runner, codex: null }, { id: 'R03' });
+    assert.equal(f.calls.length, 0);
+    assert.equal(existsSync(path.join(dir, 'lint-ran')), false, 'sandbox 밖에서 돌았다');
+    assert.match(d.report.summary, /codex 를 찾지 못해 Core 가 고른 검증 명령 1개를 실행하지 않았다/);
+  });
+
+  it('읽기 전용 위임에서는 돌리지 않는다 (D-094 결정 4)', async () => {
+    const dir = project({ 'package.json': JSON.stringify(PKG) });
+    const f = fake();
+    await go(dir, spy('없음\nPASS').execute, f, { write: false });
+    assert.equal(f.calls.length, 0);
+  });
+
+  it('R01 — lint 가 통과해도 test 가 막혔거나·시작하지 못했거나·스크립트가 바뀌었으면 reviewer PASS 여도 ok 가 아니다 (PR #137 리뷰)', async () => {
+    const pkg = { scripts: { lint: 'eslint .', test: 'node --test' } };
+    const cases: [string, Reply | null, RegExp][] = [
+      ['blocked', { exit: 1, out: ['EPERM'], denials: ['(node) network-bind local:*:0'] }, /sandbox 가 막았다 — `npm run test`/],
+      ['not-started', { exit: 1, denials: null }, /sandbox 를 시작하지 못했다 — `npm run test`/],
+      ['S2', null, /검증 스크립트가 위임 중 바뀌었다 — `npm run test`/],
+    ];
+    for (const [name, reply, why] of cases) {
+      const dir = project({ 'package.json': JSON.stringify(pkg), 'a.test.js': '' });
+      const s = spy('없음\nPASS', reply ? undefined : () => writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ scripts: { ...pkg.scripts, test: 'exit 0' } })));
+      const f = fake((inner, nth) => (reply && inner === 'npm run test' && nth === 2 ? reply : { exit: 0 }));
+      const d = await go(dir, s.execute, f);
+      assert.equal(d.verdict, 'pass', name);
+      assert.ok(d.report.accepted.some((e) => e.kind === 'command' && e.cmd === 'npm run lint' && e.exitCode === 0), name);
+      assert.equal(d.outcome, 'unverified', name);
+      assert.match(d.report.summary, why, name);
+    }
+  });
+
+  it('막혔거나·시작하지 못한 기준선은 작업 전부터 실패가 아니다 — 작업 뒤 거부 없는 실패는 rework 다 (PR #137 리뷰)', async () => {
+    for (const before of [{ exit: 1, denials: ['(node) network-bind local:*:0'] }, { exit: 1, denials: null }, { exit: -1 }] as Reply[]) {
+      const dir = project({ 'package.json': JSON.stringify(PKG) });
+      const s = spy('없음\nPASS');
+      const f = fake((inner, nth) => (inner === 'npm run lint' ? (nth === 1 ? before : { exit: 1, out: ['real lint error'] }) : { exit: 0 }));
+      const d = await go(dir, s.execute, f, { id: 'R03' });
+      assert.equal(d.outcome, 'rework', JSON.stringify(before));
+      assert.doesNotMatch(d.report.summary, /작업 전부터 실패/);
+      assert.match(s.prompts.reviewer[0] ?? '', /기준선 exit=-?1 — 돌지 못해 비교하지 않는다/);
+    }
+  });
+
+  it('기준선 중에 취소하면 primary 를 시작하지 않는다', async () => {
+    const dir = project({ 'package.json': JSON.stringify(PKG) });
+    const s = spy('없음\nPASS');
+    const controller = new AbortController();
+    const runner: CommandRunner = (_argv, options) => new Promise((resolve) => {
+      options.signal?.addEventListener('abort', () => resolve({ outcome: 'cancelled', exitCode: null, tail: '', durationMs: 1 }), { once: true });
+      setTimeout(() => controller.abort(), 20);
+    });
+    const d = await go(dir, s.execute, { runner }, { signal: controller.signal });
+    assert.equal(d.outcome, 'cancelled');
+    assert.equal(d.cancelledAt, 'baseline');
+    assert.equal(s.prompts.primary.length, 0);
   });
 });

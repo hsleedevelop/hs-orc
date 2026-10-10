@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkLimits, loadLimits } from '../limits.ts';
+import { checkLimits, loadLimits, verifyGroups } from '../limits.ts';
 
 describe('상한 파일 검사 (SPEC §9)', () => {
   it('수기 파일의 값은 통과한다', () => {
@@ -30,6 +30,15 @@ describe('상한 파일 검사 (SPEC §9)', () => {
     assert.deepEqual(loadLimits().runScripts, ['dev', 'start']);
     for (const runScripts of [[], ['dev; rm -rf ~'], ['Dev'], 'dev']) {
       assert.throws(() => checkLimits({ ...loadLimits(), runScripts } as never), /runScripts/);
+    }
+  });
+
+  it('검증 스크립트는 묶음 배열이다 — test 는 R01·R04·R06 에만, 셸 문자·빈 묶음은 거절한다 (D-096)', () => {
+    const { verifyScripts } = loadLimits();
+    assert.deepEqual(verifyGroups(verifyScripts, 'R03'), [['lint'], ['typecheck', 'type-check']]);
+    assert.deepEqual(verifyGroups(verifyScripts, 'R01').at(-1), ['test']);
+    for (const bad of [{ all: [[]], rows: {} }, { all: [['lint && rm -rf ~']], rows: {} }, { all: [['lint']], rows: { r1: [['test']] } }, { all: ['lint'], rows: {} }]) {
+      assert.throws(() => checkLimits({ ...loadLimits(), verifyScripts: bad } as never), /verifyScripts/);
     }
   });
 });

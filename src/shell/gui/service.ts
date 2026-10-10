@@ -10,6 +10,7 @@ import { loadLimits, type ApprovalMode, type OrchestratorChoice } from '../../da
 import { orchestratorOptions, type OrchestratorOption } from '../../core/conductor.ts';
 import { slotLine } from '../../core/reader.ts';
 import { routeWithFallback } from '../../core/pipeline.ts';
+import { defaultAutoVerify } from '../../core/auto-verify.ts';
 import { createExecutor, type SlotExecutor } from '../../core/executor.ts';
 import { Budget } from '../../core/budget.ts';
 import { Journal } from '../../core/journal.ts';
@@ -382,6 +383,8 @@ export class GuiService {
       execute,
       budget: this.budget,
       journal: this.journal,
+      // Core 가 고른 검증 명령 (D-096) — 실행기를 주입한 테스트에서는 켜지 않는다(세션 조립과 같은 규칙).
+      ...(this.execute ? {} : { autoVerify: defaultAutoVerify() }),
     });
     return {
       ok: d.ok,

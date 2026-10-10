@@ -11,8 +11,9 @@ import type { Budget } from './budget.ts';
 import { appendDecision } from './decision-log.ts';
 import { cancelledLine, firstLine, secondLine } from './decide.ts';
 import { checksText, noTestsEvidenceNote, primaryNoTestsNote, readOnlyVerifyNote, reviewText, runDuo, type CancelledAt, type ReviewRun, type Verdict } from './duo.ts';
-import { EXISTING_TEST_ROWS, collect, outcomeOf, type Evidence, type EvidenceReport, type SettledOutcome } from './evidence.ts';
+import { EXISTING_TEST_ROWS, collect, notRun, outcomeOf, type Evidence, type EvidenceReport, type SettledOutcome } from './evidence.ts';
 import { changedFiles, noTests, runCommand, snapshotTests, testChanges, type CommandEvidence } from './evidence-gather.ts';
+import { autoCommands, runSandboxed, scriptChanged, type AutoCommand, type AutoVerify, type SandboxVerdict } from './auto-verify.ts';
 import { declaredTests } from '../data/verify.ts';
 import type { EngineReport, SlotExecutor } from './executor.ts';
 import type { Journal } from './journal.ts';
@@ -45,6 +46,23 @@ export interface DelegateInput {
   readonly resumeBaseline?: EngineReport;
   /** 신호가 서면 도는 엔진 슬롯을 종료하고 위임을 `cancelled` 로 끝낸다 (D-066). */
   readonly signal?: AbortSignal;
+  /**
+   * 주면 쓰기 위임에 Core 가 고른 검증 명령(선언 W1 + `package.json` 스크립트 W2)을 더해 codex sandbox 안에서 돌린다 (D-096).
+   * 조립(세션·GUI 단발)이 넘긴다. 없으면 사람이 준 `verify` 만이다 — 실행기를 주입한 테스트가 실제 sandbox 를 띄우지 않는다.
+   */
+  readonly autoVerify?: AutoVerify;
+}
+
+/** 검증 명령 하나 — 사람이 적은 것(sandbox 밖 `sh -c`, D-094)이거나 Core 가 고른 것(sandbox 안, D-096). */
+interface Check {
+  readonly cmd: string;
+  readonly auto?: AutoCommand;
+}
+
+interface CheckRun {
+  readonly evidence: CommandEvidence;
+  readonly cancelled: boolean;
+  readonly verdict: SandboxVerdict;
 }
 
 export interface Delegated {
@@ -83,15 +101,87 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
 
   // 검증 명령은 primary 뒤·reviewer 앞에 Core 가 돌리고 결과를 reviewer 에 싣는다 (D-094). 읽기 전용이면 돌리지 않는다.
   const verifyCmds = input.verify.filter((v) => v.trim());
+  const notes: string[] = [];
+  // 돌려야 했지만 결과를 얻지 못한 검증 (D-096) — 다른 명령이 요구를 채워도 ok 로 닫지 않는다(`collect` 의 held). 진짜 실패의 rework 가 먼저다.
+  const held: string[] = [];
+  const checksList: Check[] = verifyCmds.map((cmd) => ({ cmd }));
+  // Core 가 고른 명령은 쓰기 위임에서만, codex sandbox 안에서만 돈다 (D-096). codex 가 없으면 sandbox 밖으로 내리지 않는다.
+  const autoVerify = input.write ? input.autoVerify : undefined;
+  if (autoVerify) {
+    const picked = autoCommands(input.cwd, plan.assignment.id, autoVerify.scripts, verifyConfigPath(input.cwd), verifyCmds);
+    notes.push(...picked.notes);
+    if (autoVerify.codex === null && picked.commands.length > 0) {
+      held.push(`codex 를 찾지 못해 Core 가 고른 검증 명령 ${picked.commands.length}개를 실행하지 않았다 — sandbox 밖에서는 돌리지 않는다 (D-096) — ${picked.commands.map((c) => `\`${c.cmd}\``).join(' · ')}`);
+    } else {
+      checksList.push(...picked.commands.map((auto) => ({ cmd: auto.cmd, auto })));
+    }
+  }
+  const runCheck = async (c: Check, signal?: AbortSignal): Promise<CheckRun> => {
+    // Core 가 고른 명령에는 sandbox 밖 길이 없다 (D-096 안전선) — codex 가 없으면 위에서 목록에 넣지 않았고, 여기서도 던진다.
+    if (c.auto) {
+      if (!autoVerify?.codex) throw new Error(`sandbox 없이 Core 가 고른 검증 명령을 돌리려 했다: ${c.cmd}`);
+      return runSandboxed({ ...autoVerify, codex: autoVerify.codex }, c.auto, input.cwd, signal ? { signal } : {});
+    }
+    const r = await runCommand(c.cmd, input.cwd, signal ? { signal } : {});
+    return { ...r, verdict: { kind: 'ran' } };
+  };
+
+  // 기준선 (D-096 V2a) — primary 전에 같은 명령을 돌린다. 작업 전부터 빨간 명령은 작업 뒤에도 빨가면 불일치로 세지 않는다.
+  const baseline = new Map<string, CheckRun>();
+  if (input.write) {
+    for (const c of checksList) {
+      const r = await runCheck(c, input.signal);
+      if (r.cancelled) {
+        appendDecision(cancelledLine(decision, 'baseline'));
+        return { ok: false, text: '', outcome: 'cancelled', cancelledAt: 'baseline', report: collect(plan.assignment, []), verdict: 'unknown', decisionId: decision.id };
+      }
+      baseline.set(c.cmd, r);
+    }
+  }
+
   const ran: CommandEvidence[] = [];
-  const checks = input.write && verifyCmds.length > 0
+  const checks = input.write && checksList.length > 0
     ? async (signal?: AbortSignal): Promise<string> => {
-        for (const cmd of verifyCmds) {
-          const r = await runCommand(cmd, input.cwd, signal ? { signal } : {});
+        const shown: CommandEvidence[] = [];
+        const skipped: string[] = [];
+        for (const c of checksList) {
+          // 위임이 W2 스크립트를 바꿨다 (S2) — 사람이 본(기준선이 돈) 것과 다른 것이 돈다. 돌리지 않는다.
+          if (c.auto?.target && scriptChanged(input.cwd, c.auto.target)) {
+            const line = `검증 스크립트가 위임 중 바뀌었다 — \`${c.cmd}\` 를 실행하지 않았다 (D-096 S2)`;
+            held.push(line);
+            skipped.push(line);
+            continue;
+          }
+          const r = await runCheck(c, signal);
           if (r.cancelled) break;
+          const base = baseline.get(c.cmd);
+          const baseExit = base?.evidence.exitCode ?? 0;
+          // 작업 전부터 실패는 기준선이 **실제로 돌아** 실패했을 때만이다 (PR #137 리뷰) — sandbox 가 막았거나·시작하지 못했거나·
+          // 돌지 못한(-1·126·127) 기준선은 코드의 실패가 아니라서, 그것으로 작업 뒤의 진짜 실패를 면제하면 새 실패가 숨는다.
+          const redBefore = base !== undefined && baseExit !== 0 && base.verdict.kind === 'ran' && notRun(baseExit) === null;
+          const marks = [
+            ...(c.auto ? ['codex sandbox'] : []),
+            ...(r.verdict.kind === 'blocked' ? [`sandbox 가 막았다: ${r.verdict.denials.join(' · ')}`] : []),
+            ...(r.verdict.kind === 'not-started' ? ['sandbox 를 시작하지 못했다'] : []),
+            ...(redBefore ? [`기준선 exit=${baseExit} — 작업 전부터 실패`] : base !== undefined && baseExit !== 0 ? [`기준선 exit=${baseExit} — 돌지 못해 비교하지 않는다`] : []),
+          ];
+          shown.push(marks.length > 0 ? { ...r.evidence, cmd: `${c.cmd}  [${marks.join(' · ')}]` } : r.evidence);
+          // V3a — sandbox 탓일 수 있는 실패는 rework 가 아니다. 진짜 실패와 겹쳐도 가를 수 없어 unverified 로 닫는다(D-096 한계).
+          if (r.verdict.kind === 'blocked') {
+            held.push(`sandbox 가 막았다 — \`${c.cmd}\` exit=${r.evidence.exitCode} (${r.verdict.denials.join(' · ')}) — 실패로 세지 않는다`);
+            continue;
+          }
+          if (r.verdict.kind === 'not-started') {
+            held.push(`sandbox 를 시작하지 못했다 — \`${c.cmd}\` exit=${r.evidence.exitCode} (거부 로그 머리줄 없음)`);
+            continue;
+          }
+          if (redBefore && r.evidence.exitCode !== 0) {
+            held.push(`작업 전부터 실패 — \`${c.cmd}\` 기준선 exit=${baseExit} · 작업 뒤 exit=${r.evidence.exitCode} — 불일치로 세지 않는다`);
+            continue;
+          }
           ran.push(r.evidence);
         }
-        return checksText(ran);
+        return [checksText(shown), ...skipped].filter(Boolean).join('\n\n');
       }
     : undefined;
 
@@ -149,11 +239,9 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
   const evidence: Evidence[] = [...duo.evidence, ...ran];
   if (evidence.length > 0) evidence.push(changedFiles(input.cwd));
   if (testsBefore) evidence.push(testChanges(testsBefore, testGlobs, input.cwd));
-  const notes = [
-    ...(missingTests ? [noTestsEvidenceNote(missingTests)] : []),
-    ...(!input.write && verifyCmds.length > 0 ? [readOnlyVerifyNote(verifyCmds)] : []),
-  ];
-  const report = collect(plan.assignment, evidence, notes);
+  notes.unshift(...(missingTests ? [noTestsEvidenceNote(missingTests)] : []));
+  if (!input.write && verifyCmds.length > 0) notes.push(readOnlyVerifyNote(verifyCmds));
+  const report = collect(plan.assignment, evidence, notes, held);
 
   journal.append({
     index: journal.records.length + 1,

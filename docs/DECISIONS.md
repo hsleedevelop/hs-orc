@@ -3933,7 +3933,7 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 ---
 
-## Q30 — 세션·once 위임에도 Core 가 검증 명령을 돌려 reviewer 에 실을까: 무엇을 · 어디서 · 보안 · 판정 · 첫 조각 (조사) → **D-094** (P1 확정, 나머지 결정 대기)
+## Q30 — 세션·once 위임에도 Core 가 검증 명령을 돌려 reviewer 에 실을까: 무엇을 · 어디서 · 보안 · 판정 · 첫 조각 (조사) → **D-094** (P1 확정) · **D-096** (결정 2~7 확정, 2026-10-11)
 
 **배경** 2026-10-09 실사용 `~/.hs-orc/projects/hs-orc-test-39c894d7/sessions/1009-2302-6c1.jsonl` 턴 2 (D-093 발단과 같은 기록). R01 위임에서 Haiku reviewer 는 "`npm run lint` 와 `eslint` 직접 실행이 승인 요구로 막혔습니다 … lint 결과는 산출물의 주장일 뿐 독립 확인되지 않았습니다" 라고 적었다. 세션 위임은 판정을 reviewer 의 코드 읽기에만 기댄다. D-040(Core 가 검증 명령을 돌려 reviewer 에 싣는다)은 CLI `loop` 에만 있다. 이 절은 그것을 세션·once 위임에도 둘지 결정 재료를 모은다 — **코드·정책 변경 없음, 엔진·Jev·`codex sandbox` 실행 없음.** 근거는 (사실: 코드·문서·로컬 기록으로 확인) · (추론) · (미검증)으로 적는다. 기록과 `hs-orc-test` 폴더는 읽기만 했다.
 
@@ -4059,6 +4059,7 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 결정 전에는 코드·SPEC 을 바꾸지 않는다.
 → **D-094** (2026-10-10 전하 결정): 결정 1 = **P1 결함부터**. 결정 2~7(W·X·V·사전 실측)은 P1 머지 뒤 다시 정한다 — **결정 대기**.
+→ **D-096** (2026-10-11 전하 결정): 결정 2~7 = 모두 §4 권장안(W1 + W2 · 사전 실측 뒤 X2 + S2 · V2a · V4a · reviewer 그대로 · V1·V3). 실측 결과와 V3 해석은 D-096.
 
 ---
 
@@ -4099,7 +4100,7 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 **영향** `core/scaffold.ts`(`runArgv` — SIGKILL 단계 뒤에 돌려준다) · `core/evidence-gather.ts`(`runCommand` 비동기·`CommandEvidence`) · `core/duo.ts`(`checks`·`checksText`·`CancelledAt`·`readOnlyVerifyNote`) · `core/delegate.ts`(`write`·`checks`) · `core/decide.ts`(`cancelledLine` 의 `verify`) · `core/session.ts`(`write` 전달·취소 문구) · `shell/cli.ts`(once·loop) · `shell/gui/service.ts` · SPEC §3·§5.
 
-**상태** 구현됨 — PR #134(Q30 조사와 같은 PR). 머지로 확정한다(전하 직접 머지). Q30 결정 2~7 은 **결정 대기**.
+**상태** 구현됨 — PR #134(Q30 조사와 같은 PR). 머지로 확정한다(전하 직접 머지). Q30 결정 2~7 은 **D-096**.
 
 ---
 
@@ -4137,6 +4138,103 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 ---
 
+## D-096 — 쓰기 위임은 `package.json` 의 lint·typecheck(·test)를 codex sandbox 안에서 기준선과 함께 돌리고, primary 직전 스크립트와 글자까지 같을 때만 돌린다 (Q30 결정 2~7, 전하 결정 2026-10-11)
+
+**배경** Q30 §6 결정 2~7 은 D-094(P1) 머지 뒤로 미뤄져 있었다. 전하가 2026-10-11 에 모두 §4 권장안으로 정했다. 결정 3(어디서)은 사전 실측(결정 7) 결과에 걸려 있어 실측을 먼저 했다.
+
+**전하 결정** (모두 Q30 §4 권장안)
+- **결정 2 (무엇을)** — W1 + W2. `lint`·`typecheck`(`type-check`)는 쓰기 행 전부, `test` 는 R01·R04·R06 에만. 패키지 매니저는 잠금 파일로(D-091 규칙). `build` 는 넣지 않는다. SPEC §5 문구를 함께 고친다. W3 은 카드에 돌 명령과 스크립트 원문(`pre`·`post` 포함)을 **읽기 전용으로 보이는 데까지만**.
+- **결정 3·7 (어디서)** — 사전 실측을 먼저 한다. 통과하면 **X2**(`codex sandbox -P :workspace` 안, `runArgv`) + **S2**(승인 시점 스크립트 스냅숏을 `sameRunTarget` 으로 대조). 실측이 실패하면(lint·tsc 가 sandbox 에서 거부) X1 + S3(primary 뒤 사람 확인, H8 과 같은 규칙).
+- **결정 4** — V2a. primary 전에 기준선을 돌린다. 기준선이 빨간 명령은 증거 요약에 "작업 전부터 실패" 로 싣고 불일치로 세지 않는다(→ `unverified`).
+- **결정 5** — V4a. 테스트 없는 프로젝트의 R01 이 Core 가 돌린 lint 통과로 `ok` 가 되는 것을 받아들인다. **D-093 결정 4 의 결과가 바뀐다** — D-093 은 "primary 의 대체 검증 보고는 산문이라 `unverified`" 였고, 이제 Core 가 lint 를 돌려 통과하면 그것이 R01 의 `command` 증거다(산문이 아니다).
+- **결정 6** — 명령이 실패해도 reviewer 는 그대로 돌린다(D-041 식 건너뛰기 없음). D-094 이후 `delegate()` 가 이미 그렇다 — 바꾸지 않는다.
+- **V1** — exit ≠ 0 은 `rework`(`contradiction()` 그대로, D-043). 결과는 reviewer 프롬프트 "검증 명령 (Core 실행)" 절 + "다시 실행하지 말라"(D-040·D-094 `checksText` 그대로).
+- **V3** — X2 일 때 `--log-denials` 의 거부는 `rework` 가 아니라 "sandbox 가 막았다" → `unverified`.
+- 결정 1(P1)은 D-094 로 이미 머지됐다.
+
+**이번 구현에서 정한 범위** (결정의 글자가 정하지 않은 것 — 전하가 다르게 보면 고친다)
+1. **sandbox 는 Core 가 고른 명령(W1 선언 + W2 스크립트)에 건다.** W1 은 이번에 세션에 처음 들어온다 — 선언 파일은 사람이 적었지만 위임마다 클릭 없이 primary 가 쓴 코드를 돌리므로 W2 와 같은 경계에 둔다(Q30 §4 "자동으로 도는 검증이 엔진보다 넓은 권한을 가지면 안 된다"). W1 은 셸 문자열이라 `codex sandbox … -- /bin/sh -c <명령>` 이다. 사람이 승인 때 적은 명령(GUI 칸·chat `--verify`·`session send --verify`)은 D-094 그대로 sandbox 밖 `sh -c` 다 — 그 노출(Q30 사실 1-10)은 이번 범위 밖이다.
+1-1. **조립이 켠다.** `DelegateInput.autoVerify`(codex 경로·실행기·이름 목록)가 있을 때만 W1·W2 를 더한다. GUI·chat·`session send` 의 세션 조립(`assembleSession`)과 GUI 단발이 넘기고, 테스트처럼 실행기를 주입한 조립은 넘기지 않는다(사람 명령만 — D-094 그대로).
+2. **W2 는 쓰기 위임(`DelegateInput.write`)일 때만 돈다**(D-094 결정 4). 행이 `writeRows` 인지가 아니라 이번 위임이 쓰기인지로 본다 — R06 처럼 읽기 행이라도 쓰기를 켜면 돈다. `test` 는 행이 R01·R04·R06 일 때만 더한다. `typecheck`·`type-check` 는 앞의 것이 이긴다. 이름 목록은 `limits.json` `verifyScripts` 에 둔다(`runScripts` 와 같은 자리).
+3. **S2 스냅숏 시점은 primary 직전**(기준선과 같은 때)이다. primary 뒤 실행 직전에 `package.json` 을 다시 읽어 `sameRunTarget`(argv·본문·`pre`·`post`)으로 대조하고, 다르면 돌리지 않고 "검증 스크립트가 위임 중 바뀌었다" 를 증거 요약에 남긴다(→ `unverified`). 카드(W3)가 보이는 것과 기준선 사이에는 primary 가 돌지 않는다.
+4. **기준선이 빨간 명령**은 primary 뒤에도 돌려 reviewer 에 보인다(`checksText` 머리에 "기준선 exit=N — 작업 전부터 실패" 표시). 작업 뒤에도 빨가면 증거에서 빼고 증거 요약에 "작업 전부터 실패" 를 남긴다 — 그리고 위임은 `ok` 가 아니다(결정 4 의 → `unverified`, 아래 리뷰 반영 1). 작업 뒤 초록이면 보통 증거다. **면제는 기준선이 실제로 돌아 실패했을 때만이다**(리뷰 반영 2). `phase` 는 쓰지 않는다 — `contradiction()` 의 기대 exit 표를 탄다.
+5. **codex 를 찾지 못하면 W2 를 돌리지 않는다** — 증거 요약에 사유를 남기고 `unverified` 다. **sandbox 밖으로 내려 돌리지 않는다**(안전선).
+6. **세션 경로의 W1 은 phase 없는 선언만** 돌린다. W2 와 같은 명령(`npm run test` ≡ `npm test` 처럼 npm 별칭 포함)이 선언·사람 명령에 이미 있으면 W2 쪽을 뺀다. `before:`·`reproduce:` 같은 phase 선언은 돌리지 않고 증거 요약에 남긴다 — phase 를 실행 시점으로 나누는 것은 CLI once·loop(D-045) 몫이다.
+7. **CLI once·loop 에는 W2 를 넣지 않는다.** 그대로 W1 선언 + `--verify`(X1)다. 사람이 플래그로 직접 부르는 경로이고 카드(W3)가 없다. 후속.
+8. 기준선은 W2·W1·사람 명령 모두에 돈다(phase 없는 명령, D-042 와 같다). 기준선 중 취소는 `cancelledAt: 'baseline'` — primary 를 시작하지 않는다.
+
+**사전 실측 (결정 7)** — 2026-10-11 00:16~00:20, codex-cli 0.160.0(`~/.local/share/mise/installs/node/latest/bin/codex` 를 셸 함수 없이 직접, `env -u CODEX_HOME` — 기본 설정에서 `-P :workspace` 가 풀렸다), **모델·엔진 호출 0**. 대상은 이 워크트리를 스크래치 폴더에 `rsync`(`.git` 제외)한 복사본이다 — `hs-orc-test`·사용자 폴더는 건드리지 않았다. `node_modules` 는 메인 체크아웃을 가리키는 심링크 그대로다(읽기만). 명령은 모두 `codex sandbox -P :workspace -C <복사본> --log-denials -- <argv>`.
+
+| # | 명령 | sandbox 밖 | sandbox 안 exit · 시간 | 거부 로그 (잡음 제외) |
+|---|---|---|---|---|
+| 1 | `npm run lint` (깨끗) | 0 · 2.84초 | **0** · 2.89초 | `file-write-create ~/.npm/_logs/…-debug-0.log` · `file-write-unlink ~/.npm/_logs/…`(옛 로그 정리) |
+| 2 | `npm run lint` (주입 오류 1건) | 1 · 2.72초 | **1** · 3.07초, 같은 eslint 출력 | 1 과 같은 `_logs` 두 줄 |
+| 3 | `npx tsc --noEmit` | — | **0** · 1.01초 | `_logs` 두 줄 |
+| 4 | `node --test` (127.0.0.1:0 listen) | 0 (pass 1) | **1** · 0.10초, `listen EPERM` | `(node) network-bind local:*:0` |
+
+- **사실 1 — lint·tsc 는 sandbox 안에서 돈다.** 결정 3 의 실측 조건("lint·tsc 가 sandbox 에서 거부")에 걸리지 않았다 → **X2 + S2** 로 간다.
+- **사실 2 — exit code 는 그대로 넘어온다.** npm 이 `~/.npm/_logs` 를 못 써도 스크립트의 exit 1 을 그대로 돌려줬다(2). 감싸개를 따로 재면 `sh -c 'exit 7'` → 7 · 안쪽 SIGTERM → 143 · 없는 안쪽 바이너리 → **71**(`sandbox-exec: execvp() … failed`) · 없는 프로필(`-P :nosuchprofile`) → **1**(`Error: default_permissions refers to unknown built-in profile`).
+- **사실 3 — 거부 로그 형식.** 안쪽 명령이 끝난 **뒤** stderr 에 머리줄 `=== Sandbox denials ===` 와 줄마다 `(<프로세스>) <seatbelt 동작> <대상>` 이 나온다. 거부가 없으면 `None found.` 한 줄이다(`/usr/bin/true` 2회). 감싸개가 시작하지 못한 경우(없는 프로필)는 머리줄이 없다. 안쪽 stdout·stderr 는 그대로 흐른다.
+- **사실 4 — 통과한 실행에도 거부가 많다.** 1 은 33줄이다. 대부분 시작 잡음(`sysctl-read …` · `file-write-data /dev/dtracehelper` · `/dev/tty` · `mach-lookup …` · `system-info …`)이고, npm 은 **매 실행** `~/.npm/_logs` 에 쓰려다 막힌다. `npm_config_logs_max=0` 은 새 로그를 안 쓰는 대신 옛 로그 11개 지우기 거부를 낸다. `npm_config_logs_dir=<$TMPDIR 아래>` 는 그 폴더에 로그를 쓰고 `_logs` 거부가 사라졌다(1·2 모두, `$TMPDIR` 은 `:workspace` 에서 쓰기 허용).
+- **사실 5 — 포트는 막힌다**(D-091 실측 1 재현). 테스트가 listen 하면 exit 1 과 `network-bind` 거부다 — 진짜 실패와 exit 로는 같다(V3 의 전제).
+- (추론) **V3 를 글자대로("거부가 있었으면 `unverified`") 두면 W2 결과가 전부 `unverified` 가 된다** — 사실 4. 이것이 결정과 부딪히는 사실이라 구현 전에 전하께 올렸다(아래 "V3 해석").
+- (추론) 감싸개 실패(없는 프로필 → exit 1)는 exit 로는 lint 실패와 같다. 머리줄이 없다는 것으로 가를 수 있다(사실 3, n=1).
+- (미검증) pnpm·yarn·bun 이 sandbox 안에서 홈에 무엇을 쓰는지. vitest·jest 의 sandbox 동작. hs-orc 자기 `npm test` 의 sandbox 동작(임시 폴더·자식 프로세스를 쓴다). `log stream` 이 거부를 놓치는 경우가 있는지. codex 다음 버전에서 머리줄 문구가 바뀌는지.
+
+**V3 해석 — 전하 결정 V3a (2026-10-11, 실측이 결정의 글자와 부딪혀 다시 물었다)** 통과한 실행에도 거부가 늘 나온다(사실 4). 그래서 "거부가 있으면 `unverified`" 를 글자대로 쓸 수 없다.
+- **V3a (권장)** — 판정 순서를 이렇게 둔다.
+  1. exit 0 → 통과. 거부는 보지 않는다 — 막힌 부수 효과가 있어도 명령은 성공했다.
+  2. exit ≠ 0 인데 머리줄이 없다 → 감싸개가 돌지 못했다 → "sandbox 를 시작하지 못했다" → `unverified`.
+  3. exit ≠ 0 이고 **차단성 거부**가 있다 → "sandbox 가 막았다" → `unverified`. 차단성 거부는 `network-*` 와 `/dev/` 밖의 `file-write-*` 다. 시작 잡음(`sysctl-read`·`mach-lookup`·`system-info`·`/dev/` 쓰기)은 세지 않는다.
+  4. 그 밖의 exit ≠ 0 → 진짜 실패 → `rework`(V1).
+  - npm 으로 도는 W2 에는 `npm_config_logs_dir=<임시 폴더>` 를 싣는다. npm 자신의 로그 쓰기가 3 에 걸려 진짜 lint 실패가 `unverified` 로 숨지 않게 한다(사실 4 — 이 설정으로 `_logs` 거부가 사라졌다).
+  - **한계 (전하 지시로 명시)**: 진짜 실패가 차단성 거부와 **겹치면** `rework` 가 아니라 `unverified` 로 낮아진다. 예: 테스트가 실제로 깨졌는데 같은 실행에서 홈 쓰기(`file-write-*`)나 네트워크(`network-*`)도 막혔으면, exit 만으로는 어느 쪽 탓인지 가를 수 없어 약한 쪽(`unverified`)으로 닫는다. 증거 요약의 "sandbox 가 막았다" 줄과 reviewer 에 실린 출력으로 사람이 본다.
+  - 위험: 동작 이름 목록은 seatbelt 어휘에 기대는 해석이다(D-046 은 출력 문구 파싱을 금했다 — 이것은 명령 출력이 아니라 sandbox 가 낸 구조화된 줄이다). 테스트가 홈에 쓰는 것과 진짜 실패가 함께면 `unverified` 로 약해진다. 반대로 `mach-lookup` 거부 탓에 실패한 테스트는 `rework` 로 남는다(보수 쪽).
+- **V3b** — 글자대로. 거부가 하나라도 있으면 `unverified`. W2 가 사실상 늘 `unverified` 라 lint 실패도 `rework` 가 되지 않는다. 권하지 않는다.
+- **V3c** — 거부 로그를 보지 않는다(`--log-denials` 없음). sandbox 가 막은 테스트(포트·네트워크)가 `rework` 로 남는다 — Q30 §3-4 가 피하려던 오탐 그대로다.
+- X 쪽은 바뀌지 않는다 — lint·tsc 는 sandbox 안에서 돈다(사실 1) → X2 + S2.
+
+**구현 기록**
+1. **선택** `core/auto-verify.ts` `autoCommands` — 선언(W1, phase 없는 것)을 먼저, 그다음 `limits.json` `verifyScripts` 의 묶음마다 `runTarget`(D-091)으로 처음 있는 스크립트를 고른다. `npm init` 자리표시 test 는 뺀다. 사람이 적은 명령·앞의 명령과 같은 것(`npm test` ≡ `npm run test`)은 한 번만이다.
+2. **실행** `runSandboxed` — `[codex, 'sandbox', '-P', ':workspace', '-C', 폴더, '--log-denials', '--', …argv]` 를 D-088 `runArgv`(비동기·취소·그룹 종료, D-094 그대로)로 띄운다. env 에 `npm_config_logs_dir=$TMPDIR/hs-orc-npm-logs`. 줄마다 받아 머리줄 앞(명령 출력)과 뒤(거부)를 가른다 — 실행기 꼬리(60줄)는 둘이 섞이고 거부가 길면 출력이 밀려난다.
+3. **판정** `sandboxVerdict`(V3a) → `delegate()` 가 `blocked`·`not-started` 를 증거에서 빼고 증거 요약에 남긴다. reviewer 에는 그대로 보이되 명령 줄에 `[codex sandbox · sandbox 가 막았다: …]` 같은 표시를 단다.
+4. **기준선** `delegate()` 가 primary 전에 모든 검증 명령(사람 명령 포함)을 한 번 돌린다. 기준선 중 취소는 `cancelledAt: 'baseline'`(결정 로그 `취소(baseline 실행 중)`, 결과 카드 "검증 기준선 실행 중 — primary 는 시작하지 않았다").
+5. **S2** primary 뒤 각 W2 명령 직전에 `scriptChanged`(= `runTarget` 재선택 + `sameRunTarget`). 바뀌었으면 돌리지 않고 증거 요약과 reviewer 절 끝에 남긴다.
+6. **조립** `SessionDeps.autoVerify` · `DelegateInput.autoVerify`. `assembleSession`(GUI·chat·`session send`)은 실행기를 주입하지 않은 project 세션에, GUI 단발은 실행기를 주입하지 않았을 때 `defaultAutoVerify()`(PATH 의 codex — `resolveBinary`)를 넘긴다. 단계 계획(`runSteps`)도 같은 값을 넘긴다.
+7. **카드(W3)** `plan` 기록 `autoVerify{commands[{cmd, body?, hooks?}], sandbox}` — GUI 배정 카드·chat·`session show` 가 읽기 전용으로 보인다. 단계 계획 카드·GUI 단발 화면에는 싣지 않았다(후속).
+8. SPEC §3(취소 단계)·§5(세션 위임에서 Core 가 고르는 명령) 문구.
+
+**검증**
+- `npm run gate` 통과 — 테스트 836 → 853 (origin/main b2f0da9 기준 · `delegate.test.ts` +11(리뷰 반영 2 포함) · `auto-verify.test.ts` 4 신규 · `session.test.ts` +1 · `limits.test.ts` +1). 엔진·모델·sandbox 호출 0 — 새 테스트는 `CommandRunner` 주입으로 프로세스를 띄우지 않는다(sandbox argv·env 를 그대로 단언).
+- **변이 8종**(각각 되돌림)이 모두 실패를 냈다: S2 대조 제거 1 · 머리줄 판정 제거 2 · 차단성 거부 판정 제거 2 · 기준선 제외 제거 1 · sandbox 대신 `sh -c` 8 · codex 없음 → 폴백 1 · npm 로그 폴더 제거 1 · 기준선 제거 11.
+- **종전 테스트 4건을 고쳤다.** `exit 1`·`exit 3` 처럼 늘 실패하는 명령을 rework 의 예로 쓰던 테스트(delegate 2 · GUI 단발 1)와 검증 명령 중 취소 테스트 1이다. 기준선이 생겨 늘 실패하는 명령은 "작업 전부터 실패" 가 되므로, 기준선에서는 통과하고 작업 뒤에만 실패(멈춤)하는 명령으로 바꿨다. 각 테스트의 뜻(실패는 rework · reviewer 가 실패를 본다 · exit 3 도 증거 · 명령 중 취소는 손자까지)은 그대로다.
+
+**미검증·위험**
+- 실제 codex sandbox 로 세션 위임 전체를 돌리지 않았다 — 사전 실측(명령 단위)과 가짜 실행기 테스트로만 확인했다. 실제 Electron 화면의 카드 표시도 보지 않았다.
+- **시간**: 기준선 때문에 검증 시간이 두 배다(실측: lint 약 2.9초 · tsc 약 1초, 이 저장소). 테스트가 긴 프로젝트(R01·R04·R06 의 `test`)는 그만큼 primary 시작이 늦다.
+- **V3a 한계**(위 "V3 해석"): 진짜 실패와 차단성 거부가 겹치면 `unverified` 로 약해진다. 홈·네트워크를 쓰는 테스트(`test` 스크립트)는 늘 "sandbox 가 막았다" 로 끝날 수 있다.
+- **V2a 한계**: 기존 실패가 있는 명령에서 새로 생긴 실패는 가려진다(exit 수준, D-042 와 같다).
+- **hs-orc 저장소 자신**을 대상으로 하면 선언(R01 `npm test`·R04 `npm run gate`)이 W2(`lint`·`type-check`·`test`)와 겹쳐 같은 검사를 여러 번 돈다(`npm run gate` 는 셋을 다 포함한다). hs-orc 자기 `npm test` 의 sandbox 동작은 재지 않았다.
+- pnpm·yarn·bun 의 sandbox 안 홈 쓰기, codex 다음 버전의 머리줄 문구는 미검증이다. 머리줄이 바뀌면 실패가 모두 "sandbox 를 시작하지 못했다"(`unverified`)로 떨어진다 — 조용한 강등이다(Q30 §4 반대 근거 a).
+- 사람이 승인 때 적은 명령은 여전히 sandbox 밖이다(범위 1).
+
+**영향** `core/auto-verify.ts`(신규) · `core/delegate.ts`(기준선·S2·V3a·`autoVerify`·`held`) · `core/evidence.ts`(`collect` 4번째 인자 `held`) · `core/duo.ts`·`core/decide.ts`(`baseline`) · `core/session.ts`(`autoVerify` 전달·카드) · `core/transcript.ts`(`plan.autoVerify`) · `data/limits.json`·`data/limits.ts`(`verifyScripts`·`verifyGroups`) · `shell/conversation.ts` · `shell/gui/service.ts` · `shell/chat.ts` · `shell/gui/renderer/app.ts` · SPEC §3·§5.
+
+**PR #137 리뷰 반영 (AO 리뷰 changes_requested, head e4da875)**
+1. **막힌 검증이 다른 통과 명령으로 `ok` 가 됐다** (P2). R01 에서 `lint` exit 0 · `test` exit 1 + `network-bind` 거부 · reviewer PASS 면, `test` 를 증거 요약에만 남기고 빼서 `lint` 하나가 `command` 요구를 채워 `ok` 였다. sandbox 를 시작하지 못한 명령·S2 로 건너뛴 명령도 같았다. → `EvidenceReport.held`(돌려야 했지만 결과를 얻지 못한 검증)를 두고, 하나라도 있으면 `satisfied` 가 아니다 → `unverified`. 대상: sandbox 가 막았다 · sandbox 를 시작하지 못했다 · 스크립트가 바뀌었다 · 작업 전부터 실패 · codex 가 없다. 나쁜 결과(`rework`)가 먼저인 순서는 그대로다(`outcomeOf`). 요약은 `검증을 다 하지 못했다 · <사유>…` 다.
+2. **실행하지 못한 기준선이 "작업 전부터 실패" 로 둔갑했다** (P2). 기준선은 exit 만 남겨, 기준선이 sandbox 에 막혀 exit 1 이고 작업 뒤에는 거부 없는 진짜 lint 실패로 exit 1 이면 새 실패가 면제됐다. 시간 초과(-1)·126·127 도 같았다. → 기준선은 판정까지 보존하고, 면제는 기준선이 **실제로 돌아(`ran`) 실패했고 돌지 못한 종료(D-046 `notRun`)가 아닐 때만**이다. 그 밖의 빨간 기준선은 reviewer 에 `기준선 exit=N — 돌지 못해 비교하지 않는다` 로 보이고, 작업 뒤 실패는 그대로 `rework` 다.
+- 회귀 테스트 2건(수정 전 코드에서 둘 다 실패를 확인): R01 `lint` 통과 + `test` 막힘·시작 못 함·스크립트 바뀜 세 경우 모두 reviewer PASS 인데 `unverified` · 막힌·시작 못 한·시간 초과 기준선 세 경우 모두 작업 뒤 거부 없는 실패가 `rework`.
+3. **`CODEX_HOME` 확인** (오케스트레이터 질문, 2026-10-11 01:3x, codex-cli **0.162.1** — 사전 실측 뒤 올라가 있었다, 모델 호출 0). 실측은 `env -u CODEX_HOME` 이었다. 제품 경로의 자식 env 에 `CODEX_HOME` 이 있으면 어떤가:
+   - (사실) `CODEX_HOME=~/.codex` · 빈 임시 폴더 → 둘 다 exit 0, 머리줄 있음. `:workspace` 는 내장 프로필이라 그 폴더의 설정과 무관하게 풀린다.
+   - (사실) 없는 경로를 가리키면 exit 1 · 머리줄 없음 · `Error: CODEX_HOME points to "…", but that path does not exist`. → "sandbox 를 시작하지 못했다" 로 증거 요약에 드러나고 1 에 따라 `unverified` 다 — 조용히 떨어지지 않는다.
+   - (사실) 0.162.1 에서도 머리줄 `=== Sandbox denials ===` 과 안쪽 exit(4 → 4)는 그대로다.
+   - → 코드는 바꾸지 않았다. 자식 env 에서 `CODEX_HOME` 을 지우면 사용자가 고른 codex 설정(claudebar 계정 등)을 우회하게 되고, 있는 폴더면 문제가 없다.
+   - (미검증) 그 폴더의 `config.toml` 이 `:workspace` 를 덮는 설정(사용자 정의 권한 프로필 등)을 가질 때.
+
+**상태** 구현됨 — 같은 PR(결정 기록·사전 실측·구현·리뷰 반영). 머지로 확정한다(전하 직접 머지).
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |
@@ -4170,4 +4268,4 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 | ~~Q27~~ | ~~지휘자(직접 답·요약·분류 폴백) claude 격리 실행의 내장 도구가 프롬프트로만 막혀 있다~~ → **D-080 확정** (T1 — `isolateArgv` 끝에 `--tools ""`, 세 역할 모두. Q26 G4 를 고르면 T2) | — |
 | ~~Q28~~ | ~~프로젝트에 오케스트레이터 세션과 워커 세션을 나눌까~~ → **D-090 확정** (화면 구분부터 — 첫 조각 S1: 역할 기록 · 칩 · `session new` 진입점. W1 워커 지휘자 유지 · T1 쓰기 워커 워크트리 · K1 종료 전파 없음 · 오케스트레이터 0~1 · 자율 지휘 열지 않음. O2·O3 는 필요가 확인된 뒤, O4·W2 버림) | — |
 | ~~Q29~~ | ~~"앱 실행해줘" 를 어떻게 처리할까 — 엔진 sandbox 가 listen 을 막고 dev 서버는 위임 모양과 맞지 않는다~~ → **D-091 확정** (A2 — GUI 실행 카드가 고른 터미널 창에서 `package.json` 의 `dev`·`start` 를 연다, H8 사람 확인 · J1 결정론 감지 + J3 지휘자 `[실행]` 절 · `npm install` 은 경고만. A1 은 필요 확인 뒤, A3 버림) | — |
-| Q30 | 세션·once 위임에도 Core 가 검증 명령을 돌려 reviewer 에 실을까 → **D-094** 로 P1(순서·비동기 실행기·읽기 전용 미실행) 확정. 남은 것: 무엇을 돌리나(W) · 어디서·권한(X·S) · 판정(V) · 사전 실측 — P1 머지 뒤 결정 | 세션 위임 검증(W·X·V) |
+| ~~Q30~~ | ~~세션·once 위임에도 Core 가 검증 명령을 돌려 reviewer 에 실을까~~ → **D-094**(P1) · **D-096**(W1 + W2 · X2 + S2 · V2a · V4a · reviewer 그대로, 2026-10-11 전하 결정 · 사전 실측) | — |

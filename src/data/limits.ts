@@ -50,11 +50,24 @@ export interface Limits {
   readonly writeRows: readonly string[];
   /** 앱 실행 카드가 고르는 `package.json` 스크립트 (D-091). 앞의 것이 이긴다. */
   readonly runScripts: readonly string[];
+  /** 쓰기 위임 뒤 Core 가 돌리는 `package.json` 스크립트 (D-096). */
+  readonly verifyScripts: VerifyScripts;
 }
+
+/** 묶음마다 앞의 이름이 이긴다 (D-096). `all` 은 모든 쓰기 위임, `rows` 는 그 행에만 더한다. */
+export interface VerifyScripts {
+  readonly all: readonly (readonly string[])[];
+  readonly rows: Readonly<Record<string, readonly (readonly string[])[]>>;
+}
+
+/** 이 행에서 고를 묶음들 — `all` 뒤에 행 몫. */
+export const verifyGroups = (scripts: VerifyScripts, rowId: string): readonly (readonly string[])[] => [...scripts.all, ...(scripts.rows[rowId] ?? [])];
 
 const LIMITS_PATH = path.resolve(import.meta.dirname, '..', '..', 'data', 'limits.json');
 
 let cached: Limits | undefined;
+
+const SCRIPT_NAME = /^[a-z][a-z0-9:_-]*$/;
 
 /** 수기 파일이라 값을 믿지 않는다. 0·음수 상한은 막지 않고, `contextChars` 가 2 미만이면 맥락 자르기가 깨진다. */
 export function checkLimits(limits: Limits): Limits {
@@ -82,8 +95,15 @@ export function checkLimits(limits: Limits): Limits {
   if (!Array.isArray(limits.writeRows) || !limits.writeRows.every((id) => typeof id === 'string' && /^R\d{2}$/.test(id))) {
     throw new Error(`limits.json 의 writeRows 는 행 id(R01 꼴) 배열이어야 한다: ${JSON.stringify(limits.writeRows)}`);
   }
-  if (!Array.isArray(limits.runScripts) || limits.runScripts.length === 0 || !limits.runScripts.every((name) => typeof name === 'string' && /^[a-z][a-z0-9:_-]*$/.test(name))) {
+  if (!Array.isArray(limits.runScripts) || limits.runScripts.length === 0 || !limits.runScripts.every((name) => typeof name === 'string' && SCRIPT_NAME.test(name))) {
     throw new Error(`limits.json 의 runScripts 는 스크립트 이름(영소문자로 시작, a-z 0-9 : _ -) 배열이어야 한다: ${JSON.stringify(limits.runScripts)}`);
+  }
+  const groups = (value: unknown): boolean =>
+    Array.isArray(value) && value.every((g) => Array.isArray(g) && g.length > 0 && g.every((name) => typeof name === 'string' && SCRIPT_NAME.test(name)));
+  const vs = limits.verifyScripts as unknown as { all?: unknown; rows?: unknown } | undefined;
+  if (!groups(vs?.all) || vs?.rows === null || typeof vs?.rows !== 'object'
+    || !Object.entries(vs.rows as Record<string, unknown>).every(([id, g]) => /^R\d{2}$/.test(id) && groups(g))) {
+    throw new Error(`limits.json 의 verifyScripts 는 { all: [[이름…]…], rows: { R01: [[이름…]…] } } 꼴이어야 한다: ${JSON.stringify(limits.verifyScripts)}`);
   }
   return limits;
 }

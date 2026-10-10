@@ -257,7 +257,7 @@ cursor  -p "<prompt>" --model gpt-5.6-sol-xhigh --output-format stream-json
 
 - 취소는 자식 프로세스를 **실제로 종료**해야 한다. 프로세스 그룹 단위 종료. 좀비 검출 테스트 필수.
   - 대화 세션의 위임 취소도 이 경로를 쓴다 — `AbortSignal` 이 `SlotRunOptions.signal` 로 내려가 어댑터 `cancel()` 을 부른다 (D-066).
-  - 검증 명령도 같다 — 같은 신호가 검증 실행기로 내려가 그룹 밖 자손까지 끝낸다(D-078). 그 자리에서 멈추면 결과는 `cancelled`(멈춘 단계 `verify`)다 (D-094).
+  - 검증 명령도 같다 — 같은 신호가 검증 실행기로 내려가 그룹 밖 자손까지 끝낸다(D-078). 그 자리에서 멈추면 결과는 `cancelled`(멈춘 단계 `verify`)다 (D-094). primary 전 기준선(D-096)에서 멈추면 멈춘 단계는 `baseline` 이고 primary 는 시작하지 않는다.
 - 진행 줄 (D-084): `RunEvent` 의 `progress` 는 claude·cursor `assistant` 줄(중간 글·`tool_use`)과 codex `command_execution`·`file_change` 에서 나온다. 결과 `text`·과금·증거에 들지 않는다. 실행기는 `SlotRunOptions.onProgress` 가 있을 때만 `progress`·`text`·`notice` 를 한 줄씩 넘기고, 대화 세션이 그것을 모아 GUI 의 "실행 중…" 아래에 보인다(기록에는 남기지 않는다).
   - 엔진이 자기 그룹 밖으로 띄운 자손(codex 는 셸 명령마다 새 그룹)도 죽인다 — 신호 전에 `ps` 로 자손을 모아 그 그룹·pid 에도 SIGTERM → 2초 → SIGKILL. 엔진이 먼저 끝나도 SIGKILL 유예는 지우지 않는다 (D-078).
 - 타임아웃은 작업 유형별 기본값을 두되 사용자가 덮어쓸 수 있다.
@@ -374,7 +374,20 @@ reviewer 판정 `FAIL` 도, `verify.json` 의 `tests` 로 선언된 **기존 테
 primary 가 실패하면 돌리지 않는다. 실행은 비동기다 — `sh -c` 를 프로세스 그룹으로 띄우고 명령당 300초 상한, 위임 취소(D-066)·시간 초과 때 그룹 밖 자손까지 끝낸다(D-078).
 GUI 는 위임을 Electron 메인 프로세스에서 도므로 동기 실행이면 명령이 끝날 때까지 취소·화면 요청을 받지 못한다.
 
-행별 **기본 검증 명령**은 `data/verify.json`(수기)에 프로젝트가 선언한다 — 제품은 추론하지 않는다.
+**세션 위임에서 Core 가 고르는 명령 (D-096).** 대화 세션·GUI 단발의 쓰기 위임은 사람이 승인 때 적은 명령 말고도 둘을 더한다 —
+프로젝트 선언(아래 `verify.json`, phase 없는 것만)과 `package.json` 의 **이름 허용 목록 스크립트**(`limits.json` `verifyScripts`:
+`lint` · `typecheck`/`type-check` 는 모든 쓰기 위임, `test` 는 1·4·6행. `build` 는 네트워크를 써서 넣지 않는다. 패키지 매니저는 잠금 파일로, D-091 과 같다).
+제품이 고르는 것은 **이름**까지다 — 스크립트 본문은 프로젝트의 것이고 카드가 원문(`pre`·`post` 포함)을 읽기 전용으로 보인다.
+이 둘은 사람 클릭 없이 primary 가 쓴 코드를 돌리므로 **`codex sandbox -P :workspace` 안에서만** 돈다(primary 와 같은 경계 — 네트워크·홈 쓰기 차단).
+codex 가 없으면 돌리지 않는다 — sandbox 밖으로 내리지 않는다. 사람이 적은 명령은 위 그대로 sandbox 밖 `sh -c` 다.
+- **기준선** — primary 전에 같은 명령을 돌린다. **사람이 적은 명령도 포함이다** — 칸·`--verify` 의 명령은 이제 바뀌지 않은 트리에서 한 번, primary 뒤에 한 번, 두 번 돈다. 작업 전에도 뒤에도 빨간 명령은 증거 요약에 `작업 전부터 실패` 로 싣고 불일치로도 증거로도 세지 않는다.
+- **스냅숏 대조** — `package.json` 스크립트는 primary 직전에 본 것과 본문·`pre`·`post` 까지 같을 때만 primary 뒤에 돈다. 다르면 `검증 스크립트가 위임 중 바뀌었다` 를 남기고 돌리지 않는다.
+- **sandbox 거부** — 명령이 실패하고 sandbox 의 거부 로그에 네트워크·`/dev/` 밖 쓰기 거부가 있으면 `rework` 가 아니라 `sandbox 가 막았다` 로 남긴다(→ `unverified`). 거부 로그 머리줄 없이 실패하면 `sandbox 를 시작하지 못했다` 다. exit 0 은 거부와 무관하게 통과다.
+- 위 셋(작업 전부터 실패 · 스크립트 변경 · sandbox 막힘·시작 못 함)과 codex 없음은 **돌려야 했지만 결과를 얻지 못한 검증**이다 — 다른 명령이 요구를 채워도 `ok` 가 아니라 `unverified` 다(진짜 실패의 `rework` 가 먼저다). 작업 전부터 실패는 기준선이 실제로 돌아 실패했을 때만이다 — 막히거나 돌지 못한 기준선으로는 작업 뒤 실패를 면제하지 않는다.
+- 명령이 실패해도 reviewer 는 돈다. 테스트 없는 프로젝트의 1행은 Core 가 돌린 `lint` 통과가 `command` 증거라 `ok` 가 될 수 있다(D-093 결정 4 의 결과가 바뀐다).
+- CLI once·loop 는 그대로다 — 선언 + `--verify` 를 sandbox 밖에서 돌린다.
+
+행별 **기본 검증 명령**은 `data/verify.json`(수기)에 프로젝트가 선언한다 — 이 파일에 대해 제품은 추론하지 않는다.
 `default` 와 행 id 선언을 합치고 `--verify` 와 다시 합친다. **선언이 없으면 빈 배열이다**:
 업무 유형만 보고 `npm test` 를 넣으면 그 프로젝트에서 틀리고, 틀린 검증으로 닫은 완료는 거짓말이 된다.
 **선언은 대상 폴더의 것이다 (D-093).** 저장소의 `data/verify.json` 은 hs-orc 자기 선언이라 대상 폴더가 hs-orc 저장소일 때만 읽는다.

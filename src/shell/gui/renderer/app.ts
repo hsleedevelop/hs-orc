@@ -56,7 +56,7 @@ interface Compaction { trigger: string; preTokens?: number; postTokens?: number 
 type Rec =
   | { kind: 'user'; turn: number; text: string }
   | { kind: 'direct'; turn: number; text: string; suggest: string | null; cost: string; notes: string[]; guide?: string[]; general?: true; read?: { slot: string; by: 'auto' | 'user' }; cut?: Cut; by?: string }
-  | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; reviewer2?: string; estimateUsd: number; notes: string[]; guide?: string[]; mode?: ApprovalMode; asked?: { code: string; text: string }[]; write?: boolean; ladder?: { stage: string; label: string; from: string; changes: string[] }; retry?: true; readOnlyBlocked?: true }
+  | { kind: 'plan'; turn: number; taskId: string; title: string; reason: string; primary: string; reviewer: string; reviewer2?: string; estimateUsd: number; notes: string[]; guide?: string[]; mode?: ApprovalMode; asked?: { code: string; text: string }[]; write?: boolean; ladder?: { stage: string; label: string; from: string; changes: string[] }; retry?: true; readOnlyBlocked?: true; autoVerify?: { commands: { cmd: string; body?: string; hooks?: { name: string; body: string }[] }[]; sandbox: boolean } }
   | { kind: 'approval'; turn: number; approved: boolean; write: boolean; by?: 'user' | 'auto'; mode?: ApprovalMode; asked?: string[] }
   | { kind: 'scaffold'; turn: number; scaffolder: string; label: string; argv: string[]; asked: { code: string; text: string }[] }
   | { kind: 'scaffold-run'; turn: number; step: 'scaffold' | 'git-init'; commands: string[][]; outcome: string; exitCode: number | null; tail: string; durationMs: number; git?: 'existing' | 'scaffolder' | 'offer'; created?: string[] }
@@ -674,6 +674,18 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       // 사다리 ④ 가 더한 reviewer (D-072) — 세 슬롯이고 판정은 AND 다.
       r.reviewer2 ? planLine(`reviewer ${r.reviewer2}  · 사다리 ④ 추가 — 둘 다 PASS 일 때만 PASS`, 5) : null,
       planLine(`비용 예상 $${r.estimateUsd}`, 3),
+      // Core 가 고른 검증 명령과 스크립트 원문 (D-096 W3) — 읽기 전용 표시다. 사람이 적는 칸은 아래 그대로다.
+      ...(r.autoVerify
+        ? [
+            h('div', { key: 'av', className: r.autoVerify.sandbox ? 'hint' : 'hint warn' }, r.autoVerify.sandbox
+              ? '쓰기 위임이면 Core 가 codex sandbox 안에서 돌린다 — 기준선 → primary → 다시 실행, 스크립트가 바뀌면 돌리지 않는다 (D-096)'
+              : 'codex 를 찾지 못해 Core 가 고른 검증 명령은 돌리지 않는다 — sandbox 밖에서는 돌리지 않는다 (D-096)'),
+            ...r.autoVerify.commands.flatMap((c, j) => [
+              h('div', { key: `av${j}`, className: 'hint mono' }, `검증 ${c.cmd}${c.body !== undefined ? `  · package.json: ${c.body}` : ''}`),
+              ...(c.hooks ?? []).map((k, m) => h('div', { key: `av${j}-${m}`, className: 'hint mono' }, `  함께 ${k.name}: ${k.body}`)),
+            ]),
+          ]
+        : []),
       // 다음 행동 안내 (D-074) — git 아닌 폴더의 쓰기 위임. manual 이면 H4 도 여기 실린다(묻는 이유가 비어서).
       ...(r.guide ?? []).map((g, j) => h('div', { key: `g${j}`, className: 'hint warn' }, g)),
       // 사다리 상향 카드는 무엇이 올라갔는지 보인다 (D-068) — 같은 요청을 올려 다시 위임하는 카드임을 첫 줄이 말한다.

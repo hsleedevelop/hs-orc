@@ -121,6 +121,11 @@ export interface EvidenceReport {
   readonly accepted: readonly Evidence[];
   /** Core 가 확인한 사실 — 판정을 바꾸지 않고 요약 끝에 붙는다 (D-093: 대상에 기존 테스트 없음). */
   readonly notes?: readonly string[];
+  /**
+   * 돌려야 했지만 결과를 얻지 못한 검증 (D-096) — sandbox 가 막았다 · sandbox 를 시작하지 못했다 · 스크립트가 바뀌었다 · 작업 전부터 실패 ·
+   * codex 가 없다. 하나라도 있으면 다른 증거가 요구를 채워도 `satisfied` 가 아니다(→ `unverified`). 나쁜 결과(`rework`)보다는 약하다.
+   */
+  readonly held?: readonly string[];
   readonly summary: string;
 }
 
@@ -168,7 +173,7 @@ export function outcomeOf(runOk: boolean, report: EvidenceReport): SettledOutcom
   return report.satisfied ? 'ok' : 'unverified';
 }
 
-export function collect(assignment: Assignment, items: readonly Evidence[], notes: readonly string[] = []): EvidenceReport {
+export function collect(assignment: Assignment, items: readonly Evidence[], notes: readonly string[] = [], held: readonly string[] = []): EvidenceReport {
   const requirements = REQUIREMENTS[assignment.id] ?? [];
   const accepted: Evidence[] = [];
   const rejected: Rejection[] = [];
@@ -198,7 +203,7 @@ export function collect(assignment: Assignment, items: readonly Evidence[], note
     }
   }
 
-  const satisfied = missing.length === 0 && requirements.length > 0;
+  const satisfied = missing.length === 0 && requirements.length > 0 && held.length === 0;
   const contradictions = accepted.map(contradiction).filter((c): c is string => c !== null);
   return {
     satisfied,
@@ -207,12 +212,16 @@ export function collect(assignment: Assignment, items: readonly Evidence[], note
     rejected,
     accepted,
     ...(notes.length > 0 ? { notes } : {}),
+    ...(held.length > 0 ? { held } : {}),
     summary: [
       contradictions.length > 0
         ? `검증 결과 완료가 아니다 — ${contradictions.join(' · ')}`
         : satisfied
           ? `증거 충족 — ${assignment.operatingCriterion}`
-          : `증거 미충족 (${missing.length}건)${rejected.length ? ` · 거절 ${rejected.length}건` : ''}`,
+          : held.length > 0 && missing.length === 0
+            ? '검증을 다 하지 못했다'
+            : `증거 미충족 (${missing.length}건)${rejected.length ? ` · 거절 ${rejected.length}건` : ''}`,
+      ...held,
       ...notes,
     ].join(' · '),
   };
