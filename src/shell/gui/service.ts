@@ -377,6 +377,7 @@ export class GuiService {
       title: payload.task,
       prompt: payload.task,
       verify: payload.verify,
+      write: payload.write === true,
       cwd: this.workdir,
       execute,
       budget: this.budget,

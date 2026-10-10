@@ -10,9 +10,9 @@ import type { AssignmentPlan } from './assign.ts';
 import type { Budget } from './budget.ts';
 import { appendDecision } from './decision-log.ts';
 import { cancelledLine, firstLine, secondLine } from './decide.ts';
-import { noTestsEvidenceNote, primaryNoTestsNote, reviewText, runDuo, type ReviewRun, type Verdict } from './duo.ts';
+import { checksText, noTestsEvidenceNote, primaryNoTestsNote, readOnlyVerifyNote, reviewText, runDuo, type CancelledAt, type ReviewRun, type Verdict } from './duo.ts';
 import { EXISTING_TEST_ROWS, collect, outcomeOf, type Evidence, type EvidenceReport, type SettledOutcome } from './evidence.ts';
-import { changedFiles, noTests, runCommand, snapshotTests, testChanges } from './evidence-gather.ts';
+import { changedFiles, noTests, runCommand, snapshotTests, testChanges, type CommandEvidence } from './evidence-gather.ts';
 import { declaredTests } from '../data/verify.ts';
 import type { EngineReport, SlotExecutor } from './executor.ts';
 import type { Journal } from './journal.ts';
@@ -31,6 +31,8 @@ export interface DelegateInput {
   /** 엔진에 보내는 프롬프트. 대화 세션은 맥락을 붙여 넘긴다 (SPEC §6.4.3). */
   readonly prompt: string;
   readonly verify: readonly string[];
+  /** 쓰기 위임인가. 읽기 전용이면 `verify` 를 돌리지 않는다 — primary 의 변경이 작업 트리에 없어 원본을 검사하게 된다 (D-094, D-040 결정 3). */
+  readonly write: boolean;
   readonly cwd: string;
   readonly execute: SlotExecutor;
   readonly budget: Budget;
@@ -50,8 +52,8 @@ export interface Delegated {
   readonly text: string;
   /** `cancelled` — 사용자가 실행 중에 멈췄다 (D-066). 실패도 성공도 아니다: 증거를 모으지 않고, 엔진 세션을 남기지 않는다. */
   readonly outcome: SettledOutcome | 'cancelled';
-  /** `outcome` 이 `cancelled` 일 때 어느 슬롯에서 멈췄는가. */
-  readonly cancelledAt?: 'primary' | 'reviewer';
+  /** `outcome` 이 `cancelled` 일 때 어느 단계에서 멈췄는가. `verify` 는 primary 뒤 검증 명령 중이다 (D-094). */
+  readonly cancelledAt?: CancelledAt;
   readonly report: EvidenceReport;
   readonly verdict: Verdict;
   /** reviewer 검증 글. reviewer 가 둘이면(D-072) reviewer 마다 머리줄을 단 한 글이다 — 기록 모양은 그대로다. */
@@ -79,6 +81,20 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
   const missingTests = EXISTING_TEST_ROWS.has(plan.assignment.id) ? noTests(input.cwd) : null;
   const prompt = missingTests ? `${input.prompt}\n\n${primaryNoTestsNote(missingTests)}` : input.prompt;
 
+  // 검증 명령은 primary 뒤·reviewer 앞에 Core 가 돌리고 결과를 reviewer 에 싣는다 (D-094). 읽기 전용이면 돌리지 않는다.
+  const verifyCmds = input.verify.filter((v) => v.trim());
+  const ran: CommandEvidence[] = [];
+  const checks = input.write && verifyCmds.length > 0
+    ? async (signal?: AbortSignal): Promise<string> => {
+        for (const cmd of verifyCmds) {
+          const r = await runCommand(cmd, input.cwd, signal ? { signal } : {});
+          if (r.cancelled) break;
+          ran.push(r.evidence);
+        }
+        return checksText(ran);
+      }
+    : undefined;
+
   // **두 슬롯을 실제로 돌린다** (D-009) — primary 만 돌리면 단일 엔진 선택기다. 사다리 ④ 배정은 reviewer 가 둘이다 (D-072).
   let duo;
   try {
@@ -89,6 +105,7 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
           : {}),
         ...(input.signal ? { signal: input.signal } : {}),
         ...(missingTests ? { noTests: missingTests } : {}),
+        ...(checks ? { checks } : {}),
       });
   } catch (error) {
     // 1차 줄을 pending 으로 버려두지 않는다 — 실행을 시작했고 끝나지 못했다.
@@ -129,10 +146,14 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
     };
   }
 
-  const evidence: Evidence[] = [...duo.evidence, ...input.verify.filter((v) => v.trim()).map((v) => runCommand(v, input.cwd))];
+  const evidence: Evidence[] = [...duo.evidence, ...ran];
   if (evidence.length > 0) evidence.push(changedFiles(input.cwd));
   if (testsBefore) evidence.push(testChanges(testsBefore, testGlobs, input.cwd));
-  const report = collect(plan.assignment, evidence, missingTests ? [noTestsEvidenceNote(missingTests)] : []);
+  const notes = [
+    ...(missingTests ? [noTestsEvidenceNote(missingTests)] : []),
+    ...(!input.write && verifyCmds.length > 0 ? [readOnlyVerifyNote(verifyCmds)] : []),
+  ];
+  const report = collect(plan.assignment, evidence, notes);
 
   journal.append({
     index: journal.records.length + 1,

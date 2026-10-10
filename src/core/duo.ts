@@ -17,6 +17,8 @@ import type { Evidence } from './evidence.ts';
 
 export type Verdict = 'pass' | 'fail' | 'unknown';
 
+export type CancelledAt = 'primary' | 'verify' | 'reviewer';
+
 /** reviewer 한 명의 실행과 그 판정 (D-072). */
 export interface ReviewRun {
   /** `Sonnet·high (claude/claude-sonnet-…)` — 증거의 `reviewer` 와 같은 모양이다. */
@@ -32,8 +34,11 @@ export interface DuoResult {
    * 취소돼 측정값이 없으면 Budget 에 넣지 않은 0 자리표시다 (D-066) — 추정치로 채우지 않는다.
    */
   readonly primaryCharge: Charge;
-  /** 사용자가 어느 슬롯에서 멈췄는가 (D-066). 끝까지 갔으면 null. primary 에서 멈추면 reviewer 는 시작하지 않는다. */
-  readonly cancelledAt: 'primary' | 'reviewer' | null;
+  /**
+   * 사용자가 어느 단계에서 멈췄는가 (D-066). 끝까지 갔으면 null. primary 에서 멈추면 reviewer 는 시작하지 않는다.
+   * `verify` — primary 뒤 검증 명령 중이다 (D-094). primary 는 끝났고 reviewer 는 시작하지 않았다.
+   */
+  readonly cancelledAt: CancelledAt | null;
   /** 첫 reviewer 실행. reviewer 를 끄면 `null`. 끈 것과 실패한 것을 구분한다. */
   readonly review: SlotRun | null;
   /** 끝까지 돈 reviewer 마다 한 줄, 돈 순서대로 (D-072). 사다리 ④ 배정이면 둘까지다. 취소된 실행은 넣지 않는다. */
@@ -90,10 +95,22 @@ export function reviewPrompt(plan: AssignmentPlan, task: string, output: string,
   ].join('\n');
 }
 
+/**
+ * Core 가 돌린 검증 명령을 reviewer 의 "검증 명령 (Core 실행)" 절 글로 (D-040). loop·once·세션이 같은 모양을 쓴다 —
+ * 명령마다 `$ [phase:]명령` · `exit=N` · 출력 꼬리 1500자.
+ */
+export function checksText(commands: readonly Extract<Evidence, { kind: 'command' }>[]): string {
+  return commands.map((c) => `$ ${c.phase ? `${c.phase}:${c.cmd}` : c.cmd}\nexit=${c.exitCode}\n${c.output.slice(-1500)}`).join('\n\n');
+}
+
 /** 기존 테스트가 없을 때 primary 프롬프트 끝에 붙이는 Core 확인 사실 (D-093) — 밝히지 않으면 reviewer 가 누락으로 본다. */
 export function primaryNoTestsNote(noTests: string): string {
   return `[Core 확인] 이 프로젝트에는 기존 테스트가 없다 (${noTests}). 결과 보고에 테스트가 없다는 사실을 밝히고, 대신 돌린 검증(lint·타입체크·빌드 등)의 명령과 결과를 적어라.`;
 }
+
+/** 읽기 전용 위임이라 검증 명령을 돌리지 않았다는 증거 요약 줄 (D-094, D-040 결정 3) — 원본을 검사한 결과를 증거처럼 쓰지 않는다. */
+export const readOnlyVerifyNote = (cmds: readonly string[]): string =>
+  `읽기 전용 위임이라 검증 명령 ${cmds.length}개를 실행하지 않았다 — ${cmds.map((c) => `\`${c}\``).join(' · ')}`;
 
 /** 증거 요약에 붙는 같은 사실 (D-093). */
 export const noTestsEvidenceNote = (noTests: string): string => `대상에 기존 테스트 없음 — ${noTests}`;
@@ -129,6 +146,11 @@ export interface DuoOptions {
   readonly signal?: AbortSignal;
   /** 대상에 기존 테스트가 없다는 Core 확인 근거 (D-093, `noTests`). reviewer 프롬프트에 싣는다. */
   readonly noTests?: string;
+  /**
+   * primary 가 성공한 뒤·reviewer 전에 Core 가 검증 명령을 돌린다 (D-094, D-040 을 once·세션으로). 돌려준 글은 reviewer 의
+   * "검증 명령 (Core 실행)" 절이 된다 — 없으면(undefined) 절을 싣지 않는다. reviewer 를 끈 실행(`skipReviewer`)에서도 돈다.
+   */
+  readonly checks?: (signal?: AbortSignal) => Promise<string | undefined>;
 }
 
 export async function runDuo(
@@ -161,17 +183,25 @@ export async function runDuo(
     return { primary, primaryCharge, review: null, reviews: [], verdict: 'unknown', evidence: [], cancelledAt: primary.cancelled === true ? 'primary' : 'reviewer' };
   }
 
-  if (options.skipReviewer === true || !primary.ok) {
-    // primary 가 실패했으면 검증할 산출물이 없다. reviewer 를 돌려 돈만 쓰지 않는다.
+  // 위에서 `signal?.aborted` 를 이미 본 탓에 TS 가 false 로 좁혀 둔다 — 검증 명령·reviewer 실행(await) 뒤에는 다시 읽어야 한다.
+  const aborted = (): boolean => signal?.aborted === true;
+  // primary 가 실패했으면 검증할 산출물이 없다. 검증 명령도 reviewer 도 돌리지 않는다.
+  if (!primary.ok) return { primary, primaryCharge, review: null, reviews: [], verdict: 'unknown', evidence: [], cancelledAt: null };
+
+  // 검증 명령은 reviewer **앞**이다 (D-094) — 뒤에 돌리면 결과가 reviewer 에 닿지 않는다(Q30 사실 1-1).
+  const checks = options.checks ? await options.checks(signal) : undefined;
+  if (aborted()) {
+    return { primary, primaryCharge, review: null, reviews: [], verdict: 'unknown', evidence: [], cancelledAt: options.checks ? 'verify' : 'reviewer' };
+  }
+
+  if (options.skipReviewer === true) {
     return { primary, primaryCharge, review: null, reviews: [], verdict: 'unknown', evidence: [], cancelledAt: null };
   }
 
   // 사다리 ④ 배정이면 reviewer 가 둘이다 (D-072). 둘 다 읽기 전용이고 같은 산출물을 서로의 판정 없이 따로 본다. 이어 붙이지 않는다(resume 없음).
   const reviewerSlots = secondReviewer ? [reviewerSlot, secondReviewer] : [reviewerSlot];
-  const prompt = reviewPrompt(plan, task, primary.text, undefined, options.noTests);
+  const prompt = reviewPrompt(plan, task, primary.text, checks, options.noTests);
   const reviews: ReviewRun[] = [];
-  // 위에서 `signal?.aborted` 를 이미 본 탓에 TS 가 false 로 좁혀 둔다 — reviewer 실행(await) 뒤에는 다시 읽어야 한다.
-  const aborted = (): boolean => signal?.aborted === true;
   let first: SlotRun | null = null;
   for (const slot of reviewerSlots) {
     // 상한을 넘겼으면 (다음) reviewer 를 시작하지 않는다 — 쓴 것은 못 되돌린다. **금액과 토큰 둘 다 본다** (D-030).

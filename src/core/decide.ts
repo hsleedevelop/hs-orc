@@ -81,7 +81,7 @@ export function unexecutedLine(
  */
 export function cancelledLine(
   first: DecisionRecord,
-  stage: 'primary' | 'reviewer',
+  stage: 'primary' | 'verify' | 'reviewer',
   now = new Date(),
 ): DecisionRecord {
   return {

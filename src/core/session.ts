@@ -201,6 +201,14 @@ export interface LadderOffer {
 /** `approve()`·자동 승인이 같이 타는 시작 경로. `by` 가 기록과 결정 로그 note 에 남는다 (D-064 결정 7). */
 type ApprovedBy = 'user' | 'auto';
 
+/** 취소된 위임이 어디서 멈췄는가 — 결과 카드 문구 (D-066). `verify` 는 primary 뒤 검증 명령 중이다 (D-094). */
+const cancelStage = (at: Delegated['cancelledAt']): string =>
+  at === 'reviewer'
+    ? 'reviewer 실행 중 — primary 는 끝났고 검증은 하지 않았다'
+    : at === 'verify'
+      ? '검증 명령 실행 중 — primary 는 끝났고 reviewer 는 시작하지 않았다'
+      : 'primary 실행 중 — reviewer 는 시작하지 않았다';
+
 export class ConversationSession {
   readonly file: string;
   private readonly deps: SessionDeps;
@@ -1101,6 +1109,7 @@ export class ConversationSession {
         title: pending.title,
         prompt,
         verify: options.verify ?? [],
+        write,
         cwd: dir,
         execute: this.tapProgress(this.deps.executorFor(write), true),
         budget,
@@ -1113,7 +1122,7 @@ export class ConversationSession {
       this.delegation = null; // 이후(기록·요약)는 취소할 위임이 아니다.
       if (d.outcome === 'cancelled') {
         // 사용자가 멈췄다 (D-066). 요약을 부르지 않고(돈을 더 쓰지 않는다) 엔진 세션은 남기지 않는다 — 다음 위임은 새로 띄운다.
-        const stage = d.cancelledAt === 'reviewer' ? 'reviewer 실행 중 — primary 는 끝났고 검증은 하지 않았다' : 'primary 실행 중 — reviewer 는 시작하지 않았다';
+        const stage = cancelStage(d.cancelledAt);
         out.push(this.append({
           kind: 'result',
           outcome: 'cancelled',
@@ -1470,6 +1479,7 @@ export class ConversationSession {
           title: `${pending.title} — 단계 ${node.id}`,
           prompt: buildStepPrompt(pending.title, node, before, context.text),
           verify: options.verify ?? [],
+          write: write && pending.writeSteps.has(node.id),
           cwd: dir,
           execute: this.tapProgress(this.deps.executorFor(write && pending.writeSteps.has(node.id)), true),
           budget,
@@ -1478,7 +1488,7 @@ export class ConversationSession {
           signal: controller.signal,
         });
         const evidence = d.outcome === 'cancelled'
-          ? `취소됨 — ${d.cancelledAt === 'reviewer' ? 'reviewer 실행 중 — primary 는 끝났고 검증은 하지 않았다' : 'primary 실행 중 — reviewer 는 시작하지 않았다'}.${write ? ' 쓰기가 켜져 있었다 — 파일이 일부 바뀌었을 수 있다(git status).' : ''}`
+          ? `취소됨 — ${cancelStage(d.cancelledAt)}.${write ? ' 쓰기가 켜져 있었다 — 파일이 일부 바뀌었을 수 있다(git status).' : ''}`
           : d.report.summary;
         out.push(this.append({
           kind: 'result',

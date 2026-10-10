@@ -1,6 +1,6 @@
 import { after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -527,13 +527,93 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
 
   it('once 는 rework(검증 명령 실패)면 exit 1, unverified 면 exit 0 이다 (D-044)', () => {
     reset();
-    const red = cli(['이 아키텍처 설계 검토해줘', '--run', '--verify', 'exit 1'], { PATH: fakeDir, REVIEWER_PASS: '1' });
+    const red = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--verify', 'exit 1'], { PATH: fakeDir, REVIEWER_PASS: '1' });
     assert.match(red.err, /outcome=rework/);
     assert.equal(red.code, 1, '테스트가 실패했는데 exit 0 — 스크립트가 다음 단계로 넘어간다.');
     reset();
-    const unknown = cli(['이 아키텍처 설계 검토해줘', '--run', '--verify', 'exit 0'], { PATH: fakeDir, REVIEWER_PASS: '1' });
+    const unknown = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--verify', 'exit 0'], { PATH: fakeDir, REVIEWER_PASS: '1' });
     assert.match(unknown.err, /outcome=unverified/);
     assert.equal(unknown.code, 0, 'R10 은 문서 절을 자동으로 못 모은다 — unverified 는 once 의 정상 결과다.');
+  });
+
+  it('once 는 검증 명령을 reviewer 앞에 돌려 결과를 reviewer 프롬프트에 싣는다 (D-094)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--verify', 'echo ONCE_MARK'], { PATH: fakeDir, REVIEWER_PASS: '1' });
+    assert.equal(r.code, 0, r.err);
+    const reviewer = readFileSync(codexArgs, 'utf8').split('<<END>>')[0] ?? '';
+    assert.match(reviewer, /--- 검증 명령 \(Core 실행\) ---\n\$ echo ONCE_MARK\nexit=0\nONCE_MARK/);
+  });
+
+  it('once 는 reviewer 를 꺼도(--no-reviewer) 검증 명령을 돌려 증거에 싣는다 (D-094)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--no-reviewer', '--verify', 'echo NR_MARK'], { PATH: fakeDir });
+    assert.match(r.err, /\+ command `echo NR_MARK` exit=0/);
+    assert.equal(existsSync(codexArgs), false, 'reviewer 가 돌았다');
+  });
+
+  for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]] as const) {
+    it(`검증 명령 중 ${signal} 면 명령과 손자를 그룹째 끝낸 뒤 ${code} 로 끝난다 — SIGTERM 을 무시하는 손자도 SIGKILL 까지 기다린다 (D-094)`, async () => {
+      reset();
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-orc-cli-sig-'));
+      const shPid = path.join(dir, 'sh.pid');
+      const childPid = path.join(dir, 'child.pid');
+      // 셸은 SIGTERM 에 바로 죽고, 출력을 떼어 낸 손자는 SIGTERM 을 무시한다(trap '' 은 exec 뒤에도 남는다).
+      // 셸이 먼저 닫혀도 SIGKILL 단계 전에 hs-orc 가 끝나면 손자가 남는다. PATH 가 fakeDir 뿐이라 sleep 은 절대 경로다.
+      const verify = `echo $$ > '${shPid}'; (trap '' TERM; exec /bin/sleep 120) >/dev/null 2>&1 & echo $! > '${childPid}'; wait`;
+      const proc = spawn(process.execPath, [CLI, '이 아키텍처 설계 검토해줘', '--run', '--write', '--verify', verify], {
+        cwd: sandbox,
+        env: { ...process.env, HS_ORC_DECISION_LOG: decisionLog, HS_ORC_JEV: 'off', PATH: fakeDir, REVIEWER_PASS: '1' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let err = '';
+      proc.stderr.setEncoding('utf8').on('data', (c: string) => (err += c));
+      const exited = new Promise<number | null>((resolve) => proc.on('close', (c) => resolve(c)));
+      const deadline = Date.now() + 20_000;
+      while (!existsSync(childPid) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+      assert.ok(existsSync(childPid), `검증 명령이 시작되지 않았다\n${err}`);
+      proc.kill(signal);
+      const exitCode = await Promise.race([exited, new Promise<'hang'>((r) => setTimeout(() => r('hang'), 15_000))]);
+      if (exitCode === 'hang') proc.kill('SIGKILL');
+      const gone = async (pid: number): Promise<boolean> => {
+        const until = Date.now() + 5_000;
+        const alive = (): boolean => {
+          try {
+            process.kill(pid, 0);
+            return true;
+          } catch {
+            return false;
+          }
+        };
+        while (alive() && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
+        return !alive();
+      };
+      const sh = Number(readFileSync(shPid, 'utf8').trim());
+      const grandchild = Number(readFileSync(childPid, 'utf8').trim());
+      const shGone = await gone(sh);
+      const grandchildGone = await gone(grandchild);
+      for (const pid of [sh, grandchild]) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // 이미 없다.
+        }
+      }
+      assert.equal(exitCode, code, err);
+      assert.ok(shGone, '검증 명령(sh)이 살아 있다');
+      assert.ok(grandchildGone, 'SIGTERM 을 무시한 손자 sleep 이 살아 있다');
+      assert.equal(existsSync(codexArgs), false, 'reviewer 가 돌았다');
+    });
+  }
+
+  it('once 는 읽기 전용이면 검증 명령을 돌리지 않고 그렇다고 남긴다 (D-094)', () => {
+    reset();
+    const marker = path.join(sandbox, 'once-ro-marker');
+    rmSync(marker, { force: true });
+    const r = cli(['이 아키텍처 설계 검토해줘', '--run', '--verify', `touch '${marker}'`], { PATH: fakeDir, REVIEWER_PASS: '1' });
+    assert.equal(existsSync(marker), false, '읽기 전용 위임에서 원본에 명령이 돌았다');
+    assert.match(r.err, /읽기 전용이라 검증 명령\(touch .*\)을 실행하지 않는다/);
+    assert.match(r.err, /읽기 전용 위임이라 검증 명령 1개를 실행하지 않았다/);
+    assert.doesNotMatch(readFileSync(codexArgs, 'utf8'), /검증 명령 \(Core 실행\)/);
   });
 
   it('reviewer 실행이 실패하면 재시도하지 않고 사람에게 올린다', () => {

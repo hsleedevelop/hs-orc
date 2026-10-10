@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadMatrix } from '../../data/matrix.ts';
@@ -33,7 +33,7 @@ describe('위임 1건 (SPEC §4 5~7단계)', () => {
     const d = await delegate({
       matrix, plan: assign(matrix, catalog, row('R01')), reason: '수동 지정 R01',
       title: '타입 고쳐줘', prompt: '[최근 대화]\n사용자: 앞\n\n[이번 요청]\n타입 고쳐줘',
-      verify: [], cwd: process.cwd(), execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
+      verify: [], write: true, cwd: process.cwd(), execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
       note: 'session 0923-1200-aaa',
     });
 
@@ -59,7 +59,7 @@ describe('위임 1건 (SPEC §4 5~7단계)', () => {
 
     await delegate({
       matrix, plan: assign(matrix, catalog, row('R01')), reason: '수동 지정 R01', title: 't', prompt: 't',
-      verify: [], cwd: dir, execute, budget, journal,
+      verify: [], write: true, cwd: dir, execute, budget, journal,
     });
 
     assert.equal(budget.charges.length, 2, 'reviewer 가 실제로 돌았다');
@@ -78,7 +78,7 @@ describe('위임 1건 (SPEC §4 5~7단계)', () => {
 
     const d = await delegate({
       matrix, plan: assign(matrix, catalog, row('R01')), reason: '수동 지정 R01', title: 't', prompt: 't',
-      verify: [], cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
+      verify: [], write: true, cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
     });
 
     const runDir = path.join(dir, 'runs', d.decisionId);
@@ -97,7 +97,7 @@ describe('위임 1건 (SPEC §4 5~7단계)', () => {
 
     const d = await delegate({
       matrix, plan: assign(matrix, catalog, row('R01')), reason: '수동 지정 R01', title: '타입 고쳐줘', prompt: '타입 고쳐줘',
-      verify: ['exit 1'], cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
+      verify: ['exit 1'], write: true, cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
     });
 
     assert.equal(d.outcome, 'rework');
@@ -120,7 +120,7 @@ describe('위임 1건 (SPEC §4 5~7단계)', () => {
     try {
       const d = await delegate({
         matrix, plan: assign(matrix, catalog, row('R01')), reason: '수동 지정 R01', title: '타입 고쳐줘', prompt: '타입 고쳐줘',
-        verify: [], cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
+        verify: [], write: true, cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
       });
       assert.equal(d.outcome, 'rework');
       assert.match(d.report.summary, /기존 테스트가 약해졌다/);
@@ -158,7 +158,7 @@ const project = (files: Record<string, string>): string => {
 const run = (id: string, dir: string, execute: SlotExecutor) =>
   delegate({
     matrix, plan: assign(matrix, catalog, row(id)), reason: `수동 지정 ${id}`, title: '날짜 넣어줘', prompt: '날짜 넣어줘',
-    verify: [], cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
+    verify: [], write: true, cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
   });
 
 describe('테스트 없는 프로젝트 (D-093)', () => {
@@ -235,5 +235,87 @@ describe('검증 선언은 대상 폴더의 것이다 (D-093)', () => {
   it('hs-orc 저장소 자신은 저장소의 data/verify.json 을 쓴다', () => {
     assert.equal(verifyConfigPath(REPO_ROOT, { ...process.env, HS_ORC_VERIFY_CONFIG: undefined }), REPO_VERIFY_PATH);
     assert.notEqual(verifyConfigPath(os.tmpdir(), { ...process.env, HS_ORC_VERIFY_CONFIG: undefined }), REPO_VERIFY_PATH);
+  });
+});
+
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** 실제 종료는 `kill -0` 로만 안다 — 기다리지 않고 단정하면 초록 거짓말이 된다. */
+const waitGone = async (pid: number, ms = 5_000): Promise<boolean> => {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (!alive(pid)) return true;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return !alive(pid);
+};
+
+describe('검증 명령은 primary 뒤·reviewer 앞에 돈다 (D-094)', () => {
+  const go = (dir: string, execute: SlotExecutor, verify: readonly string[], write: boolean, signal?: AbortSignal) =>
+    delegate({
+      matrix, plan: assign(matrix, catalog, row('R01')), reason: '수동 지정 R01', title: '날짜 넣어줘', prompt: '날짜 넣어줘',
+      verify, write, cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(), ...(signal ? { signal } : {}),
+    });
+
+  it('쓰기 위임이면 결과가 reviewer 프롬프트에 실리고, 증거에도 남는다', async () => {
+    const dir = project({});
+    const s = spy('없음\nPASS');
+    const d = await go(dir, s.execute, ['echo CHECK_MARK'], true);
+    assert.match(s.prompts.reviewer[0] ?? '', /--- 검증 명령 \(Core 실행\) ---\n\$ echo CHECK_MARK\nexit=0\nCHECK_MARK/);
+    assert.match(s.prompts.reviewer[0] ?? '', /Core 가 이미 실행했다/);
+    assert.ok(d.report.accepted.some((e) => e.kind === 'command' && e.cmd === 'echo CHECK_MARK' && e.exitCode === 0));
+  });
+
+  it('실패한 명령도 reviewer 가 보고, 판정은 rework 다', async () => {
+    const dir = project({});
+    const s = spy('없음\nPASS');
+    const d = await go(dir, s.execute, ['echo RED_MARK; exit 3'], true);
+    assert.match(s.prompts.reviewer[0] ?? '', /exit=3\nRED_MARK/);
+    assert.equal(d.outcome, 'rework');
+  });
+
+  it('읽기 전용 위임에서는 돌리지 않고, 그 사실이 증거 요약에 남는다', async () => {
+    const dir = project({});
+    const s = spy('없음\nPASS');
+    const d = await go(dir, s.execute, ['touch ran-marker'], false);
+    assert.equal(existsSync(path.join(dir, 'ran-marker')), false, '원본에 명령이 돌았다');
+    assert.doesNotMatch(s.prompts.reviewer[0] ?? '', /검증 명령 \(Core 실행\)/);
+    assert.equal(d.report.accepted.some((e) => e.kind === 'command'), false);
+    assert.match(d.report.summary, /읽기 전용 위임이라 검증 명령 1개를 실행하지 않았다 — `touch ran-marker`/);
+  });
+
+  it('명령이 도는 동안 이벤트 루프를 막지 않는다 — GUI 메인 프로세스가 취소·화면 요청을 받는다', async () => {
+    const dir = project({});
+    const s = spy('없음\nPASS');
+    let ticks = 0;
+    const timer = setInterval(() => (ticks += 1), 20);
+    try {
+      await go(dir, s.execute, ['sleep 0.6'], true);
+    } finally {
+      clearInterval(timer);
+    }
+    assert.ok(ticks >= 10, `명령 0.6초 동안 타이머가 ${ticks}번만 돌았다`);
+  });
+
+  it('명령 중에 취소하면 손자까지 끝내고 reviewer 를 띄우지 않는다 (D-066·D-078)', async () => {
+    const dir = project({});
+    const pidFile = path.join(dir, 'grandchild.pid');
+    const s = spy('없음\nPASS');
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 400);
+    const started = Date.now();
+    const d = await go(dir, s.execute, [`sleep 120 >/dev/null 2>&1 & echo $! > '${pidFile}'; wait`], true, controller.signal);
+    assert.ok(Date.now() - started < 10_000, '취소가 명령을 멈추지 못했다');
+    assert.equal(d.outcome, 'cancelled');
+    assert.equal(d.cancelledAt, 'verify');
+    assert.equal(s.prompts.reviewer.length, 0);
+    assert.ok(await waitGone(Number(readFileSync(pidFile, 'utf8').trim())), '손자 sleep 이 살아 있다');
   });
 });
