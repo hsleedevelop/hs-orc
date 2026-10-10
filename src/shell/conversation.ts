@@ -9,6 +9,7 @@ import { loadMatrix } from '../data/matrix.ts';
 import { Budget } from '../core/budget.ts';
 import { uncommittedFiles } from '../core/evidence-gather.ts';
 import { createExecutor, type SlotExecutor } from '../core/executor.ts';
+import { defaultAutoVerify } from '../core/auto-verify.ts';
 import type { Journal } from '../core/journal.ts';
 import { ConversationSession } from '../core/session.ts';
 import { readSessionLog, replaySpend, type SessionKind } from '../core/transcript.ts';
@@ -64,6 +65,9 @@ export function assembleSession(input: AssembleInput): ConversationSession {
     ...(approvalMode ? { approvalMode } : {}),
     ...(autoStart === false ? { autoStart } : {}),
     ...(runCards ? { runCards } : {}),
+    // 쓰기 위임 뒤 Core 가 고른 검증 명령을 codex sandbox 안에서 돌린다 (D-096). 실행기를 주입한 조립(테스트)에서는 켜지 않는다 —
+    // 가짜 엔진 뒤에 진짜 sandbox·npm 이 돌면 안 된다. 스크래치는 쓰기가 없다.
+    ...(execute === undefined && kind === 'project' ? { autoVerify: defaultAutoVerify() } : {}),
     // 카드가 git 아닌 폴더의 쓰기 거절을 미리 말한다 (D-074). 실행기의 `nonGit` 과 같은 판정이다. 세션은 카드를 세울 때 `gitProbe` 로 다시 본다 (D-088) —
     // 실행기는 조립 때 값 그대로다: git 이 된 폴더의 읽기 전용 위임에 `--skip-git-repo-check` 가 남는 것은 무해하고(D-073 사실 9), 쓰기에는 원래 붙지 않는다.
     inGit,

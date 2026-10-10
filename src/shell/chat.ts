@@ -48,6 +48,18 @@ export function renderRecord(r: TranscriptRecord, card?: ReturnType<typeof cardA
         `       reviewer ${r.reviewer}`,
         ...(r.reviewer2 ? [`       reviewer ${r.reviewer2}  (사다리 ④ 추가 — 둘 다 PASS 일 때만 PASS)`] : []),
         `비용   $${r.estimateUsd} (추정)`,
+        // Core 가 고른 검증 명령과 스크립트 원문 (D-096 W3) — 읽기 전용 표시다.
+        ...(r.autoVerify
+          ? [
+              r.autoVerify.sandbox
+                ? '검증   쓰기 위임이면 Core 가 codex sandbox 안에서 돌린다 — 기준선 → primary → 다시 실행 (D-096)'
+                : '검증   codex 를 찾지 못해 Core 가 고른 검증 명령은 돌리지 않는다 (D-096)',
+              ...r.autoVerify.commands.flatMap((c) => [
+                `       ${c.cmd}${c.body !== undefined ? `  (package.json: ${c.body})` : ''}`,
+                ...(c.hooks ?? []).map((k) => `       함께 ${k.name}: ${k.body}`),
+              ]),
+            ]
+          : []),
         // 다음 행동 안내 (D-074) — manual 이면 H4 도 여기 실린다(묻는 이유가 비어서).
         ...(r.guide ?? []).map((g) => `안내   ${g}`),
         ...ladderLines(r.ladder).map((l, i) => (i === 0 ? l : `       ${l}`)),

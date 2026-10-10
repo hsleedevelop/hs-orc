@@ -40,5 +40,14 @@
     "start"
   ],
   "runScriptsRationale": "앱 실행 카드가 고르는 package.json 스크립트 (D-091). 앞의 것이 이긴다 — dev 가 있으면 dev. hs-orc 는 이 이름만 고르고 '<패키지 매니저> run <이름>' 을 사람이 고른 터미널 창에서 연다. 스크립트 본문은 프로젝트 내용이라 카드에 원문을 보인다. npm install 은 넣지 않는다 — node_modules 가 없으면 카드가 알리기만 한다.",
+  "verifyScripts": {
+    "all": [["lint"], ["typecheck", "type-check"]],
+    "rows": {
+      "R01": [["test"]],
+      "R04": [["test"]],
+      "R06": [["test"]]
+    }
+  },
+  "verifyScriptsRationale": "쓰기 위임 뒤 Core 가 돌리는 package.json 스크립트 (D-096 — Q30 W2). 묶음마다 앞의 이름이 이긴다(typecheck 가 있으면 type-check 는 안 돈다). all 은 모든 쓰기 위임, rows 는 운영 기준이 테스트를 말하는 행(R01·R04·R06)에만 더한다. build 는 네트워크를 써서 넣지 않는다. codex sandbox -P :workspace 안에서만 돌고, primary 직전 스냅숏과 글자까지 같을 때만 돈다(S2). npm init 자리표시 test 는 돌리지 않는다.",
   "contextRationale": "대화 세션 맥락 (SPEC §6.4.3, D-031). rolling 요약 없이 최근 N턴 자르기로 시작한다. 엔진 원문은 싣지 않으므로 6턴·6000자면 요약·질문 수준의 대화가 들어간다."
 }

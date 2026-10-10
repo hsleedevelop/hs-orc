@@ -16,6 +16,9 @@ import { readDecisions } from '../decision-log.ts';
 import { JevUnavailableError, type JevChoiceAnswer, type JevChoiceRequest, type RowClassifier } from '../../adapters/jev.ts';
 import { appendRecord, replaySpend, transcriptPath, type TranscriptRecord } from '../transcript.ts';
 import { readUnclassified, unclassifiedLogPath } from '../unclassified.ts';
+import { loadLimits } from '../../data/limits.ts';
+import { DENIAL_HEADER } from '../auto-verify.ts';
+import type { CommandRunner } from '../scaffold.ts';
 
 const isolate = () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-log-'));
@@ -1330,6 +1333,31 @@ describe('대화 비우기 (D-092)', () => {
     const primaries = r.calls.filter((c) => c.role === 'primary');
     assert.deepEqual(primaries.map((c) => c.resume), [undefined, undefined]);
     assert.equal(primaries[1]?.prompt, '이 타입 에러 고쳐줘', '비운 앞 대화를 싣지 않는다');
+  });
+});
+
+describe('Core 가 고른 검증 명령 (D-096)', () => {
+  it('카드가 돌 명령과 스크립트 원문(pre 포함)을 읽기 전용으로 보이고, 쓰기 승인이면 같은 명령이 sandbox 로 돈다', async () => {
+    isolate();
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-'));
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ scripts: { lint: 'eslint .', prelint: 'node gen.js' } }), 'utf8');
+    const argvs: (readonly string[])[] = [];
+    const runner: CommandRunner = (argv, options) => {
+      argvs.push(argv);
+      options.onLine?.(DENIAL_HEADER);
+      return Promise.resolve({ outcome: 'ok', exitCode: 0, tail: '', durationMs: 1 });
+    };
+    const session = new ConversationSession({ approvalMode: 'manual',
+      matrix, catalog, kind: 'project', dir, id: '1011-1200-aaa',
+      budget: new Budget(20, 2_000_000), journal: new Journal(), conduct: conductSpy().exec, executorFor: () => delegateSpy().exec,
+      writeRows: [], autoVerify: { codex: '/bin/codex', runner, scripts: loadLimits().verifyScripts },
+    });
+    const card = (await session.send('이 타입 에러 고쳐줘')).find((r) => r.kind === 'plan');
+    assert.ok(card?.kind === 'plan');
+    assert.deepEqual(card.autoVerify, { commands: [{ cmd: 'npm run lint', body: 'eslint .', hooks: [{ name: 'prelint', body: 'node gen.js' }] }], sandbox: true });
+    assert.equal(argvs.length, 0, '카드만 섰는데 돌았다');
+    await session.approve({ write: true });
+    assert.deepEqual(argvs.map((a) => a.slice(1, 4).concat(a.slice(-3))), [['sandbox', '-P', ':workspace', 'npm', 'run', 'lint'], ['sandbox', '-P', ':workspace', 'npm', 'run', 'lint']]);
   });
 });
 

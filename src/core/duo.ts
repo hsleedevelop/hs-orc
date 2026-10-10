@@ -17,7 +17,8 @@ import type { Evidence } from './evidence.ts';
 
 export type Verdict = 'pass' | 'fail' | 'unknown';
 
-export type CancelledAt = 'primary' | 'verify' | 'reviewer';
+/** `baseline` — primary 전 검증 기준선 중이다 (D-096). primary 는 시작하지 않았다. */
+export type CancelledAt = 'baseline' | 'primary' | 'verify' | 'reviewer';
 
 /** reviewer 한 명의 실행과 그 판정 (D-072). */
 export interface ReviewRun {

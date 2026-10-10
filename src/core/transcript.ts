@@ -21,6 +21,7 @@ import type { ApprovalMode, OrchestratorChoice } from '../data/limits.ts';
 import type { AskReason } from './approval.ts';
 import type { LadderApplied } from './ladder.ts';
 import type { CacheWrite, EngineCompaction } from '../adapters/types.ts';
+import type { AutoVerifyShown } from './auto-verify.ts';
 
 /** `plan` 기록에 남는 사다리 적용 (D-068) — 적용 내용에 더해 어느 결정에서 올랐고 원래 행 근거가 무엇이었나. */
 export interface LadderRecord extends LadderApplied {
@@ -99,6 +100,11 @@ export type TranscriptEntry =
       readonly retry?: true;
       /** git 아닌 폴더의 쓰기 행이라(H6) 읽기 전용으로는 승인하지 않는다 (D-088). 쓰기를 켜면 승인할 수 있다(H4). 옛 기록에는 없다. */
       readonly readOnlyBlocked?: true;
+      /**
+       * 쓰기 위임이면 Core 가 codex sandbox 안에서 돌릴 검증 명령과 스크립트 원문 (D-096 W3). 읽기 전용 표시다 — 고르는 칸이 아니다.
+       * `sandbox` 가 false 면 codex 를 찾지 못해 돌리지 않는다. 옛 기록·조립이 끈 세션에는 없다.
+       */
+      readonly autoVerify?: { readonly commands: readonly AutoVerifyShown[]; readonly sandbox: boolean };
     }
   | {
       readonly kind: 'approval';

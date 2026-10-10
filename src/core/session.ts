@@ -35,13 +35,14 @@ import { buildContext, type ContextLimits } from './context.ts';
 import { appendDecision } from './decision-log.ts';
 import { firstLine, unexecutedLine } from './decide.ts';
 import { delegate, type Delegated } from './delegate.ts';
+import { autoCommands, shownOf, type AutoVerify } from './auto-verify.ts';
 import { estimateUsd, type EngineReport, type SlotExecutor } from './executor.ts';
 import type { Journal } from './journal.ts';
 import { LadderError, planLadder, requestStage, type EscalationStage } from './ladder.ts';
 import { route as routeTask, routeWithFallback } from './pipeline.ts';
 import { buildReadPrompt, readerSlot, slotLine } from './reader.ts';
 import { readUnclassifiedWithLegacy, recordUnclassified, suggestRows, unclassifiedLogPath } from './unclassified.ts';
-import { markStateOrigin } from './project-state.ts';
+import { markStateOrigin, verifyConfigPath } from './project-state.ts';
 import {
   appendRecord,
   isSessionRole,
@@ -123,6 +124,11 @@ export interface SessionDeps {
   readonly runCards?: boolean;
   /** 실행 카드가 고르는 스크립트 (D-091). 없으면 `limits.json` 의 `runScripts`. */
   readonly runScripts?: readonly string[];
+  /**
+   * 쓰기 위임에 Core 가 고른 검증 명령(선언 + `package.json` 스크립트)을 codex sandbox 안에서 더한다 (D-096). 조립이 넘기고,
+   * 카드가 돌 명령과 스크립트 원문을 읽기 전용으로 보인다(W3). 없으면(실행기를 주입한 테스트) 사람이 준 명령만이다.
+   */
+  readonly autoVerify?: AutoVerify;
 }
 
 /** `plan.reason` 에 남는 출처 — 행을 고른 것이 지휘자다. `수동 지정` 이면 사람이 고른 것으로 적힌다 (`pipeline.ts` reasonLabel). */
@@ -201,13 +207,15 @@ export interface LadderOffer {
 /** `approve()`·자동 승인이 같이 타는 시작 경로. `by` 가 기록과 결정 로그 note 에 남는다 (D-064 결정 7). */
 type ApprovedBy = 'user' | 'auto';
 
-/** 취소된 위임이 어디서 멈췄는가 — 결과 카드 문구 (D-066). `verify` 는 primary 뒤 검증 명령 중이다 (D-094). */
+/** 취소된 위임이 어디서 멈췄는가 — 결과 카드 문구 (D-066). `verify` 는 primary 뒤 검증 명령 중(D-094), `baseline` 은 primary 전 기준선 중이다(D-096). */
 const cancelStage = (at: Delegated['cancelledAt']): string =>
   at === 'reviewer'
     ? 'reviewer 실행 중 — primary 는 끝났고 검증은 하지 않았다'
     : at === 'verify'
       ? '검증 명령 실행 중 — primary 는 끝났고 reviewer 는 시작하지 않았다'
-      : 'primary 실행 중 — reviewer 는 시작하지 않았다';
+      : at === 'baseline'
+        ? '검증 기준선 실행 중 — primary 는 시작하지 않았다'
+        : 'primary 실행 중 — reviewer 는 시작하지 않았다';
 
 export class ConversationSession {
   readonly file: string;
@@ -662,6 +670,7 @@ export class ConversationSession {
     const guide = [...warnings, ...this.scaffoldGuide(write || rowWrite, inGit)];
     // H6 은 묻는 데서 그치지 않고 읽기 전용 승인을 막는다 (D-088) — 승인하면 읽기 전용 헛실행이 과금되며 돈다(1005-2233-dc3).
     const readOnlyBlocked = readOnlyWriteRow(rowWrite, write, inGit) !== null;
+    const autoVerify = this.autoVerifyShown(plan.assignment.id);
     this.pending = { title, plan, reason, write, check, ...(ladder ? { ladder } : {}), ...(retry ? { retry } : {}), ...(readOnlyBlocked ? { readOnlyBlocked } : {}) };
     this.stateValue = 'blocked';
     return this.append({
@@ -681,7 +690,19 @@ export class ConversationSession {
       ...(ladder ? { ladder } : {}),
       ...(retry ? { retry: true as const } : {}),
       ...(readOnlyBlocked ? { readOnlyBlocked: true as const } : {}),
+      ...(autoVerify ? { autoVerify } : {}),
     });
+  }
+
+  /**
+   * 쓰기 위임이면 Core 가 돌릴 검증 명령 (D-096 W3) — 카드에 읽기 전용으로 보인다. 실제로 도는 목록은 위임 시작 때 다시 고르고
+   * (사람이 칸에 적은 같은 명령은 빠진다), 그 스냅숏과 primary 뒤 스크립트가 다르면 돌지 않는다(S2). project 세션만이다 — 스크래치는 쓰기가 없다.
+   */
+  private autoVerifyShown(rowId: string): Extract<TranscriptRecord, { kind: 'plan' }>['autoVerify'] {
+    const auto = this.deps.autoVerify;
+    if (!auto || this.deps.kind !== 'project') return undefined;
+    const { commands } = autoCommands(this.deps.dir, rowId, auto.scripts, verifyConfigPath(this.deps.dir), []);
+    return commands.length > 0 ? { commands: shownOf(commands), sandbox: auto.codex !== null } : undefined;
   }
 
   /**
@@ -1116,6 +1137,7 @@ export class ConversationSession {
         journal,
         note: this.noteOf(pending, by),
         signal: controller.signal,
+        ...(this.deps.autoVerify ? { autoVerify: this.deps.autoVerify } : {}),
         ...(ref ? { resumePrimary: ref.id, ...(ref.baseline ? { resumeBaseline: ref.baseline } : {}) } : {}),
       });
       returned = true;
@@ -1486,6 +1508,7 @@ export class ConversationSession {
           journal,
           note: `session ${this.deps.id} · 승인 user · 단계 계획 ${node.id}`,
           signal: controller.signal,
+          ...(this.deps.autoVerify ? { autoVerify: this.deps.autoVerify } : {}),
         });
         const evidence = d.outcome === 'cancelled'
           ? `취소됨 — ${cancelStage(d.cancelledAt)}.${write ? ' 쓰기가 켜져 있었다 — 파일이 일부 바뀌었을 수 있다(git status).' : ''}`
