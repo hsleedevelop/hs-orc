@@ -115,7 +115,11 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
     }
   }
   const runCheck = async (c: Check, signal?: AbortSignal): Promise<CheckRun> => {
-    if (c.auto && autoVerify?.codex) return runSandboxed({ ...autoVerify, codex: autoVerify.codex }, c.auto, input.cwd, signal ? { signal } : {});
+    // Core 가 고른 명령에는 sandbox 밖 길이 없다 (D-096 안전선) — codex 가 없으면 위에서 목록에 넣지 않았고, 여기서도 던진다.
+    if (c.auto) {
+      if (!autoVerify?.codex) throw new Error(`sandbox 없이 Core 가 고른 검증 명령을 돌리려 했다: ${c.cmd}`);
+      return runSandboxed({ ...autoVerify, codex: autoVerify.codex }, c.auto, input.cwd, signal ? { signal } : {});
+    }
     const r = await runCommand(c.cmd, input.cwd, signal ? { signal } : {});
     return { ...r, verdict: { kind: 'ran' } };
   };
