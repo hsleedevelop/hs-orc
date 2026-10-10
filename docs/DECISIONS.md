@@ -4103,6 +4103,39 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 ---
 
+## D-095 — 옛 자리(`<폴더>/.hs-orc/sessions`) 목록은 시간 제한을 건 자식 프로세스로 읽고, 넘기면 없는 것으로 본다 (hs-orc-95 발견 · 조사 hs-orc-96, 2026-10-11)
+
+**배경** PR #135(테스트 격리)를 만들던 hs-orc-95 가 테스트에서 `uv_fs_scandir → __opendir2 → open` 이 5분 넘게 멈춘 것을 봤다(iCloud `claude_workspace/.hs-orc/sessions`). #135 는 테스트만 가뒀다. 제품 경로: `chat --resume`·`session send|show|ls`·이름 겹침 검사는 `knownSessions` 가, GUI 사이드바는 4초마다 IPC `conv-list` → 메인 프로세스의 동기 `GuiService.conversations()` 가 최근 폴더마다 `listSessions` → 옛 자리 `readdirSync` 를 한다.
+
+**재현 (사실, 2026-10-11 이 기계)** 실제 `~/.hs-orc/projects.json` 에 `claude_workspace`(iCloud)가 있다. 스크래치 `HS_ORC_PROJECTS`·`HS_ORC_PROJECT_STATE`·`HS_ORC_SCRATCH` 로:
+- `hs-orc session ls` — 최근 목록이 `claude_workspace` 면 20초 넘게 안 끝난다(스택 `uv_fs_scandir`). 대조군(같은 iCloud 의 `shared_workspace/hs-orc`)은 0.1초.
+- `GuiService.conversations()` 를 Electron 없이 직접 부르면 15초 넘게 안 돌아온다. 대조군 8ms. 메인 프로세스에서 이것이 멈추면 앱 전체가 언다(Electron 실기는 미검증 — 같은 함수가 `ipcMain.handle` 안에서 동기로 돈다는 것은 코드 사실).
+- 그 폴더에서 멈추는 것은 **디렉터리 open(readdir)뿐**이다 — `stat`·`existsSync`·`realpath`·없는 파일 `readFileSync` 는 0ms. 멈춘 프로세스는 SIGTERM·SIGKILL 로 죽는다. `CloudDocs` 루트·`claude_workspace` 자체의 readdir 도 멈췄다 — 원인은 이 기계의 iCloud(File Provider) 상태로 보인다(추론, 확인 안 함). hs-orc 의 결함은 사용자 폴더에 기한 없는 동기 readdir 를 지연에 민감한 경로에서 한다는 것이다.
+
+**결정**
+1. **옛 자리 목록만 바꾼다** — `legacySessionIds`(core `transcript.ts`). 새 자리(홈의 `~/.hs-orc/projects/<키>/sessions`)는 그대로 프로세스 안에서 읽는다.
+2. **없으면 묻지 않는다** — `existsSync` 로 먼저 본다(멈추지 않는다). D-071 이후 폴더는 거의 다 여기서 끝난다.
+3. **있으면 자식 프로세스로, 2초 안에** — `spawnSync(process.execPath, ['-e', …readdirSync…])`, `timeout 2000` · `killSignal SIGKILL`. Electron 메인의 `execPath` 는 Electron 이라 `ELECTRON_RUN_AS_NODE=1` 을 싣는다. `ls` 를 쓰지 않는 것은 GUI 에 win32 분기가 있어서다. 넘기거나 실패하면 빈 목록 — 세션을 한 번도 안 연 폴더와 같은 대우다(`sessionIds` 의 기존 규칙).
+4. **프로세스 동안 한 번만** — 성공·실패 모두 폴더별로 기억한다. hs-orc 는 옛 자리에 쓰지 않으므로(D-071) 목록이 바뀌지 않는다. 그래서 GUI 는 멈춘 폴더 하나당 앱 수명에 한 번 2초를 기다리고 그 뒤 갱신은 0~1ms 다. 정상 폴더의 비용은 자식 하나 — Node 약 20ms, Electron 바이너리 약 0.2초 — 역시 한 번이다.
+
+**버린 것** 최근 폴더의 옛 자리를 아예 안 읽기 — 그 폴더의 옛 세션을 id 로 못 찾게 되어 D-071 의 읽기 폴백이 깨진다(이 기계의 hs-orc 저장소에도 옛 세션 1개가 있다). `fs.promises.readdir` + `Promise.race` — 멈춘 readdir 가 libuv 스레드 풀(기본 4)을 하나씩 영구히 잡아, 4초 갱신이면 곧 메인의 모든 비동기 fs 가 멈춘다. 자식 프로세스만 죽여서 자원을 돌려받는다. 워커 스레드 — 시스템 호출 중인 스레드는 `terminate` 로 못 멈춘다. 실패를 시간 뒤 다시 시도 — 갱신마다 2초씩 멈추는 순간이 되돌아온다. 지금은 앱을 다시 켜면 다시 본다.
+
+**검증**
+- `npm run gate` 통과 — 테스트 835 → 836 (`transcript.test.ts` 1: 시간 초과 모양이면 빈 목록이고 두 번째 호출은 기다리지 않는다). 기억 줄을 빼면 이 테스트가 실패함을 확인했다. 옛 자리 목록의 기존 테스트(옛 자리 + 새 자리 합치기)는 실제 자식 프로세스로 통과한다.
+- 수정 뒤 같은 재현: `session ls` 2.07초에 끝나고(`세션 없음`), `conversations()` 첫 호출 2008ms · 다음 세 번 0~1ms. 대조군은 옛 자리 세션 `0923-2152-a10` 을 그대로 보여 준다(0.09초 · 29ms).
+- 저장소의 Electron 바이너리(`node_modules` 의 `Electron.app`, fuse 설정 없음)에 `ELECTRON_RUN_AS_NODE=1` 로 같은 자식 스크립트를 돌려 옛 자리 목록이 나옴을 확인했다(0.18초).
+
+**미검증·위험**
+- 멈춘 폴더에 옛 세션이 있으면 그 프로세스 동안 목록·`chat --resume <id>` 에서 안 보인다("그런 세션이 없다"). 화면에 "못 읽은 폴더" 를 알리는 일은 하지 않았다.
+- 목록 다음의 파일 읽기는 그대로다 — `readSessionLog` 의 옛 자리 `readFileSync`, `describeProject`·`depStatus` 의 `package.json`·`.git` 확인. 이번 폴더에서는 파일 open 이 0ms 였지만, 내려받지 않은(evicted) iCloud *파일*을 열면 내려받기를 기다릴 수 있다(미실측).
+- Electron 실기에서 앱이 실제로 얼었다가 2초 뒤 풀리는지는 돌려 보지 않았다 — 같은 함수를 Node 에서 쟀다.
+
+**영향** `core/transcript.ts`(`legacySessionIds`) · `core/__tests__/transcript.test.ts` · SPEC §6.4.1 한 줄.
+
+**상태** 구현됨 — 같은 PR. 머지로 확정한다(전하 직접 머지).
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |

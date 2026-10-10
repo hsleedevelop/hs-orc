@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   appendRecord,
+  legacySessionIds,
   legacyTranscriptPath,
   listSessions,
   prepareSession,
@@ -112,6 +113,17 @@ describe('대화 기록 (SPEC §6.4.1)', () => {
     assert.equal(loaded.broken, 1);
     assert.deepEqual(listSessions(dir, 'project').map((s) => s.id).sort(), ['new', 'old']);
     assert.equal(readTranscript(legacyTranscriptPath(dir, 'old')).records.length, 1);
+  });
+
+  it('옛 자리 목록이 시간 안에 안 오면(iCloud readdir 멈춤) 빈 목록으로 넘어가고 다시 기다리지 않는다 (D-095)', () => {
+    const dir = tmp();
+    appendRecord(legacyTranscriptPath(dir, 'old'), user(1, '옛 자리'));
+    const folder = path.dirname(legacyTranscriptPath(dir, 'x'));
+    let calls = 0;
+    const timedOut = () => { calls += 1; return { status: null, stdout: '' }; }; // spawnSync 의 timeout 모양
+    assert.deepEqual(legacySessionIds(folder, timedOut), []);
+    assert.deepEqual(legacySessionIds(folder, timedOut), []);
+    assert.equal(calls, 1);
   });
 });
 
