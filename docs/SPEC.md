@@ -442,7 +442,7 @@ Evaluator에는 reviewer 슬롯 모델을 쓴다 — 매트릭스의 독립 리�
 | `scratch` | `~/.hs-orc/scratch/<id>/` 를 세션 시작 때 만든다 (`HS_ORC_SCRATCH` 로 뿌리를 바꾼다). git 아님, **쓰기 켤 수 없음** | `~/.hs-orc/projects/<그 폴더 키>/sessions/<id>.jsonl` (D-071) |
 
 - **작업 폴더에는 아무것도 만들지 않는다** (D-071) — 빈 폴더를 요구하는 스캐폴더(`npx create-expo-app .` 등)가 위임에서 돌아야 한다. 원시 로그(`runs/`)·미분류 누적(`unclassified.jsonl`)도 같은 `projects/<폴더 키>/` 아래다. 폴더 키 = `<basename>-<실제 경로 sha256 앞 8자>`, 뿌리는 `HS_ORC_PROJECT_STATE` 로 바꾼다.
-- D-071 이전 기록(`<폴더>/.hs-orc/sessions/<id>.jsonl`)은 **읽기만 한다** — 목록에 함께 뜨고, 같은 세션은 옛 자리 → 새 자리 순으로 이어 읽는다. 옮기거나 지우지 않는다.
+- D-071 이전 기록(`<폴더>/.hs-orc/sessions/<id>.jsonl`)은 **읽기만 한다** — 목록에 함께 뜨고, 같은 세션은 옛 자리 → 새 자리 순으로 이어 읽는다. 옮기거나 지우지 않는다. 옛 자리 목록은 시간 제한(2초)을 건 자식 프로세스로 읽고, 넘기면 없는 것으로 본다 — iCloud 폴더의 readdir 가 멈출 수 있다 (D-095).
 
 - `id` 는 결정 로그와 같은 `MMDD-HHMM-xxx` (§8).
 - 기록은 **append-only JSONL** 이다. 한 줄 = 한 사건:

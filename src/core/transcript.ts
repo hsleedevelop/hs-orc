@@ -5,7 +5,8 @@
  * 엔진 쪽 기록을 진실로 삼으면 교차 벤더 순간 대화가 끊긴다.
  * append-only JSONL. 결정 로그와 같은 규칙으로 읽는다: 깨진 줄은 건너뛰고 **센다**.
  */
-import { appendFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { newDecisionId } from './decision-log.ts';
@@ -448,21 +449,60 @@ function sessionUsage(records: readonly TranscriptRecord[]): SessionUsage | unde
   };
 }
 
+const jsonlIds = (names: readonly string[]): string[] =>
+  names.filter((n) => n.endsWith('.jsonl')).map((n) => n.slice(0, -'.jsonl'.length));
+
 function sessionIds(folder: string): string[] {
   try {
-    return readdirSync(folder)
-      .filter((n) => n.endsWith('.jsonl'))
-      .map((n) => n.slice(0, -'.jsonl'.length));
+    return jsonlIds(readdirSync(folder));
   } catch {
     return []; // 세션을 한 번도 안 연 폴더다 — 정상이다.
   }
+}
+
+/** 옛 자리 목록을 기다리는 상한 (D-095). 정상 폴더는 자식 프로세스까지 수십 ms 다. */
+export const LEGACY_LIST_TIMEOUT_MS = 2000;
+
+export type LegacyLister = (folder: string) => { readonly status: number | null; readonly stdout: string };
+
+/** Electron 메인에서도 node 로 돈다 — `process.execPath` 가 Electron 이라 `ELECTRON_RUN_AS_NODE` 가 필요하다. */
+const listInChild: LegacyLister = (folder) =>
+  spawnSync(process.execPath, ['-e', "process.stdout.write(JSON.stringify(require('node:fs').readdirSync(process.argv[1])))", folder], {
+    encoding: 'utf8',
+    timeout: LEGACY_LIST_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+/** 프로세스 동안 한 번만 읽는다 — hs-orc 는 옛 자리에 쓰지 않으므로(D-071) 목록이 바뀌지 않는다. 못 읽은 폴더도 다시 기다리지 않는다. */
+const legacyListed = new Map<string, string[]>();
+
+/**
+ * 옛 자리(`<세션 폴더>/.hs-orc/sessions`)의 세션 id (D-095). 세션 폴더는 사용자의 것이라 iCloud 폴더일 수 있고,
+ * 거기서 readdir 는 끝없이 멈춘다(stat 은 즉시 답한다) — 프로세스 안에서 읽으면 `session` 찾기와 GUI 메인이 함께 언다.
+ * 그래서 있을 때만, 시간 제한을 건 자식 프로세스로 읽는다. 넘기면 없는 것으로 본다 — 세션을 못 연 폴더와 같은 대우다.
+ */
+export function legacySessionIds(folder: string, list: LegacyLister = listInChild): string[] {
+  const known = legacyListed.get(folder);
+  if (known) return known;
+  if (!existsSync(folder)) return []; // 옛 자리가 없는 폴더 — D-071 이후 폴더는 거의 다 이렇다.
+  let ids: string[] = [];
+  const r = list(folder);
+  try {
+    if (r.status === 0) ids = jsonlIds(JSON.parse(r.stdout) as string[]);
+  } catch {
+    // 자식 출력이 깨졌다 — 못 읽은 것과 같다.
+  }
+  legacyListed.set(folder, ids);
+  return ids;
 }
 
 /** 새 자리와 옛 자리(D-071 이전)를 합쳐 본다. 같은 id 는 한 세션이다. */
 export function listSessions(dir: string, kind: SessionKind): SessionSummary[] {
   const ids = new Set([
     ...sessionIds(path.dirname(transcriptPath(dir, 'x'))),
-    ...sessionIds(path.dirname(legacyTranscriptPath(dir, 'x'))),
+    ...legacySessionIds(path.dirname(legacyTranscriptPath(dir, 'x'))),
   ]);
   return [...ids]
     .map((id): SessionSummary => {
