@@ -1,6 +1,6 @@
 import { after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -548,6 +548,57 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     reset();
     const r = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--no-reviewer', '--verify', 'echo NR_MARK'], { PATH: fakeDir });
     assert.match(r.err, /\+ command `echo NR_MARK` exit=0/);
+    assert.equal(existsSync(codexArgs), false, 'reviewer 가 돌았다');
+  });
+
+  it('검증 명령 중 Ctrl-C(SIGINT)면 명령과 손자를 그룹째 끝낸 뒤 130 으로 끝난다 — 검증 실행기는 자기 그룹이라 터미널 신호가 닿지 않는다 (D-094)', async () => {
+    reset();
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-orc-cli-sigint-'));
+    const shPid = path.join(dir, 'sh.pid');
+    const childPid = path.join(dir, 'child.pid');
+    // PATH 가 fakeDir 뿐이라 sleep 은 절대 경로다. 손자는 출력을 잡지 않게 돌려 둔다.
+    const verify = `echo $$ > '${shPid}'; /bin/sleep 120 >/dev/null 2>&1 & echo $! > '${childPid}'; wait`;
+    const proc = spawn(process.execPath, [CLI, '이 아키텍처 설계 검토해줘', '--run', '--write', '--verify', verify], {
+      cwd: sandbox,
+      env: { ...process.env, HS_ORC_DECISION_LOG: decisionLog, HS_ORC_JEV: 'off', PATH: fakeDir, REVIEWER_PASS: '1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let err = '';
+    proc.stderr.setEncoding('utf8').on('data', (c: string) => (err += c));
+    const exited = new Promise<number | null>((resolve) => proc.on('close', (code) => resolve(code)));
+    const deadline = Date.now() + 20_000;
+    while (!existsSync(childPid) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(existsSync(childPid), `검증 명령이 시작되지 않았다\n${err}`);
+    proc.kill('SIGINT');
+    const code = await Promise.race([exited, new Promise<'hang'>((r) => setTimeout(() => r('hang'), 15_000))]);
+    if (code === 'hang') proc.kill('SIGKILL');
+    const gone = async (pid: number): Promise<boolean> => {
+      const until = Date.now() + 5_000;
+      const alive = (): boolean => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      while (alive() && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
+      return !alive();
+    };
+    const sh = Number(readFileSync(shPid, 'utf8').trim());
+    const grandchild = Number(readFileSync(childPid, 'utf8').trim());
+    const shGone = await gone(sh);
+    const grandchildGone = await gone(grandchild);
+    for (const pid of [sh, grandchild]) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        // 이미 없다.
+      }
+    }
+    assert.equal(code, 130, err);
+    assert.ok(shGone, '검증 명령(sh)이 살아 있다');
+    assert.ok(grandchildGone, '손자 sleep 이 살아 있다');
     assert.equal(existsSync(codexArgs), false, 'reviewer 가 돌았다');
   });
 
