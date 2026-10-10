@@ -4070,6 +4070,7 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 1. **순서** — `runDuo` 에 `checks` 단계를 둔다. primary 가 성공한 뒤·reviewer 전에 돌고, 돌려준 글이 reviewer 프롬프트의 "검증 명령 (Core 실행)" 절이 된다. 형식은 loop(D-040)와 같은 `checksText`(`$ [phase:]명령` · `exit=N` · 꼬리 1,500자)이고, loop 도 이 함수를 쓴다. reviewer 를 끈 once(`--no-reviewer`)에서도 돈다. primary 가 실패하면 돌리지 않는다(종전에는 돌았다 — 판정은 이미 `wrong` 이다).
 2. **실행기** — `runCommand` 를 비동기로 바꾼다(`spawnSync` 제거). D-088 `runArgv` 로 `['/bin/sh', '-c', 명령]` 을 프로세스 그룹으로 띄운다 — 사람이 적은 명령의 셸 뜻은 그대로다. 명령당 300초(종전 값). 위임의 `AbortSignal` 이 내려가 취소·시간 초과 때 그룹 밖 자손까지 SIGTERM → 2초 → SIGKILL(D-078). 시간 초과·취소·시그널 종료는 exit -1(D-046 "돌지 못했다").
 2-1. **CLI 신호** (PR #134 리뷰 P2) — 검증 실행기는 자기 프로세스 그룹이라 터미널의 Ctrl-C 가 닿지 않는다(종전 `spawnSync` 는 같은 그룹이라 함께 받았다). CLI once·loop(기준선·후속)는 검증 명령이 도는 **동안만** SIGINT·SIGTERM 을 `AbortController` 에 잇는다(`interruptible`). 신호를 받으면 그룹 정리가 끝나 명령이 돌아온 뒤 `중단   SIGINT — 검증 명령을 그룹째 끝냈다` 를 찍고 130(SIGTERM 은 143)으로 끝난다. 남은 명령은 띄우지 않는다. 상시 걸지 않는다 — 리스너가 있으면 Node 의 기본 종료가 꺼져 엔진 단계의 Ctrl-C 동작이 바뀐다. 결정 로그 2차 줄은 남기지 않는다 — 종전 Ctrl-C 와 같다.
+2-2. **SIGKILL 단계까지 기다린다** (PR #134 재리뷰 P2) — `runArgv` 는 셸이 닫히면 곧바로 돌려주고 SIGKILL 타이머는 `unref` 로 남겼다. 셸은 SIGTERM 에 죽고 출력을 떼어 낸 자손이 SIGTERM 을 무시하면, 호출자가 바로 `process.exit` 할 때 타이머가 사라져 자손이 영구히 남았다(`adapters/run.ts` 의 종료 훅은 `runArgv` 의 대상을 모른다). 이제 끝내려고 신호를 보낸 실행은 **SIGKILL 을 보낸 뒤에** 돌아오고, 그때까지 타이머가 프로세스를 붙잡는다(`ref`). 종료 훅을 공유하는 길보다 단순하고, 호출자가 무엇을 하든 돌아온 시점에 남은 자손이 없다. 같은 실행기를 쓰는 CLI 검증·세션 검증·D-088 스캐폴딩·`git init` 이 함께 덮인다. 대가는 취소·시간 초과가 최대 2초(`KILL_GRACE_MS`) 늦게 돌아오는 것이다.
 3. **취소 단계 `verify`** — 검증 명령 중에 멈추면 결과는 `cancelled`, `cancelledAt: 'verify'`, reviewer 는 시작하지 않는다. 결정 로그 2차는 `취소(verify 실행 중)`, 결과 카드는 "검증 명령 실행 중 — primary 는 끝났고 reviewer 는 시작하지 않았다". 증거·journal 에는 넣지 않는다(D-066 그대로).
 4. **읽기 전용이면 돌리지 않는다** — `DelegateInput.write` 를 필수로 둔다(세션·단계 계획·GUI 단발이 넘긴다). 쓰기를 끈 위임은 명령을 돌리지 않고 증거 요약 끝에 `읽기 전용 위임이라 검증 명령 N개를 실행하지 않았다 — \`명령\` …` 을 남긴다(D-093 의 `notes`). once 도 같다 — 실행 전 안내 줄 "읽기 전용이라 검증 명령(…)을 실행하지 않는다 — 실행하려면 --write" 를 찍는다. reviewer 프롬프트에는 싣지 않는다 — loop 의 읽기 전용 안내는 "검증 명령 (Core 실행)" 절 안에 들어가 "Core 가 이미 실행했다" 와 함께 찍히는 모순이 있어 옮기지 않았다(후속). `checksText` 를 같이 쓰게 된 지금, `checks` 인자로 명령 결과가 아닌 글이 들어가는 곳은 loop 의 그 한 문장뿐이다 — `reviewPrompt` 에 따로 인자를 두면 끝나는 작은 수정이다.
 5. **바꾸지 않은 것** — 무엇을 돌리나(사람이 준 칸·`--verify`·CLI 선언), `auto` 위임의 명령 0개, sandbox 밖 실행(Q30 X1 그대로). W·X·V 는 Q30 결정 2~7 몫이다.
@@ -4079,11 +4080,12 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 - 읽기 전용에서도 돌리되 "원본 검사" 라고 표시하기 — 원본 검사 결과가 R01 의 `command` 요구를 채워 `ok` 가 된다. D-040 결정 3 이 막은 그 길이다.
 
 **검증**
-- `npm run gate` 통과 — 테스트 821 → 831 (`delegate.test.ts` 5 · `evidence.test.ts` 1 · `cli.test.ts` 4 — `--no-reviewer` 에서도 검증이 도는지 고정하는 것 1 · 검증 중 SIGINT 1 포함).
+- `npm run gate` 통과 — 테스트 821 → 833 (`delegate.test.ts` 5 · `evidence.test.ts` 2 · `cli.test.ts` 5 — `--no-reviewer` 고정 1 · 검증 중 SIGINT·SIGTERM 2 포함).
 - **수정 전 실패 확인** (새 테스트를 수정 전 코드에 대고 돌렸다):
   - 세션 5건이 모두 실패했다. 결과가 reviewer 에 없음 · 실패 명령도 없음 · 읽기 전용에서 원본에 돎 · 0.6초 명령 동안 20ms 타이머가 돌지 못함 · 취소가 **120초** 막힘(`spawnSync` 가 손자 `sleep 120` 을 기다렸다).
   - CLI once 2건(reviewer 프롬프트 · 읽기 전용)도 실패했다.
   - CLI 검증 중 SIGINT(리뷰 P2): 수정 전에는 hs-orc 가 신호로 죽고(exit 없음) 검증 명령이 남았다. 수정 뒤에는 `sh`·손자 `sleep` 이 모두 사라지고 exit 130 이다.
+  - SIGKILL 단계(재리뷰 P2): fixture 는 셸이 SIGTERM 에 바로 죽고 출력을 떼어 낸 손자가 `trap '' TERM` 으로 SIGTERM 을 무시한다. 수정 전에는 3건이 모두 실패했다 — 실행기 취소 1(돌아온 뒤 손자 생존), CLI SIGINT·SIGTERM 2(hs-orc 종료 뒤 손자 생존). 수정 뒤 통과한다.
   - 이전 실행기에 300ms 시간 초과를 주면 exit -1 이 나오지만 **손자 `sleep` 은 살아 있었다**.
 - **종전 테스트 5건을 고쳤다.** 읽기 전용 위임에 검증 명령을 걸고 원본에서 돈 결과를 기대하던 테스트다(세션 1 · GUI 단발 3 · CLI once 1). 결함을 고정한 것이라 쓰기 위임으로 바꿨고, 각 테스트의 뜻(exit code 가 증거 · 실패는 `rework` · 바꾼 폴더에서 돈다 · 통과면 제안 없음)은 그대로다.
 - 엔진 과금 호출 0 — 가짜 실행기만 썼다.
@@ -4095,7 +4097,7 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 - 실제 Electron 화면에서 명령 중 취소 버튼이 듣는지는 단위 테스트(이벤트 루프 타이머·취소 신호)로만 확인했다.
 - 실행 위치는 여전히 sandbox 밖이다 — Q30 §3-3 의 노출은 그대로이고, 결정 3(X·S)이 남았다.
 
-**영향** `core/evidence-gather.ts`(`runCommand` 비동기·`CommandEvidence`) · `core/duo.ts`(`checks`·`checksText`·`CancelledAt`·`readOnlyVerifyNote`) · `core/delegate.ts`(`write`·`checks`) · `core/decide.ts`(`cancelledLine` 의 `verify`) · `core/session.ts`(`write` 전달·취소 문구) · `shell/cli.ts`(once·loop) · `shell/gui/service.ts` · SPEC §3·§5.
+**영향** `core/scaffold.ts`(`runArgv` — SIGKILL 단계 뒤에 돌려준다) · `core/evidence-gather.ts`(`runCommand` 비동기·`CommandEvidence`) · `core/duo.ts`(`checks`·`checksText`·`CancelledAt`·`readOnlyVerifyNote`) · `core/delegate.ts`(`write`·`checks`) · `core/decide.ts`(`cancelledLine` 의 `verify`) · `core/session.ts`(`write` 전달·취소 문구) · `shell/cli.ts`(once·loop) · `shell/gui/service.ts` · SPEC §3·§5.
 
 **상태** 구현됨 — PR #134(Q30 조사와 같은 PR). 머지로 확정한다(전하 직접 머지). Q30 결정 2~7 은 **결정 대기**.
 

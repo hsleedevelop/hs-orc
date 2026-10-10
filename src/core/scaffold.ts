@@ -96,6 +96,7 @@ const ANSI = /\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-
 /**
  * argv 를 **셸 없이** 띄운다. 문자열 속 `$(…)`·`;`·`|` 는 글자 그대로 인자다. stdin 은 닫는다 — 묻는 스캐폴더는 기다리지 않고 끝나거나 시간 초과로 끝난다.
  * 취소·시간 초과는 엔진과 같은 규칙으로 그룹째(그룹 밖 자손 포함, D-078) SIGTERM → 유예 → SIGKILL 이다.
+ * 끝낸 실행은 SIGKILL 단계가 지난 뒤에 돌아온다 — 돌아온 시점에 남은 자손이 없다 (D-094 리뷰).
  */
 export const runArgv: CommandRunner = (argv, options) => {
   const startedAt = Date.now();
@@ -122,6 +123,9 @@ export const runArgv: CommandRunner = (argv, options) => {
 
     const targets = new Set<number>();
     let killTimer: NodeJS.Timeout | undefined;
+    let killed = false;
+    // 끝낸 실행이 SIGKILL 단계 전에 닫히면 그 단계가 지난 뒤에 돌려준다 (D-094 리뷰).
+    let afterKill: (() => void) | undefined;
     const signalAll = (sig: NodeJS.Signals): void => {
       for (const t of targets) {
         try {
@@ -138,7 +142,11 @@ export const runArgv: CommandRunner = (argv, options) => {
       targets.add(-child.pid);
       for (const t of outsideGroupDescendants(child.pid)) targets.add(t);
       signalAll('SIGTERM');
-      killTimer = setTimeout(() => signalAll('SIGKILL'), KILL_GRACE_MS);
+      killTimer = setTimeout(() => {
+        killed = true;
+        signalAll('SIGKILL');
+        afterKill?.();
+      }, KILL_GRACE_MS);
       killTimer.unref();
     };
     const timer = setTimeout(() => terminate('timeout'), options.timeoutMs);
@@ -156,12 +164,21 @@ export const runArgv: CommandRunner = (argv, options) => {
       if (partial) take('\n');
       if (error) lines.push(`실행하지 못했다: ${error.message}`);
       const tail = lines.join('\n');
-      resolve({
+      const result: CommandRun = {
         outcome: outcome ?? (exitCode === 0 && !error ? 'ok' : 'failed'),
         exitCode,
         tail: tail.length > TAIL_CHARS ? `…${tail.slice(-(TAIL_CHARS - 1))}` : tail,
         durationMs: Date.now() - startedAt,
-      });
+      };
+      // 끝내려고 신호를 보냈는데 SIGKILL 단계 전에 닫혔다 — 셸은 SIGTERM 에 죽어도 출력을 떼어 낸 자손은 무시하고 남을 수 있다.
+      // 여기서 돌려주면 호출자가 곧바로 process.exit 할 때 unref 타이머가 사라져 자손이 영구히 남는다(CLI 검증·스캐폴딩).
+      // 그래서 SIGKILL 을 보낸 뒤 돌려주고, 그때까지 타이머가 프로세스를 붙잡게 한다.
+      if (killTimer !== undefined && !killed) {
+        afterKill = () => resolve(result);
+        killTimer.ref();
+        return;
+      }
+      resolve(result);
     };
     child.on('error', (error) => finish(null, error));
     child.on('close', (code) => finish(code));

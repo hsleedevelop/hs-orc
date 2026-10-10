@@ -173,6 +173,36 @@ describe('기계적 수집', () => {
     assert.deepEqual([(await runCommand('exit 0')).evidence.exitCode, (await runCommand('exit 7')).evidence.exitCode], [0, 7]);
   });
 
+  it('취소하면 SIGTERM 을 무시하는 손자까지 SIGKILL 로 끝낸 뒤에 돌아온다 — 셸이 먼저 닫혀도 (D-094 리뷰)', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-verify-term-'));
+    const pidFile = path.join(dir, 'pid');
+    const controller = new AbortController();
+    const pending = runCommand(`(trap '' TERM; exec sleep 120) >/dev/null 2>&1 & echo $! > '${pidFile}'; wait`, dir, { signal: controller.signal });
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      try {
+        if (readFileSync(pidFile, 'utf8').trim()) break;
+      } catch {
+        // 아직 없다.
+      }
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    controller.abort();
+    const { cancelled } = await pending;
+    assert.equal(cancelled, true);
+    const pid = Number(readFileSync(pidFile, 'utf8').trim());
+    // 돌아온 시점에 이미 죽어 있어야 한다 — 호출자가 곧바로 process.exit 해도 남지 않게. 좀비 수거만 잠깐 기다린다.
+    await new Promise((r) => setTimeout(r, 100));
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch {
+      alive = false;
+    }
+    if (alive) process.kill(pid, 'SIGKILL');
+    assert.equal(alive, false, 'SIGTERM 을 무시한 손자가 돌아온 뒤에도 살아 있다');
+  });
+
   it('시간 초과면 그룹째 끝내 손자도 남기지 않고 exit -1 이다 (D-094·D-078)', async () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-verify-timeout-'));
     const pidFile = path.join(dir, 'pid');
