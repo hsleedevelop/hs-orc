@@ -4128,6 +4128,7 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 **미검증·위험**
 - 멈춘 폴더에 옛 세션이 있으면 그 프로세스 동안 목록·`chat --resume <id>` 에서 안 보인다("그런 세션이 없다"). 화면에 "못 읽은 폴더" 를 알리는 일은 하지 않았다.
 - 목록 다음의 파일 읽기는 그대로다 — `readSessionLog` 의 옛 자리 `readFileSync`, `describeProject`·`depStatus` 의 `package.json`·`.git` 확인. 이번 폴더에서는 파일 open 이 0ms 였지만, 내려받지 않은(evicted) iCloud *파일*을 열면 내려받기를 기다릴 수 있다(미실측).
+- 2초 상한은 SIGKILL 이 iCloud `open()` 에 걸린 자식을 죽인다는 데 기댄다. 이 기계에서 본 상태(`SN`, 끊을 수 있는 대기)에서는 죽었다. File Provider 가 끊을 수 없는 대기로 두면 `spawnSync` 는 그 open 이 끝날 때까지 돌아오지 않는다(미관찰).
 - Electron 실기에서 앱이 실제로 얼었다가 2초 뒤 풀리는지는 돌려 보지 않았다 — 같은 함수를 Node 에서 쟀다.
 
 **영향** `core/transcript.ts`(`legacySessionIds`) · `core/__tests__/transcript.test.ts` · SPEC §6.4.1 한 줄.
