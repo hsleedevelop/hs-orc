@@ -11,9 +11,15 @@ import path from 'node:path';
 process.env.HS_ORC_JEV = 'off';
 
 /**
- * 프로젝트별 상태(D-071)의 뿌리도 가둔다 — 기본값은 **진짜 홈**(`~/.hs-orc/projects`)이라,
- * 세션·원시 로그를 쓰는 테스트가 거기 쌓이면 안 된다. 테스트 파일 프로세스마다 하나다.
+ * 홈을 기본값으로 쓰는 상태 경로도 전부 가둔다 — 테스트 파일 프로세스마다 하나의 임시 뿌리다.
+ * 프로젝트별 상태(D-071, `~/.hs-orc/projects`)에 세션·원시 로그가 쌓이면 안 되고,
+ * 최근 목록(`~/.hs-orc/projects.json`)을 읽으면 세션 찾기가 개발자의 실제 폴더를 뒤진다 — iCloud 폴더에서는 readdir 가 멈춘다.
+ * 테스트가 자기 값을 넣으면 그것이 이긴다. 격리가 유지되는지는 `src/shell/__tests__/home-leak.test.ts` 가 잰다.
  */
-const projectState = mkdtempSync(path.join(os.tmpdir(), 'hs-orc-state-'));
-process.env.HS_ORC_PROJECT_STATE = projectState;
-process.on('exit', () => rmSync(projectState, { recursive: true, force: true }));
+const root = mkdtempSync(path.join(os.tmpdir(), 'hs-orc-state-'));
+process.env.HS_ORC_PROJECT_STATE = path.join(root, 'projects');
+process.env.HS_ORC_PROJECTS = path.join(root, 'projects.json');
+process.env.HS_ORC_SCRATCH = path.join(root, 'scratch');
+process.env.HS_ORC_WORKTREES = path.join(root, 'worktrees');
+process.env.HS_ORC_DECISION_LOG = path.join(root, 'decision-log.jsonl');
+process.on('exit', () => rmSync(root, { recursive: true, force: true }));
