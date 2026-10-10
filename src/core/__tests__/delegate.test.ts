@@ -425,6 +425,37 @@ describe('Core 가 고른 검증 명령은 codex sandbox 안에서 기준선과 
     assert.equal(f.calls.length, 0);
   });
 
+  it('R01 — lint 가 통과해도 test 가 막혔거나·시작하지 못했거나·스크립트가 바뀌었으면 reviewer PASS 여도 ok 가 아니다 (PR #137 리뷰)', async () => {
+    const pkg = { scripts: { lint: 'eslint .', test: 'node --test' } };
+    const cases: [string, Reply | null, RegExp][] = [
+      ['blocked', { exit: 1, out: ['EPERM'], denials: ['(node) network-bind local:*:0'] }, /sandbox 가 막았다 — `npm run test`/],
+      ['not-started', { exit: 1, denials: null }, /sandbox 를 시작하지 못했다 — `npm run test`/],
+      ['S2', null, /검증 스크립트가 위임 중 바뀌었다 — `npm run test`/],
+    ];
+    for (const [name, reply, why] of cases) {
+      const dir = project({ 'package.json': JSON.stringify(pkg), 'a.test.js': '' });
+      const s = spy('없음\nPASS', reply ? undefined : () => writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ scripts: { ...pkg.scripts, test: 'exit 0' } })));
+      const f = fake((inner, nth) => (reply && inner === 'npm run test' && nth === 2 ? reply : { exit: 0 }));
+      const d = await go(dir, s.execute, f);
+      assert.equal(d.verdict, 'pass', name);
+      assert.ok(d.report.accepted.some((e) => e.kind === 'command' && e.cmd === 'npm run lint' && e.exitCode === 0), name);
+      assert.equal(d.outcome, 'unverified', name);
+      assert.match(d.report.summary, why, name);
+    }
+  });
+
+  it('막혔거나·시작하지 못한 기준선은 작업 전부터 실패가 아니다 — 작업 뒤 거부 없는 실패는 rework 다 (PR #137 리뷰)', async () => {
+    for (const before of [{ exit: 1, denials: ['(node) network-bind local:*:0'] }, { exit: 1, denials: null }, { exit: -1 }] as Reply[]) {
+      const dir = project({ 'package.json': JSON.stringify(PKG) });
+      const s = spy('없음\nPASS');
+      const f = fake((inner, nth) => (inner === 'npm run lint' ? (nth === 1 ? before : { exit: 1, out: ['real lint error'] }) : { exit: 0 }));
+      const d = await go(dir, s.execute, f, { id: 'R03' });
+      assert.equal(d.outcome, 'rework', JSON.stringify(before));
+      assert.doesNotMatch(d.report.summary, /작업 전부터 실패/);
+      assert.match(s.prompts.reviewer[0] ?? '', /기준선 exit=-?1 — 돌지 못해 비교하지 않는다/);
+    }
+  });
+
   it('기준선 중에 취소하면 primary 를 시작하지 않는다', async () => {
     const dir = project({ 'package.json': JSON.stringify(PKG) });
     const s = spy('없음\nPASS');
