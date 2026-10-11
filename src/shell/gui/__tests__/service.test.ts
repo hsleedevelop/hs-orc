@@ -65,7 +65,7 @@ describe('GUI — Core 를 그대로 쓴다', () => {
 
   it('분류가 빗나가도 화면에서 고른 행으로 배정하고, run 도 같은 행으로 돈다', async () => {
     isolated();
-    const service = new GuiService(fake);
+    const service = new GuiService(fake, undefined, tempRepo());
     const view = await service.plan('넌 누구니', { classifyLlm: false, taskId: 'R01' });
     assert.equal(view.stage, 'assigned');
     assert.equal(view.awaitingApproval, true);
@@ -84,7 +84,7 @@ describe('GUI — Core 를 그대로 쓴다', () => {
 describe('GUI — S5 시나리오', () => {
   it('승인 → 실행 → 증거 미충족이면 unverified 로 닫고 결정 로그 2줄을 남긴다', async () => {
     const log = isolated();
-    const service = new GuiService(fake);
+    const service = new GuiService(fake, undefined, tempRepo());
     const result = await service.run({ task: '이 타입 에러 고쳐줘', verify: [] });
 
     assert.equal(result.ok, true);
@@ -97,7 +97,7 @@ describe('GUI — S5 시나리오', () => {
 
   it('증거가 모이면 ok 로 닫는다 — "성공했습니다"가 아니라 exit code 다', async () => {
     const log = isolated();
-    const service = new GuiService(fake);
+    const service = new GuiService(fake, undefined, tempRepo());
     const result = await service.run({ task: '이 타입 에러 고쳐줘', verify: ['exit 0'], write: true });
 
     assert.equal(result.outcome, 'ok');
@@ -109,7 +109,7 @@ describe('GUI — S5 시나리오', () => {
     const marker = path.join(path.dirname(isolated()), 'baseline-ran');
     // 기준선(D-096 V2a)에서는 통과하고 작업 뒤에만 exit 3 — 작업 전부터 빨간 명령은 불일치로도 증거로도 세지 않는다.
     const cmd = `[ -e '${marker}' ] || { touch '${marker}'; exit 0; }; exit 3`;
-    const result = await new GuiService(fake).run({ task: '이 타입 에러 고쳐줘', verify: [cmd], write: true });
+    const result = await new GuiService(fake, undefined, tempRepo()).run({ task: '이 타입 에러 고쳐줘', verify: [cmd], write: true });
     // exit code 3 도 **증거다**(형태가 맞다). 다만 R01 은 코드 값을 따지지 않으므로 충족이다 —
     // 이 테스트는 그 사실을 고정한다: 통과/실패 판정은 사람이 하고, 제품은 증거의 **존재와 형태**를 본다.
     assert.equal(result.report?.satisfied, true);
@@ -118,7 +118,7 @@ describe('GUI — S5 시나리오', () => {
 
   it('원시 로그를 실행별로 남긴다 — **파싱 결과가 아니라 원본이다** (SPEC §3.7)', async () => {
     isolated();
-    await new GuiService(fake).run({ task: '이 타입 에러 고쳐줘', verify: [] });
+    await new GuiService(fake, undefined, tempRepo()).run({ task: '이 타입 에러 고쳐줘', verify: [] });
     const dir = path.join(process.env['HS_ORC_RUN_STORE'] as string, readDecisions().at(-1)?.id ?? '');
     assert.ok(readFileSync(path.join(dir, '01-Luna.meta.json'), 'utf8').includes('outcome'));
     // fake 가 준 raw 가 그대로 디스크에 있어야 한다. `text`(ran:…) 가 들어 있으면 셸이 raw 를 버린 것이다.
@@ -127,7 +127,7 @@ describe('GUI — S5 시나리오', () => {
 
   it('누적 비용과 Dashboard 가 v1 과 같은 모양으로 갱신된다', async () => {
     isolated();
-    const service = new GuiService(fake);
+    const service = new GuiService(fake, undefined, tempRepo());
     await service.run({ task: '이 타입 에러 고쳐줘', verify: [] });
     const view = service.dashboard();
     assert.deepEqual(view.distribution, [{ model: 'Luna', count: 1 }]);
@@ -138,7 +138,7 @@ describe('GUI — S5 시나리오', () => {
   it('GUI 도 두 슬롯을 실제로 띄운다 (D-009)', async () => {
     isolated();
     calls.length = 0;
-    const result = await new GuiService(fake).run({ task: '이 타입 에러 고쳐줘', verify: [] });
+    const result = await new GuiService(fake, undefined, tempRepo()).run({ task: '이 타입 에러 고쳐줘', verify: [] });
     assert.deepEqual(calls, ['Luna', 'Haiku'], 'GUI 에서 reviewer 가 안 돌면 단일 엔진 선택기다');
     assert.equal(result.verdict, 'pass');
     assert.equal(result.report?.accepted.some((e) => e.kind === 'review'), true);
@@ -185,6 +185,16 @@ function initRepo(dir: string): void {
   const env = gitEnv();
   spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: dir, env });
   spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir, env });
+}
+
+/**
+ * 증거 단계(`git status`)까지 가는 위임의 작업 폴더. hs-orc 저장소에서 돌면 git 이 인덱스를 고치려 `.git/index.lock` 을 잡는데,
+ * codex sandbox 는 `.git` 쓰기를 막아 R01 기준선마다 G1 표시가 붙었다 (D-097 후속).
+ */
+function tempRepo(): string {
+  const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'hs-svc-repo-')));
+  initRepo(dir);
+  return dir;
 }
 
 describe('GUI — 워크트리', () => {
@@ -324,7 +334,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
 
   it('카드의 행을 바꿔도 원 카드의 쓰기 위임을 이어받는다', async () => {
     isolated();
-    const service = new GuiService(fake, 20, process.cwd());
+    const service = new GuiService(fake, 20, tempRepo());
     service.startConversation('project');
     await service.converse('이 타입 에러 고쳐줘', true);
     const view = await service.converseReplan('R04');
@@ -624,7 +634,7 @@ describe('GUI — 대화 세션 (v2.1)', () => {
 
   it('승인 방식 — 읽기 행을 쓰기 위임으로 보내면 auto 에서도 카드가 선다 (쓰기 행은 D-086 이 따로 본다)', async () => {
     isolated();
-    const service = new GuiService(fake, 20, process.cwd());
+    const service = new GuiService(fake, 20, tempRepo());
     service.startConversation('project');
     service.converseMode('auto');
     // R02(읽기 행) — 쓰기 행(R01 등)은 git 폴더가 깨끗하면 auto 가 바로 시작하므로 작업 트리 상태에 따라 갈린다.
