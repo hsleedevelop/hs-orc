@@ -4235,6 +4235,138 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 ---
 
+## Q31 — 사람이 적은 검증 명령과 CLI once·loop 의 검증은 아직 sandbox 밖이다: 누가 정하고 · 어디서 · 실제 위험 · 선택지 (조사)
+
+**배경** D-096 은 Core 가 고른 명령(W1 선언 + W2 스크립트)만 `codex sandbox -P :workspace` 안에 넣었다. 두 경로가 남았다. (1) 사람이 승인 때 적은 명령(GUI 칸 · chat `--verify` · `session send --verify`)은 D-094 그대로 sandbox 밖 `sh -c` 다(D-096 범위 1, Q30 사실 1-10). (2) CLI once·loop 는 W1 선언과 `--verify` 를 sandbox 밖에서 돌리고 W2 는 없다(D-045, D-096 범위 7). 이 절은 둘을 어떻게 할지 결정 재료를 모은다 — **코드·정책 변경 없음, 모델·엔진 호출 0.** 근거는 (사실: 코드·실측) · (추론) · (미검증)으로 적는다. 코드 위치는 main `86dc805` 기준이다.
+
+**1. 사실 — 경로마다 누가 명령을 정하고 · 어디서 · 어떤 권한으로 도나**
+
+| # | 경로 | 명령 문자열을 정하는 쪽 | 실행 위치 · 횟수 |
+|---|---|---|---|
+| H1 | GUI 배정 카드 칸 | 사람 — `app.ts:711` 칸 → `:732` `convApprove({verify})` → `main.ts:80` → `service.ts:494` → `session.ts:1083`·`:1090` → `delegate({verify})` `:1132` | 기준선 1회(primary 전) + primary 뒤 1회 |
+| H2 | GUI 단계 계획 카드 칸 | 사람 — `app.ts:766`·`:785` → `session.ts:1503` | **쓰기 단계마다** 기준선 + 뒤 |
+| H3 | chat `--verify` | 사람 — chat 을 **띄울 때** 한 번(`chat.ts:365`) | 그 chat 의 **모든 승인**에 실린다(`chat.ts:294`) |
+| H4 | `session send --verify` | 부르는 쪽 — 사람 **또는 다른 에이전트**(`session-cmd.ts:3-4` "부르는 쪽이 사람이 아니라 다른 에이전트일 수 있다") · `:84` → `:225` | 기준선 + 뒤 |
+| C1 | CLI once | W1 선언(`cli.ts:592`) + `--verify`(`:593`) | primary 뒤 1회(`:603-607`), 쓰기만. 기준선 없음 |
+| C2 | CLI loop | W1 선언 + `--verify`(`cli.ts:330`) | 기준선 1회(`:370`) + **매 사이클 primary 뒤**(`:456`), 사이클 사이에 사람 클릭 없음 |
+
+- **실행기 (사실).** H1~H4 는 `delegate.ts:119-127` `runCheck` 에서 `auto` 가 없으므로 `runCommand`(`:125`)로 간다. C1·C2 는 `runVerifyList`(`cli.ts:188-198`) → 같은 `runCommand` 다. `runCommand` 는 `runArgv(['/bin/sh','-c',cmd], {cwd, timeoutMs: 300_000, signal})`(`evidence-gather.ts:34-38`)이고, `runArgv` 는 `env` 를 주지 않으면 `process.env` 그대로 띄운다(`scaffold.ts:106`).
+  - cwd: 세션은 세션 폴더(`session.ts:1134` `cwd: dir`), CLI 는 `process.cwd()`.
+  - env: 부모 그대로 — GUI 는 Electron 메인의 env, CLI 는 셸 env(토큰·키 포함).
+  - 네트워크·홈 쓰기·`.git` 쓰기: 제한 없음 — 사용자 권한이다.
+- **primary 의 경계 (사실).** 쓰기 행 primary 는 codex `-s workspace-write`(R01·R03·R04·R05·R07)이거나 claude `--permission-mode acceptEdits`(R09 — `-p` 에서는 Bash 를 물을 사람이 없어 셸이 막힌다, Q30 사실 1-5)다(`engines.json` `write`). 즉 **sandbox 밖 검증 명령은 그 코드를 쓴 primary 보다 넓은 권한으로 primary 가 쓴 코드를 실행한다.**
+- **`auto` 위임은 사람 명령이 0개다** (사실, `session.ts:715` `start({write})` — Q30 사실 1-2 그대로). H1~H4 는 모두 사람이 누르거나(`session send` 는 `--run`) 미리 넘긴 명령이다.
+- **GUI 단발(`GuiService.run`, `service.ts:355`)** 은 IPC 핸들러가 없다(`main.ts:42-94`) — 테스트에서만 부른다. 이번 범위에서 뺀다.
+- **선언(W1) 파일의 자리 (사실).** `verifyConfigPath`(`project-state.ts:78-83`)는 다른 프로젝트면 홈의 상태 폴더(`~/.hs-orc/projects/<키>/verify.json`), hs-orc 저장소면 저장소 안 `data/verify.json` 이다. C1·C2 는 primary **전에** 읽는다 — 같은 실행 안에서 primary 가 선언 문자열을 바꾸지 못한다. hs-orc 저장소를 대상으로 쓰기 위임하면 다음 실행의 선언은 primary 가 고칠 수 있다(추론).
+
+**2. 실측** — 2026-10-11 09:5x~10:0x, codex-cli **0.162.1**(`~/.local/share/mise/installs/node/latest/bin/codex`, `env -u CODEX_HOME`), **모델·엔진 호출 0**. 하네스는 스크래치(커밋하지 않음)이고 `HS_ORC_*` 상태 경로를 모두 스크래치로 돌렸다. primary 는 가짜 `SlotExecutor` 다 — primary 차례에 작업 트리를 바꾸고 reviewer 는 `PASS` 를 낸다. 실제 `delegate()` · `defaultAutoVerify()`(PATH 의 codex) · `runSandboxed()` 를 탔다.
+
+**E1 — 사람이 같은 명령을 적으면 sandbox 와 S2 가 꺼지고 판정이 `ok` 로 뒤집힌다.** 스크래치 git 프로젝트, `package.json` 은 `"lint": "node lint.js"` 하나(`lint.js` 는 exit 0). R01 · `write: true` · `autoVerify` 켬. 가짜 primary 가 홈에 표식 파일(`~/.hs-orc-q31-probe-marker`, 매회 지움)을 쓰는 코드를 심는다 — (a) `package.json` 의 `lint` 를 `node evil.js` 로 바꾼다 (b) 스크립트는 그대로 두고 `lint.js` 본문을 바꾼다.
+
+| # | primary 가 바꾼 것 | 사람 명령 | outcome | 홈 표식 | 증거 요약 |
+|---|---|---|---|---|---|
+| 1 | (a) 스크립트 | 없음 | `unverified` | 없음 | S2 — "검증 스크립트가 위임 중 바뀌었다" |
+| 2 | (a) 스크립트 | `npm run lint` | **`ok`** | **생김** | 증거 충족 |
+| 3 | (b) 본문 | 없음 | `unverified` | 없음 | "sandbox 가 막았다 — `(node) file-write-create ~/.hs-orc-q31-probe-marker`" |
+| 4 | (b) 본문 | `npm run lint` | **`ok`** | **생김** | 증거 충족 |
+
+- **사실 1.** 사람 명령이 W2 와 같으면 W2 쪽이 빠진다 — `delegate.ts:111` 이 사람 명령을 `exclude` 로 넘기고 `autoCommands` 가 그것과 같은 W2 를 건너뛴다(`auto-verify.ts:70`·`:89`). 남은 사람 명령에는 S2 대조가 없고(`delegate.ts:149` 는 `c.auto?.target` 만 본다) V3a 도 없다(`:126` `verdict: ran` 고정).
+- → (사실) **같은 위임에서 칸에 `npm run lint` 한 줄을 적은 것만으로, D-096 이 막던 두 경우(스크립트 약화·홈 쓰기)가 모두 sandbox 밖에서 돌고 `ok` 로 닫혔다.** 사람이 명령을 적는 것이 보호를 더하지 않고 **뺀다.**
+
+**E2 — 사람 명령 문자열도 D-096 감싸개로 돈다.** 4번 트리에서 `runSandboxed` 에 `argv: ['/bin/sh','-c','npm run lint']`(W1 과 같은 모양, `auto-verify.ts:80`)를 주면 exit 1 · V3a `blocked`(`(node) file-write-create ~/.hs-orc-q31-probe-marker`) · 표식 없음이다. 사람 문자열에 sandbox 를 거는 데 새 실행기가 필요 없다.
+
+**E3 — hs-orc 자기 `npm test`(R01·R06 선언)는 sandbox 안에서 깨진다.** 이 워크트리를 스크래치에 `rsync`(`.git` 제외 → 새 `git init`, `node_modules` 심링크 그대로)하고 `npm_config_logs_dir=$TMPDIR/…` 로:
+
+| | exit | 시간 | 테스트 |
+|---|---|---|---|
+| sandbox 밖 | 0 | 24초 | 854 / 854 통과 |
+| `codex sandbox -P :workspace --log-denials -- npm test` | **1** | 23초 | **850 통과 · 4 실패** |
+
+- **사실 2.** 실패 4건은 모두 `src/adapters/__tests__/run.test.ts` 의 D-078 취소 테스트다(`'error'` ≠ `'cancelled'` 등). 취소 경로가 자손 스냅숏에 `ps` 를 부르고(`adapters/run.ts:59`) `/bin/ps` 는 setuid root 다 — 거부 로그의 `(node) forbidden-exec-sugid` 가 그것이다.
+- **사실 3.** 같은 실행의 거부 60여 줄 중 V3a 가 세는 차단성 거부는 `(git) file-write-create <복사본>/.git/index.lock` 한 줄이다 — sandbox 는 작업 폴더 안이라도 `.git` 쓰기를 막는다. 그래서 `sandboxVerdict` = **`blocked`** → `unverified` 다.
+- **사실 4.** 그 `.git` 줄을 빼고 같은 함수에 넣으면 `ran` 이다 — `forbidden-exec-sugid` 는 V3a 의 차단성 목록(`network-*`·`/dev/` 밖 `file-write-*`, `auto-verify.ts:113-118`)에 없다. → (추론) sandbox 탓인 실패가 **우연히 함께 난 `.git` 쓰기 거부 덕에** `unverified` 가 됐다. 그 줄이 없었다면 `rework` 다(V3a 의 보수 쪽 오탐 — D-096 위험 줄의 "`mach-lookup` 거부 탓에 실패한 테스트" 와 같은 꼴).
+- **사실 5 (지금 상태).** hs-orc 저장소에서 R01·R06 쓰기 세션 위임은 이미 W1 `npm test` 를 sandbox 에서 돌린다(D-096). E3 대로면 그 위임은 지금 **`ok` 로 닫히지 못한다.** D-096 "미검증" 의 "hs-orc 자기 `npm test` 의 sandbox 동작" 이 이것이다. R04 `npm run gate` 는 재지 않았다(`npm test` 를 포함하므로 같을 것 — 추론).
+
+**3. 실제 위험** (추론 — 사실 1·E1·E3 위)
+- **경로는 있다.** primary 가 쓴 코드는 사람 명령·선언을 거쳐 sandbox 밖에서 돈다 — 테스트·설정 파일(`eslint.config.js`·`vitest.config.*`), `package.json` 스크립트와 `pre`·`post`, 그 스크립트가 부르는 파일(E1 (b)), 작업 폴더 안 `node_modules/.bin`. 네트워크·홈 쓰기·부모 env 의 토큰이 모두 열려 있다.
+- **"사람이 직접 적었다" 가 줄이는 것.** 어느 **명령 이름**을 부를지는 primary 밖의 주체가 정한다. 그 이름이 작업 폴더의 코드를 실행하지 않으면(`git diff --check` · `test -f X`) 위험은 거의 없다. 그러나 흔한 검증 명령(`npm test`·`npm run lint`·`npx vitest`)은 **무엇을 실행할지를 작업 폴더가 정한다** — primary 가 방금 쓴 그 폴더다. 그래서 이 경우의 감소분은 작다(E1: 2·4 행).
+- **"직접" 이 약해지는 자리.**
+  - H1·H2: 칸의 글은 승인 뒤에도 지워지지 않는다(`app.ts:577` 의 상태에 `setVerify('')` 가 없다). 화면은 세션마다 하나이고 숨기기만 한다(`app.ts:1187-1191`). → 첫 카드에 적은 명령이 그 세션의 다음 카드 승인에도 그대로 실린다(추론 — Electron 실기 미확인).
+  - H3: chat 을 띄울 때 적은 명령이 그 chat 의 모든 승인에 실린다.
+  - H4: 부르는 쪽이 에이전트면 명령 문자열을 모델이 정한다. 그 모델은 `session show` 로 primary 의 출력을 읽을 수 있다(추론).
+  - C2: 사이클 사이에 사람이 없다. 같은 명령이 primary 의 새 코드 위에서 최대 `maxIterations` 번 돈다.
+- **현실적인 피해 모양** (추론). 악의보다 사고가 흔하다 — primary 가 쓴 테스트가 env 의 실제 키로 실제 서비스를 부르거나, 홈·전역 캐시에 쓰거나, 경로 계산을 틀린 정리 코드가 작업 폴더 밖을 지운다. 저장소 내용에 섞인 프롬프트 주입은 그 위에 얹히는 꼬리 위험이다. sandbox 안이면 이 모두가 거부 로그와 함께 `unverified` 로 드러난다(E2).
+- **약화는 sandbox 가 막지 못한다.** primary 가 `"test": "exit 0"` 으로 바꾸면 sandbox 안에서도 exit 0 이다. 이것은 S2 의 몫이다 — 지금 S2 는 W2 에만 걸린다(사실 1).
+
+**4. 갈림길과 선택지** (구현 크기는 코드 읽기 어림 — 추론)
+
+**4-1. 사람 명령과 W2 가 겹칠 때 (H1~H4 — 다른 선택과 독립)**
+
+| # | 선택지 | 효과 | 비용 · 위험 |
+|---|---|---|---|
+| D0 | 지금 그대로 — 사람 쪽을 남기고 W2 를 뺀다 | — | E1 2·4 행 그대로 |
+| **D1** | **W2 쪽을 남기고 같은 사람 명령을 뺀다** — `autoCommands` 를 사람 목록 없이 고르고, W2 와 같은(npm 별칭 포함) 사람 명령을 거른다 | 사람이 적은 명령이 보호를 빼지 않는다. 그 명령은 sandbox + S2 + V3a 로 돈다 | 작다. 그 명령이 sandbox 에서 깨지는 프로젝트(E3 꼴)는 `ok` → `unverified` 로 바뀐다 — 지금 사람이 W2 와 같은 명령을 적어 sandbox 를 피하던 것과 같은 효과가 사라진다 |
+
+**4-2. 사람 명령(H1~H4)을 어디서 돌리나**
+
+| # | 선택지 | V3a 판정 영향 | UX 영향 | codex 가 없을 때 |
+|---|---|---|---|---|
+| O1 | **그대로 두고 문서화** — 카드·칸에 "sandbox 밖에서 사용자 권한으로 돈다" 를 보인다 | 없음. 지금처럼 exit 가 곧 판정이다 | 바뀌지 않는다 | 지금처럼 돈다 |
+| O2 | **D-096 경로 재사용** — 사람 명령도 `runSandboxed(['/bin/sh','-c',명령])`(E2), 예외 없이 | 네트워크·포트·홈·`.git`·setuid 를 쓰는 명령이 `blocked`/`not-started` → `held` → `unverified`(reviewer PASS 여도). 지금 그런 명령의 환경 탓 실패는 `rework`, 통과는 `ok` 다. E3 대로 hs-orc 자기 `npm test` 는 `unverified` 다. V3a 차단성 목록 밖의 sandbox 거부(사실 4)는 `rework` 로 남는다 | 사람이 고른 명령인데 "돌지 못했다" 로 끝날 수 있다. 되돌릴 길이 없다 | (O2a) 돌리지 않고 `held` → `unverified` — **D-096 안전선과 같다**. claude 만 쓰는 사용자는 사람 명령이 늘 안 돈다. (O2b) 밖에서 돌리고 "codex 없음 — sandbox 밖" 표시 — D-094 동작은 지키지만 D-096 의 "밖으로 내리지 않는다" 와 어긋난다 |
+| O3 | **경로별 opt-out** — 기본은 O2, 사람이 명령마다 "sandbox 밖에서 실행" 을 명시하면 그 명령만 지금처럼 밖에서 돈다 | 기본 명령은 O2 와 같다. opt-out 한 명령은 지금(O1)과 같다 — 그 사실을 증거 요약·reviewer 절에 표시한다 | 깨지는 명령을 사람이 되살릴 수 있다. 칸 옆 스위치·플래그가 하나 는다 | 기본 명령은 O2a(안 돈다), opt-out 한 명령만 밖에서 돈다 — 자동으로 밖에 내리는 일이 없어 **D-096 안전선과 같다** |
+| O4 | **경로별 opt-in** — 기본은 O1, 사람이 고르면 sandbox | 기본은 지금과 같다 | 바뀌지 않는다(기본) | 지금처럼 돈다 |
+
+- opt-out 표기 (O3): 칸의 줄 머리(`host:` 같은)는 쓰지 않는다 — CLI `--verify` 와 `verify.json` 이 이미 `phase:명령` 을 줄 머리로 읽는다(`cli.ts:101-107`, `verify.ts:24-29`). 그래서 GUI 는 칸 옆 스위치(카드마다 꺼진 채 시작), chat 은 별도 플래그(예: `--verify-host "<명령>"`)다.
+- **H4 `session send` 는 opt-out 을 받지 않는다**(권장 이유: 부르는 쪽이 에이전트일 수 있다). 선례는 D-088 — 스캐폴딩 카드는 `--run` 으로 승인하지 않는다(`session-cmd.ts` 의 H7 안내).
+- 약화(§3 마지막 줄)는 O2·O3 로도 남는다. 사람 명령이 `<매니저> run <이름>` · `<매니저> test` 꼴이면 `runTarget` 으로 스냅숏을 떠 S2 를 거는 확장(S2+)이 있다 — 셸 문자열 해석이 아니라 정확한 꼴 맞추기다. 그 밖의 문자열은 대조하지 않는다.
+
+**4-3. CLI once·loop (C1·C2)**
+
+| # | 선택지 | V3a 판정 영향 | UX 영향 | codex 가 없을 때 |
+|---|---|---|---|---|
+| L0 | 그대로 두고 문서화(D-096 범위 7) | 없음 | 없음 | 돈다 |
+| L1 | **W1 선언만 sandbox** — 세션 W1 과 같은 경계(D-096 범위 1). `--verify` 는 4-2 의 결정을 따른다(O3 이면 `--verify` 기본 sandbox + `--verify-host`) | once 는 `contradiction` → 증거 요약에 V3a 를 더한다. loop 는 **`blocked`·`not-started` 를 D-046 의 "돌지 못했다"(`verifyBroken`, `cli.ts:465-475`)로 멈춘다** — primary 는 거부를 고칠 수 없어 재시도는 사이클만 태운다. 기준선이 막히면 D-042 의 "기준선 실패" 가 아니라 "실행할 수 없다"(`cli.ts:373-385`)로 엔진 전에 멈춘다 | **hs-orc 자기 CLI 개발이 깨진다** — E3 대로 R01·R06 `npm test` 기준선이 막혀 loop 는 엔진 전에 멈추고, once 는 `unverified` 다. `--verify-host "npm test"` 같은 opt-out 이나 아래 T1 이 있어야 지금처럼 쓴다 | 선언을 돌리지 않고 그 사실을 찍는다(once `unverified`, loop 는 엔진 전 중단) |
+| L2 | L1 + W2 도 넣는다 | L1 과 같다 | 카드(W3)가 없어 무엇이 도는지 실행 전 안내 줄로 보인다 | L1 과 같다 |
+
+- **T1 (L1·O2·O3 공통 전제, 별도 작업).** hs-orc 자기 테스트를 sandbox 친화로 고친다 — 실패 4건은 setuid `ps` 를 부르는 D-078 테스트이고 `.git` 쓰기 1건이다(E3). 이것은 **D-096 의 지금 세션 위임에도 이미 걸린다**(사실 5). 고치는 방법(테스트를 sandbox 밖 전용으로 표시 · 스냅숏을 `ps` 대신 다른 수단으로)은 이 절의 범위 밖이다.
+
+**5. 권장안**
+- **첫 조각 D1** (4-1). 근거: E1 — 사람이 W2 와 같은 명령을 적으면 판정이 `unverified` → `ok` 로 뒤집히고 홈 쓰기가 일어난다. 4-2·4-3 을 무엇으로 정하든 옳은 수정이고 작다. 보호를 빼는 쪽이 아니라 더하는 쪽이다.
+- **4-2 는 O3 (기본 sandbox + 명령 단위 opt-out, `session send` 는 opt-out 없음, codex 없으면 기본 명령은 돌지 않음).** 근거:
+  - E2 — D-096 실행기를 그대로 쓴다. 새 정책 표면은 스위치·플래그 하나다.
+  - §3 — "사람이 적었다" 는 흔한 검증 명령에서 위험을 거의 줄이지 못하고, 그 "직접" 마저 H1~H4 에서 자주 낡는다. 자동으로 넓은 권한을 주지 않는다는 Q30 §4 의 선을 사람 명령에도 둔다.
+  - E3 — 기본 sandbox 는 실제로 명령을 깬다(hs-orc 자기 `npm test`). 그래서 O2(되돌릴 길 없음)가 아니라 O3 다. 깨질 때의 결과는 조용한 통과가 아니라 사유가 보이는 `unverified` 다.
+  - O1·O4 를 권하지 않는 이유: 기본값이 지금과 같아 §3 의 경로가 그대로다. O4 는 사람이 매번 sandbox 를 고를 이유를 알아야 한다.
+- **4-3 은 L1** (W1 sandbox · `--verify` 는 O3 규칙 · loop 의 `blocked` 는 D-046 중단). L2(W2)는 후속. **단 T1 이 먼저이거나 함께여야 한다** — 아니면 hs-orc 자기 loop 가 매번 엔진 전에 멈춘다.
+- **순서**: D1 → T1 → O3(세션) → L1(CLI).
+- 반대 근거:
+  - (a) O3 은 동작 변화다 — 오늘 GUI 칸에 `npm test` 를 적는 사람은 결과가 `ok` 에서 `unverified` 로 바뀔 수 있다(E3). 스위치를 찾아야 지금처럼 쓴다.
+  - (b) codex 가 없는 사용자에게 O3 의 기본 명령은 돌지 않는다. "사람이 적은 명령은 돈다" 는 기대와 어긋난다 — 증거 요약의 사유 줄이 유일한 안내다.
+  - (c) V3a 의 차단성 목록은 좁다(사실 4). 사람 명령은 W2 보다 종류가 넓어 `forbidden-exec-sugid` · `mach-lookup` 류 거부로 인한 실패가 `rework` 로 남는 일이 늘 수 있다. 목록을 넓히면 진짜 실패가 `unverified` 로 숨는 쪽이 는다 — 트레이드오프다.
+  - (d) sandbox 도 env 를 그대로 넘긴다(`auto-verify.ts:154` `...process.env`). 네트워크가 막혀 밖으로 못 보낼 뿐, 작업 폴더에 키를 쓰는 것은 막지 않는다.
+
+**6. 미검증·이 조사가 보장하지 않는 것**
+- E1·E2 는 가짜 primary 와 스크래치 프로젝트 1개(n=1)다. 실제 codex primary 가 이런 코드를 쓰는지가 아니라 **쓰면 어디서 돈다**를 확인했다.
+- GUI 칸이 다음 카드에 남는 것은 코드 읽기다(Electron 실기 미확인). chat `--verify` 재사용은 코드 사실이다.
+- E3 는 이 저장소 1개 · 1회다. vitest·jest · pnpm·yarn·bun · Swift·Xcode 류 명령의 sandbox 동작은 재지 않았다. `npm run gate`(R04)는 재지 않았다.
+- `.git` 쓰기 거부가 codex 의 고정 정책인지(버전·설정에 따라 바뀌는지)는 확인하지 않았다 — 이번 거부 로그 1줄이 근거다.
+- sandbox 밖 명령의 네트워크·홈 쓰기는 실행기에 제한이 없다는 코드 사실과 E1 의 홈 쓰기로 확인했다. 네트워크 송신은 재지 않았다.
+- §4 의 구현 크기는 코드 읽기 어림이다.
+
+**7. 결정 대기 (전하 몫)**
+1. **W2 와 겹치는 사람 명령**: **D1 W2 쪽을 남긴다(권장)** / D0 그대로.
+2. **사람 명령(H1~H4)의 실행 위치**: O1 그대로 + 문서화 / O2 전부 sandbox / **O3 기본 sandbox + 명령 단위 opt-out(권장)** / O4 기본 밖 + opt-in.
+3. **codex 가 없을 때 sandbox 기본인 사람 명령**: **돌리지 않고 `unverified`(권장 — D-096 안전선)** / 밖에서 돌리고 표시.
+4. **`session send --verify` 의 opt-out**: **받지 않는다(권장 — 에이전트가 부를 수 있다, D-088 선례)** / 받는다.
+5. **CLI once·loop**: L0 그대로 / **L1 W1 sandbox + `--verify` 는 2번 규칙 + loop `blocked` 는 D-046 중단(권장)** / L2 W2 까지.
+6. **T1 hs-orc 자기 테스트의 sandbox 실패 4건**: **L1·O3 앞에 고친다(권장)** / 따로 둔다 — 이 경우 hs-orc 저장소의 R01·R06 쓰기 세션 위임이 지금처럼 `unverified` 로 닫힌다(사실 5).
+7. **GUI 칸을 승인 뒤 비울지**(§3 H1·H2): 비운다 / 그대로(세션 동안 유지가 의도라면).
+8. **S2+ (사람 명령이 `<매니저> run|test` 꼴이면 스냅숏 대조)**: 함께 / 후속 / 하지 않는다.
+
+결정 전에는 코드·SPEC 을 바꾸지 않는다.
+
+---
+
 ## 미해결 목록
 
 | # | 질문 | 막는 단계 |
@@ -4269,3 +4401,4 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 | ~~Q28~~ | ~~프로젝트에 오케스트레이터 세션과 워커 세션을 나눌까~~ → **D-090 확정** (화면 구분부터 — 첫 조각 S1: 역할 기록 · 칩 · `session new` 진입점. W1 워커 지휘자 유지 · T1 쓰기 워커 워크트리 · K1 종료 전파 없음 · 오케스트레이터 0~1 · 자율 지휘 열지 않음. O2·O3 는 필요가 확인된 뒤, O4·W2 버림) | — |
 | ~~Q29~~ | ~~"앱 실행해줘" 를 어떻게 처리할까 — 엔진 sandbox 가 listen 을 막고 dev 서버는 위임 모양과 맞지 않는다~~ → **D-091 확정** (A2 — GUI 실행 카드가 고른 터미널 창에서 `package.json` 의 `dev`·`start` 를 연다, H8 사람 확인 · J1 결정론 감지 + J3 지휘자 `[실행]` 절 · `npm install` 은 경고만. A1 은 필요 확인 뒤, A3 버림) | — |
 | ~~Q30~~ | ~~세션·once 위임에도 Core 가 검증 명령을 돌려 reviewer 에 실을까~~ → **D-094**(P1) · **D-096**(W1 + W2 · X2 + S2 · V2a · V4a · reviewer 그대로, 2026-10-11 전하 결정 · 사전 실측) | — |
+| Q31 | 사람이 적은 검증 명령(GUI 칸 · chat `--verify` · `session send --verify`)과 CLI once·loop 의 W1·`--verify` 가 sandbox 밖이다 — 그대로 · D-096 sandbox 재사용 · 경로별 opt-out (조사, 권장 D1 → T1 → O3 → L1) | 사람 명령·CLI 검증의 실행 위치 |
