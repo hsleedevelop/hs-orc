@@ -605,6 +605,7 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
       assert.match(r.err, /reviewer Astra 생략 — 검증 스크립트가 위임 중 바뀌었다 · `npm run e2e`/);
       assert.match(r.err, /중단 {3}escalated · 1회/);
       assert.equal(existsSync(codexArgs), false, '바뀐 검증에 reviewer 를 태웠다.');
+      assert.match(r.err, /안내 {3}primary 가 검증 스크립트를 바꿨다/);
     });
   });
 

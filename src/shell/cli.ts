@@ -250,7 +250,7 @@ const withTarget = (v: VerifyItem): VerifyItem => {
 
 /** 위임이 이 명령의 스크립트를 바꿨나 (S2) — 바뀌었으면 돌리지 않는다. 사람이 본(primary 전) 것과 다른 것이 돈다. */
 const scriptMoved = (v: VerifyItem): boolean => v.target !== undefined && scriptChanged(process.cwd(), v.target);
-const movedLine = (v: VerifyItem): string => `검증 스크립트가 위임 중 바뀌었다 — \`${verifyLabel(v)}\` 를 실행하지 않았다 (D-096 S2 · D-097 결정 8)`;
+const movedLine = (v: VerifyItem): string => `검증 스크립트가 위임 중 바뀌었다 — \`${verifyLabel(v)}\` 를 실행하지 않았다 (D-096 S2)`;
 
 /** codex 가 없어 sandbox 명령을 돌릴 수 없다는 줄 (D-097 L1) — 밖으로 내리지 않는다. */
 const noCodexLine = (boxed: readonly VerifyItem[]): string =>
@@ -516,6 +516,8 @@ async function main(): Promise<void> {
     let reviewerBroken = false;
     // 사이클 중 검증 명령이 돌지 못하면 primary 가 고칠 수 없다 — 재시도로 상한까지 태우지 않고 올린다 (D-046).
     let verifyBroken = false;
+    // 위임이 검증 스크립트를 바꿔 멈췄다 (D-097 결정 8) — 끝에 무엇을 하면 되는지 안내한다.
+    let scriptMovedStop = false;
     // D-049: 약화로 FAIL 한 다음 사이클도 기계적 FAIL(약화·명령 실패)이면 과제와 기존 테스트가 충돌하는 것이다 —
     // 모델은 약화 없이 풀 수 없다. 재시도로 상한까지 태우지 않고 사람에게 올린다. 첫 약화는 한 번 재시도한다(형식만 바꾼 실수일 수 있다).
     let weakenedLastCycle = false;
@@ -540,6 +542,7 @@ async function main(): Promise<void> {
           const moved = args.write ? postCmds.filter(scriptMoved) : [];
           if (moved.length > 0) {
             verifyBroken = true;
+            scriptMovedStop = true;
             return {
               passed: false,
               verification: `reviewer ${plan.slots.reviewer.label} 생략 — 검증 스크립트가 위임 중 바뀌었다 · ${moved.map((v) => `\`${cmdLabel(v)}\``).join(', ')}`,
@@ -638,6 +641,9 @@ async function main(): Promise<void> {
     );
     if (testConflict) {
       process.stderr.write('안내   과제가 기존 테스트와 충돌한다 — 테스트를 직접 고치거나 과제를 바꾼 뒤 다시 실행한다 (D-049).\n');
+    }
+    if (scriptMovedStop) {
+      process.stderr.write('안내   primary 가 검증 스크립트를 바꿨다 — 바뀐 스크립트는 돌리지 않았다. 변경을 확인해 되돌리거나 검증 명령을 바꾼 뒤 다시 실행한다 (D-097 결정 8).\n');
     }
     if (result.journal.unverified.length > 0) {
       process.stderr.write(`경고   검증 기록이 빈 사이클 ${result.journal.unverified.length}건 — "통과"가 아니다.\n`);
