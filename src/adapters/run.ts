@@ -17,6 +17,11 @@ export interface SpawnSpec {
   readonly format: StreamFormat;
   /** 부모 env 위에 덮어 실을 값 (D-061). 없으면 부모 env 를 그대로 물려준다. */
   readonly env?: Readonly<Record<string, string>>;
+  /**
+   * 그룹 밖 자손 찾기 (D-078). 없으면 `outsideGroupDescendants`(`ps` 스냅숏)다. 테스트가 codex sandbox 안에서 돌 때만
+   * 바꾼다 — sandbox 는 setuid `/bin/ps` 실행을 막고(forbidden-exec-sugid) `pgrep` 도 못 쓴다 (Q31 E3).
+   */
+  readonly descendants?: (rootPid: number) => number[];
 }
 
 /** SIGTERM 후 이 시간 안에 안 죽으면 그룹째 SIGKILL. */
@@ -159,7 +164,7 @@ export function runProcess(spec: SpawnSpec, onEvent?: (event: RunEvent) => void)
   const collectTargets = (): void => {
     if (child.pid === undefined) return;
     targets.add(-child.pid);
-    for (const target of outsideGroupDescendants(child.pid)) targets.add(target);
+    for (const target of (spec.descendants ?? outsideGroupDescendants)(child.pid)) targets.add(target);
     for (const target of targets) terminating.add(target);
   };
   /** 이미 죽었으면 ESRCH 가 나므로 삼킨다. */
