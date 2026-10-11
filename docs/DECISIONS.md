@@ -4466,9 +4466,15 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 - **실측 — hs-orc 자기 R01 `npm test` 기준선** (2026-10-11, codex-cli 0.162.1, `env -u CODEX_HOME`, 모델 호출 0). 이 브랜치를 스크래치에 `rsync`(`.git` 제외 → 새 `git init`)하고 loop 기준선과 같은 실행기(`runSandboxed`, `/bin/sh -c npm test`)를 댔다: **exit 0 · 873/873 통과 · 24.7초 · 판정 `ran`** — T1(PR #140) 뒤 sandbox 안에서 통과한다. loop 를 실제로 띄우지는 않았다(기준선 뒤 엔진이 돈다). 거부 로그에 차단성 거부 `(git) file-write-create <복사본>/.git/index.lock` 1줄이 남아 G1 표시가 매번 붙는다 — 어떤 테스트가 저장소 `.git` 에 쓰려다 막히고도 통과한다(Q31 E3 사실 3 과 같은 줄). 판정은 바뀌지 않는다.
 
 **미검증·위험 (L1)**
-- **동작 변화**: CLI once·loop 의 선언·`--verify` 가 이제 sandbox 안에서 돈다. 네트워크·포트·홈·`.git` 쓰기·setuid 를 쓰는 명령은 once 에서 `unverified`, loop 에서 엔진 전(기준선)·사이클 중 중단으로 바뀐다. 되살리려면 `--verify-host`. codex 가 없으면 once 는 `unverified`, loop 는 시작하지 않는다.
+- **동작 변화**: CLI once·loop 의 선언·`--verify` 가 이제 sandbox 안에서 돈다. 네트워크·포트·홈·`.git` 쓰기·setuid 를 쓰는 명령은 once 에서 `unverified`, loop 에서 엔진 전(기준선)·사이클 중 중단으로 바뀐다. 되살리려면 `--verify-host`. **막힌 명령이 선언(W1, `verify.json`)이면 선언도 조정해야 한다** — `--verify-host` 로 같은 명령을 더해도 선언 쪽은 sandbox 목록에 그대로 남아 같은 자리에서 다시 막힌다. loop 의 중단 안내 줄에도 이것을 적었다. codex 가 없으면 once 는 `unverified`, loop 는 시작하지 않는다.
 - hs-orc 자기 R04 `npm run gate` 와 phase 선언(R05·R06)의 sandbox 동작은 재지 않았다. 실제 엔진을 띄운 loop 전체도 돌리지 않았다.
 - hs-orc 저장소에서 R01 loop 를 돌리면 매번 `.git/index.lock` G1 표시가 붙는다 — 소음이다. 원인 테스트를 찾아 고치는 것은 후속이다.
+
+**PR #143 리뷰 반영 (AO 리뷰 changes_requested, head 284082d)**
+- **loop 기준선이 실행 위치와 G1 을 잃었다** (P2). 기준선 결과를 evidence 로만 바꾼 뒤 기준선 줄과 reviewer 의 재현 결과를 만들어, (a) 기준선에서만 도는 `--verify-host "reproduce:…"`·`before:` 가 reviewer 에 `[sandbox 밖 — 사람이 지정]` 없이 실렸고, (b) phase 없는 명령이 기준선에서만 차단성 거부를 삼키고 exit 0 이면 그 G1 이 어디에도 남지 않았다(사이클 실행이 거부 없이 통과하면 영영 안 보인다).
+- → 기준선 결과(`VerifyRun` — 명령·판정·거부)를 그대로 쓴다. 기준선 줄은 `exit=N` 뒤에 실행 위치·sandbox 판정 꼬리표를 달고, reviewer 의 재현 결과는 `shownRun` 꼬리표를 단 채 싣는다. 기준선에서만 생긴 G1 은 `검증   기준선(변경 전) — sandbox 가 막은 부수 효과가 있었다 …` 줄로 찍고 reviewer 절에도 싣는다.
+- 회귀 2건(`--verify-host` 재현 단계의 꼬리표 · 기준선에서만 생긴 G1) — 리뷰 전 코드에서 둘 다 실패. 종전 D-045 테스트 1건은 reviewer 재현 줄에 `[codex sandbox]` 가 붙는 새 동작으로 기대값을 고쳤다. 테스트 873 → 875. 테스트의 가짜 sandbox 에 `SANDBOX_DENIALS_ON=N`(N번째 호출에만 거부)을 더했다.
+- (선택·문서) 위 "미검증·위험" 의 동작 변화 줄에 선언 조정 안내를 더했다.
 
 **상태** 결정 1(D1 + D1a) — PR #141 머지. 결정 6(T1) — PR #140 머지. 결정 2·3·4·7·9(O3 · 칸 비우기 · G1) — PR #142 머지. 결정 5(L1) — 이 PR, 머지로 확정한다(전하 직접 머지). 남은 것: 결정 8(S2+) · L2(CLI W2) — 후속.
 

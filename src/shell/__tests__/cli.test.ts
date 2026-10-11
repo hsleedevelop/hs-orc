@@ -261,6 +261,7 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
   const codexArgs = path.join(fakeDir, 'codex-args');
   const mark = path.join(fakeDir, 'verify-mark');
   const sandboxLog = path.join(fakeDir, 'sandbox-log');
+  const sandboxCount = path.join(fakeDir, 'sandbox-count');
   const fakeClaude = path.join(fakeDir, 'claude');
   const fakeCodex = path.join(fakeDir, 'codex');
   const codexLine = (text: string) =>
@@ -290,7 +291,10 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
       '  while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do shift; done; shift',
       `  printf '%s\\n' "$*" >> '${sandboxLog}'`,
       '  "$@"; rc=$?',
-      `  printf '%s\\n' '=== Sandbox denials ===' "\${SANDBOX_DENIALS:-None found.}" >&2`,
+      // SANDBOX_DENIALS_ON=N 이면 N번째 sandbox 호출에만 거부를 찍는다 (기준선에서만 막힌 경우).
+      `  c=0; [ -f '${sandboxCount}' ] && read c < '${sandboxCount}'; c=$((c+1)); echo "$c" > '${sandboxCount}'`,
+      '  d="${SANDBOX_DENIALS:-None found.}"; if [ -n "$SANDBOX_DENIALS_ON" ] && [ "$SANDBOX_DENIALS_ON" != "$c" ]; then d="None found."; fi',
+      `  printf '%s\\n' '=== Sandbox denials ===' "$d" >&2`,
       '  exit "$rc"',
       'fi',
       'if [ -n "$REVIEWER_EXIT" ]; then exit "$REVIEWER_EXIT"; fi',
@@ -305,7 +309,7 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
   );
   chmodSync(fakeCodex, 0o755);
   after(() => rmSync(fakeDir, { recursive: true, force: true }));
-  const reset = () => [claudeArgs, reviewCount, primaryCount, codexArgs, mark, sandboxLog].forEach((f) => rmSync(f, { force: true }));
+  const reset = () => [claudeArgs, reviewCount, primaryCount, codexArgs, mark, sandboxLog, sandboxCount].forEach((f) => rmSync(f, { force: true }));
 
   it('FAIL 이면 다음 사이클로 가고, 그 프롬프트에 reviewer 의 지적이 실린다', () => {
     reset();
@@ -388,7 +392,7 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     assert.match(r.err, /중단 {3}goal-reached · 1회/);
     assert.match(r.err, /변경 전\(기준선\) 1회: before:echo RED_BEFORE; exit 1 — 실패해야 한다/);
     assert.match(r.err, /기준선 `before:echo RED_BEFORE; exit 1` exit=1/);
-    assert.match(readFileSync(codexArgs, 'utf8'), /before:echo RED_BEFORE; exit 1 \(기준선 — 변경 전\)[\s\S]*exit=1[\s\S]*RED_BEFORE/);
+    assert.match(readFileSync(codexArgs, 'utf8'), /before:echo RED_BEFORE; exit 1 {2}\[codex sandbox\] \(기준선 — 변경 전\)[\s\S]*exit=1[\s\S]*RED_BEFORE/);
   });
 
   it('before 가 변경 전에 통과하면 재현되지 않은 것이다 — --fix-red-baseline 으로도 넘기지 않고 엔진 없이 올린다 (D-045)', () => {
@@ -524,6 +528,33 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     assert.match(sandboxed(), /echo LOOP_IN/);
     assert.doesNotMatch(sandboxed(), /LOOP_HOST/);
     assert.match(r.err, /검증 {3}sandbox 밖\(사용자 권한·네트워크·홈 쓰기 열림\): echo LOOP_HOST/);
+  });
+
+  it('loop — 기준선에서만 도는 --verify-host 재현 단계도 reviewer 에 "sandbox 밖" 꼬리표를 단 채 실린다 (PR #143 리뷰)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify-host', 'reproduce:echo REPRO_HOST; exit 1'], {
+      PATH: fakeDir,
+      REVIEWER_PASS: '1',
+    });
+    assert.equal(r.code, 0, r.err);
+    assert.doesNotMatch(sandboxed(), /REPRO_HOST/, '--verify-host 재현이 sandbox 로 갔다');
+    assert.match(r.err, /기준선 `reproduce:echo REPRO_HOST; exit 1` exit=1 \[sandbox 밖 — 사람이 지정\]/);
+    assert.match(readFileSync(codexArgs, 'utf8'), /\$ reproduce:echo REPRO_HOST; exit 1 {2}\[sandbox 밖 — 사람이 지정\] \(기준선 — 변경 전\)\nexit=1/);
+  });
+
+  it('loop — 기준선에서만 막힌 부수 효과(G1)도 기준선 줄과 reviewer 절에 남는다 (PR #143 리뷰)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', 'echo BASE_SIDE'], {
+      PATH: fakeDir,
+      REVIEWER_PASS: '1',
+      SANDBOX_DENIALS: DENIED,
+      SANDBOX_DENIALS_ON: '1',
+    });
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.err, /기준선 `echo BASE_SIDE` exit=0 \[codex sandbox · sandbox 가 막은 부수 효과: \(node\) file-write-create/);
+    const reviewer = readFileSync(codexArgs, 'utf8');
+    assert.match(reviewer, /\$ echo BASE_SIDE {2}\[codex sandbox\]\nexit=0/, '사이클 실행은 거부가 없다');
+    assert.match(reviewer, /기준선\(변경 전\) — sandbox 가 막은 부수 효과가 있었다 — `echo BASE_SIDE` exit=0/);
   });
 
   it('loop — codex 가 없으면 sandbox 명령을 밖으로 내리지 않고 엔진 전에 멈춘다 (D-097 L1)', () => {

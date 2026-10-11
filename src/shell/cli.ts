@@ -424,10 +424,17 @@ async function main(): Promise<void> {
     }
     const plainCmds = postCmds.filter((v) => v.phase === undefined);
     let reproduced = '';
+    // 기준선에서만 sandbox 가 막은 부수 효과 (D-097 G1, PR #143 리뷰) — 뒤 사이클이 거부 없이 통과하면 다시 보이지 않으므로 reviewer 에 따로 싣는다.
+    let baselineSide = '';
     if (args.write && plainCmds.length + preCmds.length > 0) {
       const baselineRuns = await runVerifyList([...plainCmds, ...preCmds], auto);
       const baseline = baselineRuns.map((r) => r.evidence);
-      process.stderr.write(`기준선 ${baselineRuns.map((r) => `\`${cmdLabel(r.evidence)}\` exit=${r.evidence.exitCode}`).join(', ')}\n`);
+      // 어디서 돌았는지(sandbox 안·밖)와 sandbox 판정을 기준선 줄에도 단다 (PR #143 리뷰) — 기준선에서만 도는 before·reproduce 는 여기가 유일한 기록이다.
+      const marksOf = (r: VerifyRun): string => shownRun(r).cmd.slice(r.evidence.cmd.length).trim();
+      process.stderr.write(`기준선 ${baselineRuns.map((r) => `\`${cmdLabel(r.evidence)}\` exit=${r.evidence.exitCode} ${marksOf(r)}`).join(', ')}\n`);
+      const sideNotes = baselineRuns.flatMap((r) => sandboxMarks(cmdLabel(r.evidence), r).note ?? []).map((n) => `기준선(변경 전) — ${n}`);
+      for (const n of sideNotes) process.stderr.write(`검증   ${n}\n`);
+      baselineSide = sideNotes.join('\n');
       // D-046: 돌지 못한 명령(126·127·시그널·시간 초과)은 환경 문제다 — 모델도 --fix-red-baseline 도 고치지 못한다.
       // sandbox 가 막았거나 시작하지 못한 기준선도 같다 (D-097 L1) — D-042 의 "기준선 실패" 가 아니다.
       const unrunnable = baselineRuns.filter((r) => whyNotRun(r) !== null);
@@ -437,7 +444,7 @@ async function main(): Promise<void> {
             `중단   검증 명령을 실행할 수 없다 — 테스트 실패가 아니라 환경 문제다. 엔진을 띄우지 않았다.`,
             ...unrunnable.map((r) => `$ ${cmdLabel(r.evidence)} → exit ${r.evidence.exitCode} (${whyNotRun(r)})\n${r.evidence.output.slice(-1500)}`),
             `안내   PATH·설치·시간 제한을 확인한다.`,
-            ...(unrunnable.some((r) => r.verdict.kind !== 'ran') ? ['안내   sandbox 가 막은 명령은 고치거나, 사용자 권한이 필요하면 --verify-host 로 밖에서 돌린다 (D-097 L1).'] : []),
+            ...(unrunnable.some((r) => r.verdict.kind !== 'ran') ? ['안내   sandbox 가 막은 명령은 고치거나, 사용자 권한이 필요하면 --verify-host 로 밖에서 돌린다 (D-097 L1). 선언(verify.json)의 명령이면 선언에서도 빼야 한다 — --verify-host 를 더해도 선언 쪽은 sandbox 에서 그대로 돈다.'] : []),
             '',
           ].join('\n'),
         );
@@ -458,9 +465,10 @@ async function main(): Promise<void> {
         process.exitCode = 1;
         return;
       }
-      reproduced = baseline
-        .filter((c) => c.phase !== undefined)
-        .map((c) => `$ ${cmdLabel(c)} (기준선 — 변경 전)\nexit=${c.exitCode}\n${c.output.slice(-1500)}`)
+      // reviewer 에는 실행 위치 꼬리표(`[sandbox 밖 — 사람이 지정]` 등)를 단 채 싣는다 (PR #143 리뷰).
+      reproduced = baselineRuns
+        .filter((r) => r.evidence.phase !== undefined)
+        .map((r) => `$ ${cmdLabel(shownRun(r))} (기준선 — 변경 전)\nexit=${r.evidence.exitCode}\n${r.evidence.output.slice(-1500)}`)
         .join('\n\n');
       const red = baseline.filter((c) => c.phase === undefined && c.exitCode !== 0);
       if (red.length > 0 && !args.fixRedBaseline) {
@@ -522,7 +530,7 @@ async function main(): Promise<void> {
             .map((r) => `\`${cmdLabel(r.evidence)}\` exit=${r.evidence.exitCode}${sandboxMarks(cmdLabel(r.evidence), r).note ? ' (sandbox 가 막은 부수 효과)' : ''}`)
             .join(', ');
           const checks = args.write
-            ? [checksText(runs.map(shownRun)), reproduced]
+            ? [checksText(runs.map(shownRun)), reproduced, baselineSide]
                 .filter(Boolean)
                 .join('\n\n') || undefined
             : verifyCmds.length > 0
