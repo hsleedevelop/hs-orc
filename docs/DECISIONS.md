@@ -4235,7 +4235,7 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 ---
 
-## Q31 — 사람이 적은 검증 명령과 CLI once·loop 의 검증은 아직 sandbox 밖이다: 누가 정하고 · 어디서 · 실제 위험 · 선택지 (조사)
+## Q31 — 사람이 적은 검증 명령과 CLI once·loop 의 검증은 아직 sandbox 밖이다: 누가 정하고 · 어디서 · 실제 위험 · 선택지 (조사) → **D-097** (9개 모두 권장안, 2026-10-11)
 
 **배경** D-096 은 Core 가 고른 명령(W1 선언 + W2 스크립트)만 `codex sandbox -P :workspace` 안에 넣었다. 두 경로가 남았다. (1) 사람이 승인 때 적은 명령(GUI 칸 · chat `--verify` · `session send --verify`)은 D-094 그대로 sandbox 밖 `sh -c` 다(D-096 범위 1, Q30 사실 1-10). (2) CLI once·loop 는 W1 선언과 `--verify` 를 sandbox 밖에서 돌리고 W2 는 없다(D-045, D-096 범위 7). 이 절은 둘을 어떻게 할지 결정 재료를 모은다 — **코드·정책 변경 없음, 모델·엔진 호출 0.** 근거는 (사실: 코드·실측) · (추론) · (미검증)으로 적는다. 코드 위치는 main `86dc805` 기준이다.
 
@@ -4379,6 +4379,49 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 9. **성공한 명령의 차단성 거부**(§4-4): G0 그대로 / **G1 표시만(권장)** / G2 `unverified`(D-096 V3a 변경).
 
 결정 전에는 코드·SPEC 을 바꾸지 않는다.
+→ **D-097** (2026-10-11 전하 결정): §7 의 9개 모두 권장안. 첫 조각 D1 + D1a 는 D-097 과 같은 PR.
+
+---
+
+## D-097 — 검증 명령의 남은 sandbox 밖 경로를 닫는 순서: 같은 명령은 W2 > W1 > 사람 하나만, 사람 명령은 기본 sandbox + 명령 단위 opt-out, CLI W1 은 sandbox (Q31 확정, 전하 결정 2026-10-11)
+
+**배경** Q31. D-096 뒤에도 사람이 승인 때 적은 명령(GUI 칸 · chat `--verify` · `session send --verify`)과 CLI once·loop 의 W1·`--verify` 는 sandbox 밖 `sh -c` 로 돌았다. 실측 E1 은 칸에 `npm run lint` 한 줄을 적는 것만으로 W2 의 sandbox·S2 가 꺼지고 같은 위임이 `unverified` → `ok` 로 뒤집히며 primary 가 심은 홈 쓰기가 일어남을 보였다. 같은 겹침이 W1 선언에도 있다(Q31 사실 1-1, PR #139 리뷰).
+
+**전하 결정** (Q31 §7, 모두 권장안)
+1. **D1 + D1a** — W1·사람·W2 세 목록을 한 번에 고르고 같은 명령(npm 별칭 포함)이면 W2(`target` 있음) > W1 > 사람 하나만 남긴다. 어느 쪽으로 돌렸는지 증거 요약에 남긴다. codex 가 없으면 합쳐진 사람 명령도 돌지 않는다(D-096 안전선). 근거: Q31 E1·사실 1·1-1, §4-1.
+2. **O3** — 사람 명령은 기본 sandbox(D-096 실행기 재사용, E2), 사람이 명령마다 "sandbox 밖에서 실행" 을 명시하면 그 명령만 밖에서 돈다. 표기는 줄 머리가 아니라 GUI 칸 옆 스위치(카드마다 꺼진 채 시작)와 chat 별도 플래그다(`phase:` 줄 머리와 부딪히지 않게). 근거: §3·§4-2, E3(기본 sandbox 는 실제로 명령을 깨므로 되돌릴 길이 필요하다).
+3. **codex 가 없으면** sandbox 가 기본인 사람 명령은 돌리지 않고 `unverified` 다. 근거: D-096 안전선과 같다.
+4. **`session send --verify` 는 opt-out 을 받지 않는다.** 근거: 부르는 쪽이 에이전트일 수 있다(`session-cmd.ts:3-4`), D-088 H7 선례.
+5. **L1** — CLI once·loop 의 W1 선언은 sandbox, `--verify` 는 2번 규칙(기본 sandbox + `--verify-host`), loop 의 `blocked`·`not-started` 는 D-046 "돌지 못했다"(`verifyBroken`)로 멈춘다. W2(L2)는 후속. 근거: §4-3.
+6. **T1 을 L1·O3 앞에 고친다** — hs-orc 자기 테스트의 sandbox 실패 4건(setuid `ps` 를 부르는 D-078 테스트 · `.git` 쓰기). 근거: E3·사실 5 — 고치지 않으면 hs-orc 저장소의 R01·R06 쓰기 위임과 CLI loop 가 sandbox 에서 막힌다.
+7. **GUI 검증 칸은 승인 뒤 비운다.** 근거: §3 — 첫 카드에 적은 명령이 다음 카드에도 실려 "직접 적었다" 가 낡는다.
+8. **S2+ (D1+T)** 는 후속.
+9. **G1** — exit 0 이어도 차단성 거부가 있으면 증거 요약·reviewer 절의 명령 줄에 "sandbox 가 막은 부수 효과가 있었다: …" 를 단다. 판정은 바꾸지 않는다(D-096 V3a 그대로). 근거: §3·§4-4.
+
+**순서** D1 → T1 → O3(세션) → L1(CLI). 7·9 는 작아서 어느 조각에 얹어도 된다 — 7 은 O3(같은 칸에 스위치를 더한다), 9 는 O3 또는 L1(사람 명령·CLI 가 sandbox 에 들어올 때 같은 표시 코드를 쓴다)에 얹는다. 이번 PR 의 범위가 아니다.
+
+**구현 기록 — 첫 조각 D1 + D1a** (이번 PR)
+- `core/auto-verify.ts` `autoCommands(dir, row, scripts, verifyFile, human)` — W2 를 먼저 고르고(`target` 과 npm 별칭을 같은 명령의 열쇠로 둔다), 그다음 W1(phase 없는 것), 마지막으로 사람 명령을 그 열쇠에 댄다. 돌려주는 값에 합쳐지지 않은 사람 명령(`human`)과 합쳐진 목록(`merged`: 무엇이 · 어디서 왔고 · 무엇으로)을 더했다. 돌 순서는 종전처럼 W1 → W2 다. 사람 명령끼리의 중복은 종전처럼 건드리지 않는다.
+- `core/delegate.ts` — `autoVerify` 가 있으면 사람 명령 목록을 `autoCommands` 의 `human` 으로 짓는다(종전에는 사람 명령을 그대로 두고 W2 를 뺐다). 합쳐진 것은 증거 요약에 `사람 명령 \`npm run lint\` 은 Core 가 고른 \`npm run lint\`(codex sandbox) 하나로 돌린다 (D-097 D1)` 로 남는다. codex 가 없으면 `held` 줄 끝에 `같은 명령인 사람 명령 \`…\` 도 돌리지 않았다 (D-097 D1a)` 를 붙인다. `autoVerify` 가 없는 조립(실행기를 주입한 테스트·읽기 전용)은 종전 그대로 사람 명령만이다.
+- 세션 카드(W3, `session.ts` `autoVerifyShown`)는 같은 함수를 쓰므로 hs-orc R01 카드가 선언 `npm test` 대신 `npm run test`(스크립트 원문 포함)를 보인다.
+- SPEC §5 한 항목.
+
+**검증**
+- `npm run gate` 통과 — 테스트 854 → 857 (`delegate.test.ts` +3 · `auto-verify.test.ts` 1건 갱신). 모델·엔진·sandbox 호출 0 — 가짜 sandbox 실행기다.
+- **수정 전 실패 확인** (새 테스트를 origin/main `00ba3f7` 의 두 파일에 대고 돌렸다): 4건 모두 실패했다.
+  - E1 2·4행 회귀(사람 `npm run lint` + primary 가 스크립트 또는 `lint.js` 본문을 바꾼다): 수정 전에는 사람 명령이 실제 `npm run lint` 로 sandbox 밖에서 돌아 primary 의 코드가 작업 폴더에 표식을 썼다(`sandbox 밖에서 primary 의 코드가 돌았다`). 수정 뒤에는 표식이 없고, 스크립트 변경은 S2, 본문의 쓰기는 가짜 sandbox 거부로 둘 다 `unverified` 다.
+  - hs-orc R01 꼴(선언 `npm test` + `test` 스크립트, primary 가 `test` 를 `exit 0` 으로 약화): 수정 전에는 `/bin/sh -c npm test` 가 S2 없이 돌았다. 수정 뒤에는 `npm run test` 가 돌고 S2 가 약화를 잡는다.
+  - D1a(codex 없음 + 사람 `npm run lint`): 수정 전에는 사람 명령이 밖에서 돌아 `lint-ran` 이 생겼다. 수정 뒤에는 아무것도 돌지 않고 `unverified` 다.
+  - `auto-verify.test.ts` 의 종전 기대(선언 `npm test` 가 W2 를 이긴다)는 결정 1 로 뒤집힌 동작이라 고쳤다.
+
+**미검증·위험**
+- **동작 변화**: 사람이 W2 와 같은 명령을 적던 위임, 그리고 선언이 W2 와 같은 위임(hs-orc 저장소 R01·R06 `npm test`)은 이제 sandbox + S2 로 돈다. 그 명령이 sandbox 에서 깨지는 프로젝트는 `ok` 가 `unverified` 로 바뀐다 — hs-orc 자기 `npm test` 가 그렇다(Q31 E3, T1 이 고친다). 다만 hs-orc 저장소의 선언은 D-096 때부터 이미 sandbox 였으므로 판정은 같고, S2 가 더해진 것이 차이다.
+- 실제 codex sandbox 로 위임 전체를 돌리지 않았다 — 가짜 sandbox 실행기와 Q31 E1(실제 sandbox, 스크래치 하네스)로만 확인했다.
+- 사람 명령 중 W2·W1 과 같지 않은 것은 여전히 sandbox 밖이다 — 결정 2(O3) 몫이다. CLI once·loop 는 그대로다 — 결정 5(L1) 몫이다.
+
+**영향** `core/auto-verify.ts`(`autoCommands`·`MergedCommand`) · `core/delegate.ts` · `core/__tests__/auto-verify.test.ts` · `core/__tests__/delegate.test.ts` · SPEC §5.
+
+**상태** 결정 1(D1 + D1a) 구현됨 — 이 PR. 머지로 확정한다(전하 직접 머지). 결정 2~9 는 위 순서로 후속 PR. T1 은 다른 워커가 병렬로 맡는다.
 
 ---
 
@@ -4416,4 +4459,4 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 | ~~Q28~~ | ~~프로젝트에 오케스트레이터 세션과 워커 세션을 나눌까~~ → **D-090 확정** (화면 구분부터 — 첫 조각 S1: 역할 기록 · 칩 · `session new` 진입점. W1 워커 지휘자 유지 · T1 쓰기 워커 워크트리 · K1 종료 전파 없음 · 오케스트레이터 0~1 · 자율 지휘 열지 않음. O2·O3 는 필요가 확인된 뒤, O4·W2 버림) | — |
 | ~~Q29~~ | ~~"앱 실행해줘" 를 어떻게 처리할까 — 엔진 sandbox 가 listen 을 막고 dev 서버는 위임 모양과 맞지 않는다~~ → **D-091 확정** (A2 — GUI 실행 카드가 고른 터미널 창에서 `package.json` 의 `dev`·`start` 를 연다, H8 사람 확인 · J1 결정론 감지 + J3 지휘자 `[실행]` 절 · `npm install` 은 경고만. A1 은 필요 확인 뒤, A3 버림) | — |
 | ~~Q30~~ | ~~세션·once 위임에도 Core 가 검증 명령을 돌려 reviewer 에 실을까~~ → **D-094**(P1) · **D-096**(W1 + W2 · X2 + S2 · V2a · V4a · reviewer 그대로, 2026-10-11 전하 결정 · 사전 실측) | — |
-| Q31 | 사람이 적은 검증 명령(GUI 칸 · chat `--verify` · `session send --verify`)과 CLI once·loop 의 W1·`--verify` 가 sandbox 밖이다 — 그대로 · D-096 sandbox 재사용 · 경로별 opt-out (조사, 권장 D1 → T1 → O3 → L1, G1) | 사람 명령·CLI 검증의 실행 위치 |
+| ~~Q31~~ | ~~사람이 적은 검증 명령과 CLI once·loop 의 W1·`--verify` 가 sandbox 밖이다~~ → **D-097 확정** (9개 모두 권장안 — D1 + D1a · O3 · codex 없으면 안 돎 · `session send` opt-out 없음 · L1 · T1 먼저 · 칸 비우기 · S2+ 후속 · G1. 순서 D1 → T1 → O3 → L1) | — |

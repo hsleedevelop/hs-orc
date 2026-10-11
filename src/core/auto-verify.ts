@@ -56,41 +56,65 @@ export const shownOf = (commands: readonly AutoCommand[]): AutoVerifyShown[] =>
 /** npm 이 `run` 없이 받는 스크립트 — 선언의 `npm test` 와 W2 의 `npm run test` 는 같은 명령이다. */
 const RUNLESS = new Set(['test', 'start', 'stop', 'restart']);
 
+/** W1·사람 명령이 같은 명령으로 합쳐졌다 (D-097 D1) — `into` 하나만 돈다. 증거 요약에 남긴다. */
+export interface MergedCommand {
+  readonly cmd: string;
+  readonly from: 'declared' | 'human';
+  readonly into: string;
+}
+
 /**
- * 이 위임에서 Core 가 고를 명령. 선언(W1, phase 없는 것만)이 먼저, 그다음 W2 스크립트다. `exclude`(사람이 적은 명령)와 같은 것은 뺀다.
+ * 이 위임에서 돌 검증 명령을 세 목록(W1 선언 · 사람 명령 · W2 스크립트)에서 한 번에 고른다 (D-097 D1).
+ * 같은 명령(npm 별칭 포함)이면 보호가 강한 쪽 하나만 남긴다 — W2(`target` 이 있어 S2 대조를 받는다) > W1(sandbox) > 사람(sandbox 밖).
+ * 사람이 W2 와 같은 명령을 적으면 그 명령이 sandbox·S2 밖으로 빠지던 결함(Q31 E1)을 막는다.
  * phase 선언은 돌리지 않고 `notes` 로 남긴다 — phase 를 실행 시점으로 나누는 것은 CLI once·loop(D-045) 몫이다.
+ * `commands` 는 W1 이 먼저, 그다음 W2 다. `human` 은 합쳐지지 않고 남은 사람 명령이다.
  */
 export function autoCommands(
   dir: string,
   rowId: string,
   scripts: VerifyScripts,
   verifyFile: string,
-  exclude: readonly string[],
-): { readonly commands: AutoCommand[]; readonly notes: string[] } {
-  const seen = new Set(exclude.map((c) => c.trim()));
-  const commands: AutoCommand[] = [];
-  const notes: string[] = [];
-  for (const v of defaultVerify(rowId, verifyFile)) {
-    if (v.phase !== undefined) {
-      notes.push(`세션 위임은 phase 선언을 돌리지 않는다 — \`${v.phase}:${v.cmd}\` (CLI once·loop 몫, D-045)`);
-      continue;
-    }
-    if (seen.has(v.cmd.trim())) continue;
-    seen.add(v.cmd.trim());
-    commands.push({ cmd: v.cmd, argv: ['/bin/sh', '-c', v.cmd] });
-  }
+  human: readonly string[],
+): { readonly commands: AutoCommand[]; readonly notes: string[]; readonly human: string[]; readonly merged: MergedCommand[] } {
+  // 같은 명령으로 보는 글 → 실제로 돌 명령.
+  const owner = new Map<string, string>();
+  const w2: AutoCommand[] = [];
   for (const group of verifyGroups(scripts, rowId)) {
     const t = runTarget(dir, group);
     if ('why' in t) continue;
     // `npm init` 자리표시 test 는 늘 실패한다 — 테스트가 없다는 뜻이다(D-093 과 같은 판정).
     if (/no test specified/.test(t.body)) continue;
     const cmd = t.argv.join(' ');
-    const alias = RUNLESS.has(t.script) ? `${t.pm} ${t.script}` : null;
-    if (seen.has(cmd) || (alias !== null && seen.has(alias))) continue;
-    seen.add(cmd);
-    commands.push({ cmd, argv: t.argv, target: t });
+    if (owner.has(cmd)) continue;
+    w2.push({ cmd, argv: t.argv, target: t });
+    owner.set(cmd, cmd);
+    if (RUNLESS.has(t.script)) owner.set(`${t.pm} ${t.script}`, cmd);
   }
-  return { commands, notes };
+  const w1: AutoCommand[] = [];
+  const notes: string[] = [];
+  const merged: MergedCommand[] = [];
+  for (const v of defaultVerify(rowId, verifyFile)) {
+    if (v.phase !== undefined) {
+      notes.push(`세션 위임은 phase 선언을 돌리지 않는다 — \`${v.phase}:${v.cmd}\` (CLI once·loop 몫, D-045)`);
+      continue;
+    }
+    const key = v.cmd.trim();
+    const into = owner.get(key);
+    if (into !== undefined) {
+      if (into !== key) merged.push({ cmd: key, from: 'declared', into });
+      continue;
+    }
+    owner.set(key, key);
+    w1.push({ cmd: v.cmd, argv: ['/bin/sh', '-c', v.cmd] });
+  }
+  const rest: string[] = [];
+  for (const c of human) {
+    const into = owner.get(c.trim());
+    if (into !== undefined) merged.push({ cmd: c.trim(), from: 'human', into });
+    else rest.push(c);
+  }
+  return { commands: [...w1, ...w2], notes, human: rest, merged };
 }
 
 /** 위임이 W2 스크립트를 바꿨나 (S2). 지금 다시 고른 대상이 스냅숏과 argv·본문·pre/post 까지 같아야 같다. */

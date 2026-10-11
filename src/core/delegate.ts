@@ -104,17 +104,27 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
   const notes: string[] = [];
   // 돌려야 했지만 결과를 얻지 못한 검증 (D-096) — 다른 명령이 요구를 채워도 ok 로 닫지 않는다(`collect` 의 held). 진짜 실패의 rework 가 먼저다.
   const held: string[] = [];
-  const checksList: Check[] = verifyCmds.map((cmd) => ({ cmd }));
+  const checksList: Check[] = [];
   // Core 가 고른 명령은 쓰기 위임에서만, codex sandbox 안에서만 돈다 (D-096). codex 가 없으면 sandbox 밖으로 내리지 않는다.
   const autoVerify = input.write ? input.autoVerify : undefined;
   if (autoVerify) {
+    // 사람 명령·선언이 Core 가 고른 명령과 같으면 보호가 강한 쪽 하나만 남는다 (D-097 D1) — 사람이 적었다고 sandbox·S2 밖으로 빠지지 않는다.
     const picked = autoCommands(input.cwd, plan.assignment.id, autoVerify.scripts, verifyConfigPath(input.cwd), verifyCmds);
     notes.push(...picked.notes);
+    checksList.push(...picked.human.map((cmd) => ({ cmd })));
+    const mergedText = picked.merged.map((m) => `${m.from === 'human' ? '사람 명령' : '선언'} \`${m.cmd}\``).join(' · ');
     if (autoVerify.codex === null && picked.commands.length > 0) {
-      held.push(`codex 를 찾지 못해 Core 가 고른 검증 명령 ${picked.commands.length}개를 실행하지 않았다 — sandbox 밖에서는 돌리지 않는다 (D-096) — ${picked.commands.map((c) => `\`${c.cmd}\``).join(' · ')}`);
+      // 합쳐진 사람 명령도 돌지 않는다 (D-097 D1a) — 밖에서 돌리면 D-096 안전선을 넘는다.
+      held.push(
+        `codex 를 찾지 못해 Core 가 고른 검증 명령 ${picked.commands.length}개를 실행하지 않았다 — sandbox 밖에서는 돌리지 않는다 (D-096) — ${picked.commands.map((c) => `\`${c.cmd}\``).join(' · ')}` +
+          (mergedText ? ` — 같은 명령인 ${mergedText} 도 돌리지 않았다 (D-097 D1a)` : ''),
+      );
     } else {
       checksList.push(...picked.commands.map((auto) => ({ cmd: auto.cmd, auto })));
+      notes.push(...picked.merged.map((m) => `${m.from === 'human' ? '사람 명령' : '선언'} \`${m.cmd}\` 은 Core 가 고른 \`${m.into}\`(codex sandbox) 하나로 돌린다 (D-097 D1)`));
     }
+  } else {
+    checksList.push(...verifyCmds.map((cmd) => ({ cmd })));
   }
   const runCheck = async (c: Check, signal?: AbortSignal): Promise<CheckRun> => {
     // Core 가 고른 명령에는 sandbox 밖 길이 없다 (D-096 안전선) — codex 가 없으면 위에서 목록에 넣지 않았고, 여기서도 던진다.

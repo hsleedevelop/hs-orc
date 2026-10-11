@@ -11,10 +11,10 @@ const folder = (files: Record<string, string>): string => {
   for (const [file, body] of Object.entries(files)) writeFileSync(path.join(dir, file), body, 'utf8');
   return dir;
 };
-const cmds = (dir: string, row: string, verify: Record<string, unknown> = {}, exclude: readonly string[] = []) => {
+const cmds = (dir: string, row: string, verify: Record<string, unknown> = {}, human: readonly string[] = []) => {
   const file = path.join(dir, 'verify.json');
   writeFileSync(file, JSON.stringify(verify), 'utf8');
-  return autoCommands(dir, row, loadLimits().verifyScripts, file, exclude);
+  return autoCommands(dir, row, loadLimits().verifyScripts, file, human);
 };
 
 describe('Core 가 고르는 검증 명령 (D-096 W1 + W2)', () => {
@@ -27,11 +27,18 @@ describe('Core 가 고르는 검증 명령 (D-096 W1 + W2)', () => {
     assert.deepEqual(cmds(dir, 'R03').commands.map((c) => c.cmd), ['pnpm run lint', 'pnpm run typecheck']);
   });
 
-  it('선언(phase 없는 것)이 먼저 오고, phase 선언은 돌리지 않고 남기며, 같은 명령(npm test ≡ npm run test·사람이 적은 것)은 한 번만이다', () => {
+  it('선언(phase 없는 것)이 먼저 오고 phase 선언은 돌리지 않고 남긴다 — 같은 명령(npm test ≡ npm run test)은 W2 > W1 > 사람 하나만이다 (D-097 D1)', () => {
     const dir = folder({ 'package.json': JSON.stringify({ scripts: { lint: 'eslint .', test: 'node --test' } }) });
-    const picked = cmds(dir, 'R01', { default: ['npm run check'], R01: ['npm test', 'before:npm test'] }, ['npm run lint']);
-    assert.deepEqual(picked.commands.map((c) => c.cmd), ['npm run check', 'npm test']);
+    const picked = cmds(dir, 'R01', { default: ['npm run check'], R01: ['npm test', 'before:npm test'] }, ['npm run lint', 'npm run check', 'git diff --check']);
+    assert.deepEqual(picked.commands.map((c) => c.cmd), ['npm run check', 'npm run lint', 'npm run test']);
     assert.deepEqual(picked.commands[0]?.argv, ['/bin/sh', '-c', 'npm run check']);
+    assert.ok(picked.commands[2]?.target, 'W2 는 S2 대조 대상을 가진다');
+    assert.deepEqual(picked.human, ['git diff --check']);
+    assert.deepEqual(picked.merged, [
+      { cmd: 'npm test', from: 'declared', into: 'npm run test' },
+      { cmd: 'npm run lint', from: 'human', into: 'npm run lint' },
+      { cmd: 'npm run check', from: 'human', into: 'npm run check' },
+    ]);
     assert.match(picked.notes[0] ?? '', /phase 선언을 돌리지 않는다 — `before:npm test`/);
   });
 

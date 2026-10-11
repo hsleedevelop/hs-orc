@@ -342,10 +342,10 @@ describe('Core 가 고른 검증 명령은 codex sandbox 안에서 기준선과 
     };
     return { runner, calls, inners: () => calls.map((c) => inner(c.argv)) };
   };
-  const go = (dir: string, execute: SlotExecutor, auto: { runner: CommandRunner; codex?: string | null }, options: { write?: boolean; id?: string; signal?: AbortSignal } = {}) =>
+  const go = (dir: string, execute: SlotExecutor, auto: { runner: CommandRunner; codex?: string | null }, options: { write?: boolean; id?: string; signal?: AbortSignal; verify?: string[] } = {}) =>
     delegate({
       matrix, plan: assign(matrix, catalog, row(options.id ?? 'R01')), reason: '수동 지정', title: '날짜 넣어줘', prompt: '날짜 넣어줘',
-      verify: [], write: options.write ?? true, cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
+      verify: options.verify ?? [], write: options.write ?? true, cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
       autoVerify: { codex: auto.codex === undefined ? '/bin/codex' : auto.codex, runner: auto.runner, scripts: loadLimits().verifyScripts },
       ...(options.signal ? { signal: options.signal } : {}),
     });
@@ -416,6 +416,49 @@ describe('Core 가 고른 검증 명령은 codex sandbox 안에서 기준선과 
     assert.equal(f.calls.length, 0);
     assert.equal(existsSync(path.join(dir, 'lint-ran')), false, 'sandbox 밖에서 돌았다');
     assert.match(d.report.summary, /codex 를 찾지 못해 Core 가 고른 검증 명령 1개를 실행하지 않았다/);
+  });
+
+  it('사람이 W2 와 같은 명령을 적어도 sandbox·S2 밖으로 빠지지 않는다 — 스크립트 약화는 S2, 본문의 홈 쓰기는 sandbox 가 막는다 (D-097 D1, Q31 E1 2·4행)', async () => {
+    // 2행: primary 가 package.json 의 lint 를 바꾼다. 4행: 스크립트는 그대로 두고 lint.js 본문을 바꾼다.
+    const variants: [string, (dir: string) => void, (inner: string, nth: number) => Reply, RegExp][] = [
+      ['스크립트', (dir) => writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ scripts: { lint: 'node evil.js' } })), () => ({ exit: 0 }), /검증 스크립트가 위임 중 바뀌었다 — `npm run lint`/],
+      ['본문', (dir) => writeFileSync(path.join(dir, 'lint.js'), "require('fs').writeFileSync('escaped', 'x')\n"),
+        (_inner, nth) => (nth === 2 ? { exit: 1, denials: ['(node) file-write-create /Users/me/escaped'] } : { exit: 0 }), /sandbox 가 막았다 — `npm run lint`/],
+    ];
+    for (const [name, primaryDo, respond, why] of variants) {
+      const dir = project({ 'package.json': JSON.stringify({ scripts: { lint: 'node lint.js' } }), 'lint.js': '', 'evil.js': "require('fs').writeFileSync('escaped', 'x')\n" });
+      const f = fake(respond);
+      const d = await go(dir, spy('없음\nPASS', () => primaryDo(dir)).execute, f, { verify: ['npm run lint'] });
+      assert.equal(existsSync(path.join(dir, 'escaped')), false, `${name}: sandbox 밖에서 primary 의 코드가 돌았다`);
+      assert.ok(f.inners().every((c) => c === 'npm run lint'), name);
+      assert.equal(d.outcome, 'unverified', name);
+      assert.match(d.report.summary, why, name);
+      assert.match(d.report.summary, /사람 명령 `npm run lint` 은 Core 가 고른 `npm run lint`\(codex sandbox\) 하나로 돌린다 \(D-097 D1\)/, name);
+    }
+  });
+
+  it('선언(W1)이 W2 와 같으면 W2 로 돌려 S2 를 받는다 — hs-orc R01 의 `npm test` (D-097 D1, PR #139 리뷰)', async () => {
+    const pkg = { scripts: { lint: 'eslint .', test: 'node --test' } };
+    const dir = project({ 'package.json': JSON.stringify(pkg), 'a.test.js': '' });
+    const config = verifyConfigPath(dir);
+    mkdirSync(path.dirname(config), { recursive: true });
+    writeFileSync(config, JSON.stringify({ R01: ['npm test'] }), 'utf8');
+    const f = fake();
+    const d = await go(dir, spy('없음\nPASS', () => writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ scripts: { ...pkg.scripts, test: 'exit 0' } }))).execute, f);
+    assert.deepEqual(f.inners(), ['npm run lint', 'npm run test', 'npm run lint']);
+    assert.equal(d.outcome, 'unverified');
+    assert.match(d.report.summary, /검증 스크립트가 위임 중 바뀌었다 — `npm run test`/);
+    assert.match(d.report.summary, /선언 `npm test` 은 Core 가 고른 `npm run test`\(codex sandbox\) 하나로 돌린다/);
+  });
+
+  it('codex 가 없으면 W2 와 같은 사람 명령도 돌지 않는다 — sandbox 밖으로 내리지 않는다 (D-097 D1a)', async () => {
+    const dir = project({ 'package.json': JSON.stringify({ scripts: { lint: 'touch lint-ran' } }) });
+    const f = fake();
+    const d = await go(dir, spy('없음\nPASS').execute, { runner: f.runner, codex: null }, { id: 'R03', verify: ['npm run lint'] });
+    assert.equal(f.calls.length, 0);
+    assert.equal(existsSync(path.join(dir, 'lint-ran')), false, 'sandbox 밖에서 돌았다');
+    assert.equal(d.outcome, 'unverified');
+    assert.match(d.report.summary, /같은 명령인 사람 명령 `npm run lint` 도 돌리지 않았다 \(D-097 D1a\)/);
   });
 
   it('읽기 전용 위임에서는 돌리지 않는다 (D-094 결정 4)', async () => {
