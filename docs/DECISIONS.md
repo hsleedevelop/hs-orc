@@ -4395,7 +4395,7 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 5. **L1** — CLI once·loop 의 W1 선언은 sandbox, `--verify` 는 2번 규칙(기본 sandbox + `--verify-host`), loop 의 `blocked`·`not-started` 는 D-046 "돌지 못했다"(`verifyBroken`)로 멈춘다. W2(L2)는 후속. 근거: §4-3.
 6. **T1 을 L1·O3 앞에 고친다** — hs-orc 자기 테스트의 sandbox 실패 4건(setuid `ps` 를 부르는 D-078 테스트 · `.git` 쓰기). 근거: E3·사실 5 — 고치지 않으면 hs-orc 저장소의 R01·R06 쓰기 위임과 CLI loop 가 sandbox 에서 막힌다.
 7. **GUI 검증 칸은 승인 뒤 비운다.** 근거: §3 — 첫 카드에 적은 명령이 다음 카드에도 실려 "직접 적었다" 가 낡는다.
-8. **S2+ (D1+T)** 는 후속.
+8. **S2+ (D1+T)** 는 후속. → 2026-10-11 전하 착수 승인, 아래 "구현 기록 — 결정 8".
 9. **G1** — exit 0 이어도 차단성 거부가 있으면 증거 요약·reviewer 절의 명령 줄에 "sandbox 가 막은 부수 효과가 있었다: …" 를 단다. 판정은 바꾸지 않는다(D-096 V3a 그대로). 근거: §3·§4-4.
 
 **순서** D1 → T1 → O3(세션) → L1(CLI). 7·9 는 작아서 어느 조각에 얹어도 된다 — 7 은 O3(같은 칸에 스위치를 더한다), 9 는 O3 또는 L1(사람 명령·CLI 가 sandbox 에 들어올 때 같은 표시 코드를 쓴다)에 얹는다. 이번 PR 의 범위가 아니다.
@@ -4501,7 +4501,40 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 1. **R05·R06 에 phase 선언을 둘지** — R05 `before:`/`after:`, R06 `reproduce:`/`fix:`/`regress:` 를 hs-orc 자기 선언에 적을지. 지금은 R05 비움 · R06 phase 없는 `npm test` 다. 적으면 D-045 단계 대조가 hs-orc 자기 위임에도 걸린다. 무엇을 적을지는 행의 뜻에 달려 정책이다.
 2. **`GIT_OPTIONAL_LOCKS=0` 을 둘지** — git 이 status 의 선택적 잠금(`index.lock`)을 잡지 않게 하는 공식 환경 변수다. (a) `scripts/test-setup.mjs` 에 한 줄 — 위 "다른 테스트 41곳" 의 재발을 한 번에 막는다(테스트 전용). (b) 제품의 `git status` 두 곳(`evidence-gather.ts` `changedFiles`·`uncommittedFiles`) — 사용자가 같은 저장소에서 git 을 쓰는 중에 hs-orc 의 증거 수집이 `index.lock` 을 잡아 사용자 명령이 `File exists` 로 실패할 수 있는 경합을 없앤다(미실측). (c) 두지 않는다 — 이번 수정으로 지금 소음은 없다. 권장: (a) 는 값이 작고 되돌리기 쉽다. (b) 는 제품 동작이라 실제 경합을 재현한 뒤에 정한다.
 
-**상태** 결정 1(D1 + D1a) — PR #141 머지. 결정 6(T1) — PR #140 머지. 결정 2·3·4·7·9(O3 · 칸 비우기 · G1) — PR #142 머지. 결정 5(L1) — PR #143 머지. 후속(`index.lock` G1 소음 · R04·R05·R06 실측) — 이 PR, 머지로 확정한다(전하 직접 머지). 남은 것: 결정 8(S2+) · L2(CLI W2) — 후속. 위 "전하 결정 필요" 2건.
+**구현 기록 — 결정 8 (S2+ · D1+T)** (L1 이 PR #143 으로 머지된 뒤 · 전하 착수 승인 2026-10-11)
+- `core/auto-verify.ts` `scriptTarget(dir, cmd)` — 문자열을 공백·탭으로 나눈 낱말이 **정확히** `<매니저> run <이름>`(npm·pnpm·yarn·bun) 또는 `<매니저> test`(D1 의 `RUNLESS` 그대로 — npm·pnpm·yarn, `bun test` 는 내장 러너라 제외)일 때만 `runTarget(dir, [이름])` 으로 스냅숏을 뜬다. 이름은 셸이 다르게 읽을 글자가 없고 `-` 로 시작하지 않는 것만(`[A-Za-z0-9_][A-Za-z0-9_:.+@/-]*`). 스크립트가 없으면 대조하지 않는다. 셸 문자열은 해석하지 않는다 — 그 밖의 문자열은 종전 그대로(대조 없음). `shellCommand` = 문자열 그대로 `/bin/sh -c` + 스냅숏 — **실행은 적힌 문자열 그대로**이고 스냅숏은 대조에만 쓴다.
+- 같은 함수를 세 자리가 탄다(결정 8 "W1·사람에 같은 코드로"): W1 선언(`autoCommands`) · 세션 사람 명령(`delegate`, sandbox 명령은 `shellCommand`, sandbox 밖 지정은 `Check.target`) · CLI once·loop(`withTarget`, 선언·`--verify`·`--verify-host`).
+- **스냅숏 시점** — D-096 S2 와 같다. 세션은 `checksList` 를 짓는 primary 전(기준선 전), CLI once 는 `verify` 목록을 짓는 primary 전(once 는 기준선이 없다), CLI loop 는 기준선 전(= 첫 primary 전)이다. 대조는 D-096 의 `scriptChanged`(argv·본문·`pre`·`post`) 그대로다.
+- **바뀌었을 때** — 세션·once: 돌리지 않고 `검증 스크립트가 위임 중 바뀌었다 — \`…\` 를 실행하지 않았다` 를 증거 요약(`held` → `unverified`)과 reviewer 절 끝에 남긴다(D-096 S2 와 같은 줄). loop: 아래 2.
+- 카드(W3) — 선언 문자열이 꼴에 맞으면 카드에 그 스크립트 원문(`pre`·`post` 포함)이 함께 보인다(`shownOf` 가 스냅숏을 읽는다). 사람 명령은 승인 때 적으므로 카드에 실리지 않는다.
+- SPEC §5 두 항목(스냅숏 대조 · CLI once·loop).
+
+**구현에서 정한 것 — 전하 결정 2026-10-11: 둘 다 제안(a)대로 확정** (설계 문서가 정하지 않은 자리라 하나를 구현하고 대안을 남겨 올렸다. 대안 (b)는 버린다)
+1. **sandbox 밖을 지정한 사람 명령(GUI 스위치 · `chat --verify-host` · CLI `--verify-host`)에도 S2 를 건다** (구현). 근거: S2 는 "무엇이 도나"(D-096), opt-out 은 "어디서 도나"(O3)를 정한다 — 둘은 직교한다. Q31 §4-2 의 S2+ 문장은 "사람 명령" 을 가르지 않았고, 결정 8 은 "W1·사람에 같은 코드로" 다. 사용자 권한으로 도는 명령일수록 약화 대조가 더 필요하다. **대안 (b)** 걸지 않는다 — O3 표의 "opt-out 한 명령은 지금(O1)과 같다" 를 대조까지 포함해 읽는 것이다. opt-out 의 목적(sandbox 에서 깨지는 명령을 되살리기)은 (a)에서도 그대로다.
+2. **CLI loop 에서 사이클 중 스크립트가 바뀌면 그 사이클은 검증 명령도 reviewer 도 돌리지 않고, 재시도 없이 사람에게 올린다(`escalated`)** (구현). 결과 줄은 `reviewer … 생략 — 검증 스크립트가 위임 중 바뀌었다 · \`…\``. 끝에 `안내   primary 가 검증 스크립트를 바꿨다 — … 되돌리거나 검증 명령을 바꾼 뒤 다시 실행한다` 한 줄을 낸다. 근거: L1 이 결과를 얻지 못한 검증(`blocked`·`not-started`)을 D-046 중단으로 맵핑했다 — 같은 꼴이다. 세션·once 의 `unverified`(사람이 본다)와도 맞는다. **대안 (b)** D-047 약화처럼 FAIL + 지적("검증 스크립트를 되돌려라")으로 재시도하고, 연속이면 D-049 충돌로 올린다 — primary 가 되돌릴 수 있으니 실행 하나를 살릴 수 있다. 다만 스냅숏은 첫 primary 전 것이라 되돌리지 않으면 매 사이클 같은 자리에서 걸린다.
+
+**검증 (결정 8)**
+- `npm run gate` 통과 — 테스트 875 → 881(리뷰 반영 뒤 883) (`auto-verify.test.ts` +1 꼴 맞추기 표 · `delegate.test.ts` +2 · `cli.test.ts` +3). 모델·엔진·sandbox 호출 0 — 세션은 가짜 sandbox 실행기, CLI 는 가짜 codex·claude·npm(인자를 파일에 남긴다). 세션의 sandbox 밖 지정 경우는 기준선에서 실제 `npm run e2e`(본문 `node -e 0`)가 임시 폴더에서 한 번 돈다.
+- 양성 — 꼴이 맞는 명령에서 primary 가 스크립트를 바꾸면 작업 뒤에 돌지 않고 `unverified`(세션: 선언 `npm run gate` · 사람 `npm run e2e` · sandbox 밖 지정 `npm run e2e`, 셋 다 `verifyScripts` 밖 이름 / once: `--verify`·`--verify-host` `npm run e2e`) · loop 는 기준선 한 번만 돌고 reviewer 없이 `escalated · 1회`.
+- 음성 — `npm run e2e -- --ci` 는 스크립트가 바뀌어도 그대로 돈다(세션·once). 꼴 표: `npx vitest` · `npm test && …` · `npm run a;b` · `npm run "e2e"` · `npm run --silent` · `bun test` · 없는 스크립트 · `toString run e2e` 는 스냅숏이 없다.
+- **수정 전 실패 확인** — 소스 3파일(`auto-verify.ts`·`delegate.ts`·`cli.ts`)만 HEAD `45ae267` 로 되돌리고 새 테스트를 돌렸다: 양성은 모두 실패했다(`auto-verify.test.ts` 는 `scriptTarget` export 가 없어 파일째 실패 · 세션 양성은 세 경우를 하나씩 남겨 각각 실패 · CLI once·loop 양성 실패). 음성 2건은 수정 전에도 통과한다 — 꼴 밖 문자열을 대조하지 않는 종전 동작을 지키는 가드다.
+
+**미검증·위험 (결정 8)**
+- 실제 codex sandbox·실제 엔진·Electron 화면으로 돌리지 않았다.
+- **동작 변화**: 선언·사람 명령이 꼴에 맞고 primary 가 그 스크립트를 고치는 것이 정당한 작업이면 이제 세션·once 는 `unverified`, loop 는 중단이다 — W2 에서 이미 그랬던 것이 W1·사람 명령으로 넓어졌다. 예: hs-orc 저장소 R04(선언 `npm run gate`)에서 `package.json` 의 `gate` 를 고치는 작업.
+- 꼴은 좁다 — 인자를 붙인 꼴(`npm run e2e -- --ci`) · `npm --prefix x run e2e` · `run` 생략형(`pnpm lint`) · `npx …` · `&&` 묶음은 대조하지 않는다(약화를 놓친다, 종전 그대로). 넓히려면 셸 해석이 필요하다 — 결정 8 의 범위 밖이다.
+- 스크립트가 primary 전에 없었으면(primary 가 새로 만든 이름) 스냅숏이 없어 대조하지 않는다.
+- 꼴의 매니저가 잠금 파일의 매니저와 달라도(`yarn run lint` + `package-lock.json`) 대조한다 — 스냅숏의 argv 는 잠금 파일 기준이고 primary 전·뒤가 같은 함수라 자기 일관적이다(본문·`pre`·`post` 를 본다). primary 가 잠금 파일을 바꾸면 매니저가 달라져 "바뀌었다" 로 걸린다(보수 쪽).
+- 스크립트 본문이 부르는 파일(`node e2e.js` 의 `e2e.js`)의 변경은 S2 가 보지 않는다 — D-096 과 같다(sandbox 의 몫).
+
+**영향 (결정 8)** `core/auto-verify.ts`(`scriptTarget`·`shellCommand`) · `core/delegate.ts`(`Check.target`) · `shell/cli.ts`(`VerifyItem.target`·`withTarget`·`scriptMoved`) · 테스트 3파일 · SPEC §5.
+
+**PR #145 리뷰 반영 (AO 리뷰 changes_requested, head fa53869)**
+- **CLI 의 S2 대조가 목록 실행 전에 한 번만 돌았다** (P2). once 는 `runnable.filter(scriptMoved)`, loop 는 `postCmds.filter(scriptMoved)` 로 대조한 뒤 목록을 돌려, 앞 검증 명령(예: primary 가 고친 `node prepare.js`)이 뒤 명령의 `package.json` 스크립트 본문이나 lifecycle hook(`pree2e`)을 바꾸면 바뀐 명령이 그대로 돌아 통과 증거가 됐다. 세션 위임은 명령마다 실행 직전에 대조하므로 CLI 만의 결함이다.
+- → `runVerifyList` 가 `moved` 를 받으면(primary 뒤) 명령마다 **실행 직전에** `scriptMoved` 를 대조하고 바뀐 명령은 돌리지 않고 담는다. once 는 `held` → `unverified`, loop 는 그 사이클을 `escalated` 로 올린다(앞의 2 그대로). 기준선은 대조하지 않는다 — primary 전이다.
+- 회귀 2건(`cli.test.ts` — once: 앞 `--verify` 가 `e2e` 본문 · `pree2e` hook 을 바꾸는 두 경우 · loop: 사이클(2회차)에서만 앞 명령이 `e2e` 를 약화). 리뷰 전 코드(`fa53869` 의 `cli.ts`)에서 세 경우 모두 실패함을 확인했다(once 두 경우는 하나씩 남겨 각각). 테스트 881 → 883.
+
+**상태** 결정 1(D1 + D1a) — PR #141 머지. 결정 6(T1) — PR #140 머지. 결정 2·3·4·7·9(O3 · 칸 비우기 · G1) — PR #142 머지. 결정 5(L1) — PR #143 머지. 후속(`index.lock` G1 소음 · R04·R05·R06 실측) — PR #144 머지. 결정 8(S2+) — 이 PR, 머지로 확정한다(전하 직접 머지) · 구현에서 정한 2건(sandbox 밖 지정 명령에도 S2 · loop 는 중단)은 전하가 제안대로 확정(2026-10-11). 남은 것: L2(CLI W2) — 후속. 후속 절의 "전하 결정 필요" 2건(R05·R06 phase 선언 · `GIT_OPTIONAL_LOCKS=0`).
 
 ---
 
@@ -4539,4 +4572,4 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 | ~~Q28~~ | ~~프로젝트에 오케스트레이터 세션과 워커 세션을 나눌까~~ → **D-090 확정** (화면 구분부터 — 첫 조각 S1: 역할 기록 · 칩 · `session new` 진입점. W1 워커 지휘자 유지 · T1 쓰기 워커 워크트리 · K1 종료 전파 없음 · 오케스트레이터 0~1 · 자율 지휘 열지 않음. O2·O3 는 필요가 확인된 뒤, O4·W2 버림) | — |
 | ~~Q29~~ | ~~"앱 실행해줘" 를 어떻게 처리할까 — 엔진 sandbox 가 listen 을 막고 dev 서버는 위임 모양과 맞지 않는다~~ → **D-091 확정** (A2 — GUI 실행 카드가 고른 터미널 창에서 `package.json` 의 `dev`·`start` 를 연다, H8 사람 확인 · J1 결정론 감지 + J3 지휘자 `[실행]` 절 · `npm install` 은 경고만. A1 은 필요 확인 뒤, A3 버림) | — |
 | ~~Q30~~ | ~~세션·once 위임에도 Core 가 검증 명령을 돌려 reviewer 에 실을까~~ → **D-094**(P1) · **D-096**(W1 + W2 · X2 + S2 · V2a · V4a · reviewer 그대로, 2026-10-11 전하 결정 · 사전 실측) | — |
-| ~~Q31~~ | ~~사람이 적은 검증 명령과 CLI once·loop 의 W1·`--verify` 가 sandbox 밖이다~~ → **D-097 확정** (9개 모두 권장안 — D1 + D1a · O3 · codex 없으면 안 돎 · `session send` opt-out 없음 · L1 · T1 먼저 · 칸 비우기 · S2+ 후속 · G1. 순서 D1 → T1 → O3 → L1) | — |
+| ~~Q31~~ | ~~사람이 적은 검증 명령과 CLI once·loop 의 W1·`--verify` 가 sandbox 밖이다~~ → **D-097 확정** (9개 모두 권장안 — D1 + D1a · O3 · codex 없으면 안 돎 · `session send` opt-out 없음 · L1 · T1 먼저 · 칸 비우기 · S2+ 후속(→ 결정 8 구현) · G1. 순서 D1 → T1 → O3 → L1) | — |

@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadLimits } from '../../data/limits.ts';
-import { autoCommands, sandboxVerdict } from '../auto-verify.ts';
+import { autoCommands, sandboxVerdict, scriptTarget } from '../auto-verify.ts';
 
 const folder = (files: Record<string, string>): string => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-auto-verify-'));
@@ -59,6 +59,20 @@ describe('Core 가 고르는 검증 명령 (D-096 W1 + W2)', () => {
       const picked = cmds(folder({ 'package.json': JSON.stringify({ scripts: { test: 'vitest run' } }), [lock]: '' }), 'R01', {}, [`${pm} test`]);
       assert.deepEqual(picked.merged, [{ cmd: `${pm} test`, from: 'human', into: `${pm} run test` }], pm);
     }
+  });
+
+  it('선언·사람 명령은 정확히 `<매니저> run <이름>` · `<매니저> test` 꼴일 때만 스냅숏을 가진다 — 셸 문자열은 해석하지 않는다 (D-097 결정 8, S2+)', () => {
+    const scripts = { e2e: 'playwright test', gate: 'npm run lint', test: 'vitest run', 'a;b': 'x' };
+    const dir = folder({ 'package.json': JSON.stringify({ scripts }) });
+    for (const cmd of ['npm run e2e', '  npm   run gate ', 'pnpm test', 'yarn run e2e', 'bun run test']) assert.ok(scriptTarget(dir, cmd), cmd);
+    assert.equal(scriptTarget(dir, 'npm run e2e')?.body, 'playwright test');
+    for (const cmd of ['npm run e2e -- --ci', 'npx vitest', 'npm test && npm run e2e', 'npm run a;b', 'npm run "e2e"', 'npm run --silent', 'bun test', 'npm run missing', 'toString run e2e', 'npm  e2e']) {
+      assert.equal(scriptTarget(dir, cmd), undefined, cmd);
+    }
+    // 선언(W1)도 같은 함수로 스냅숏을 갖는다 — verifyScripts 밖 이름이라 W2 가 고르지 않는다.
+    const picked = cmds(dir, 'R03', { R03: ['npm run gate', 'npm run e2e -- --ci'] });
+    assert.equal(picked.commands.find((c) => c.cmd === 'npm run gate')?.target?.body, 'npm run lint');
+    assert.equal(picked.commands.find((c) => c.cmd === 'npm run e2e -- --ci')?.target, undefined);
   });
 
   it('npm init 자리표시 test 는 돌리지 않는다 — 늘 실패하는 명령이다 (D-093 과 같은 판정)', () => {

@@ -13,7 +13,8 @@ import { cancelledLine, firstLine, secondLine } from './decide.ts';
 import { checksText, noTestsEvidenceNote, primaryNoTestsNote, readOnlyVerifyNote, reviewText, runDuo, type CancelledAt, type ReviewRun, type Verdict } from './duo.ts';
 import { EXISTING_TEST_ROWS, collect, notRun, outcomeOf, type Evidence, type EvidenceReport, type SettledOutcome } from './evidence.ts';
 import { changedFiles, noTests, runCommand, snapshotTests, testChanges, type CommandEvidence } from './evidence-gather.ts';
-import { autoCommands, runSandboxed, sandboxMarks, scriptChanged, type AutoCommand, type AutoVerify, type SandboxVerdict } from './auto-verify.ts';
+import { autoCommands, runSandboxed, sandboxMarks, scriptChanged, scriptTarget, shellCommand, type AutoCommand, type AutoVerify, type SandboxVerdict } from './auto-verify.ts';
+import type { RunTarget } from './run-app.ts';
 import { declaredTests } from '../data/verify.ts';
 import type { EngineReport, SlotExecutor } from './executor.ts';
 import type { Journal } from './journal.ts';
@@ -67,6 +68,8 @@ interface Check {
   readonly cmd: string;
   readonly auto?: AutoCommand;
   readonly host?: true;
+  /** sandbox 밖 명령의 S2 대조 대상 (D-097 결정 8) — sandbox 명령은 `auto.target` 에 든다. */
+  readonly target?: RunTarget;
 }
 
 interface CheckRun {
@@ -142,13 +145,18 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
         held.push(`codex 를 찾지 못해 사람 명령 ${human.length}개를 실행하지 않았다 — sandbox 밖에서 돌리려면 명령마다 "sandbox 밖에서 실행" 으로 적는다 (D-097 O3) — ${human.map((c) => `\`${c}\``).join(' · ')}`);
       }
     } else {
-      checksList.push(...human.map((cmd) => ({ cmd, auto: { cmd, argv: ['/bin/sh', '-c', cmd] } })));
+      // 꼴이 `<매니저> run <이름>` 이면 지금(primary 전) 스냅숏을 떠 S2 를 건다 — W1 과 같은 함수다 (D-097 결정 8).
+      checksList.push(...human.map((cmd) => ({ cmd, auto: shellCommand(input.cwd, cmd) })));
       checksList.push(...picked.commands.map((auto) => ({ cmd: auto.cmd, auto })));
       notes.push(...picked.merged.map((m) =>
         `${m.from === 'human' ? '사람 명령' : '선언'} \`${m.cmd}\` 은 Core 가 고른 \`${m.into}\`(codex sandbox) 하나로 돌린다 (D-097 D1)` +
           (hostSet.has(m.cmd) ? ' — sandbox 밖 지정은 Core 가 고른 명령에는 적용되지 않는다' : '')));
     }
-    checksList.push(...host.map((cmd) => ({ cmd, host: true as const })));
+    // sandbox 밖을 지정해도 무엇이 도는지(S2)는 대조한다 — opt-out 은 어디서 도는지만 바꾼다 (D-097 결정 8).
+    checksList.push(...host.map((cmd) => {
+      const target = scriptTarget(input.cwd, cmd);
+      return { cmd, host: true as const, ...(target ? { target } : {}) };
+    }));
     if (host.length > 0) notes.push(`사람이 sandbox 밖을 지정한 명령 ${host.map((c) => `\`${c}\``).join(' · ')} 은 사용자 권한(네트워크·홈 쓰기 열림)으로 돌린다 (D-097 O3)`);
   } else {
     checksList.push(...[...verifyCmds, ...hostCmds].map((cmd) => ({ cmd })));
@@ -182,8 +190,10 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
         const shown: CommandEvidence[] = [];
         const skipped: string[] = [];
         for (const c of checksList) {
-          // 위임이 W2 스크립트를 바꿨다 (S2) — 사람이 본(기준선이 돈) 것과 다른 것이 돈다. 돌리지 않는다.
-          if (c.auto?.target && scriptChanged(input.cwd, c.auto.target)) {
+          // 위임이 검증 스크립트를 바꿨다 (S2) — 사람이 본(기준선이 돈) 것과 다른 것이 돈다. 돌리지 않는다.
+          // W2 와, 꼴이 맞는 W1·사람 명령(D-097 결정 8)이 같다.
+          const target = c.auto?.target ?? c.target;
+          if (target && scriptChanged(input.cwd, target)) {
             const line = `검증 스크립트가 위임 중 바뀌었다 — \`${c.cmd}\` 를 실행하지 않았다 (D-096 S2)`;
             held.push(line);
             skipped.push(line);

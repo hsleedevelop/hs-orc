@@ -60,6 +60,31 @@ export const shownOf = (commands: readonly AutoCommand[]): AutoVerifyShown[] =>
  */
 const RUNLESS: Readonly<Record<PackageManager, readonly string[]>> = { npm: ['test'], pnpm: ['test'], yarn: ['test'], bun: [] };
 
+/** 스크립트 이름으로 받는 글자 — 셸이 다르게 읽을 글자(`;`·`$`·따옴표·공백 등)가 없고 `-` 로 시작하지 않는다(옵션이 아니다). */
+const SCRIPT_NAME = /^[A-Za-z0-9_][A-Za-z0-9_:.+@/-]*$/;
+
+/**
+ * 선언(W1)·사람 명령 문자열이 정확히 `<매니저> run <이름>` · `<매니저> test` 꼴이면 그 스크립트의 스냅숏 (D-097 결정 8, S2+).
+ * 셸 문자열을 해석하지 않는다 — 공백으로 나눈 낱말이 이 꼴과 정확히 같을 때만이다. `npm run e2e -- --ci`·`npx vitest`·`npm test && …` 는 대조하지 않는다.
+ * `run` 없는 꼴은 `RUNLESS` 그대로다 — `bun test` 는 내장 러너라 스크립트와 대조하지 않는다. 스크립트가 없으면 대조하지 않는다(undefined).
+ * 실행은 여전히 문자열 그대로(`/bin/sh -c`)다. 스냅숏은 primary 뒤 실행 직전에 `scriptChanged` 로 대조하는 데만 쓴다.
+ */
+export function scriptTarget(dir: string, cmd: string): RunTarget | undefined {
+  const words = cmd.trim().split(/[ \t]+/);
+  const pm = words[0] as PackageManager;
+  if (!Object.hasOwn(RUNLESS, pm)) return undefined;
+  const name = words.length === 3 && words[1] === 'run' ? words[2] : words.length === 2 && RUNLESS[pm].includes(words[1] ?? '') ? words[1] : undefined;
+  if (name === undefined || !SCRIPT_NAME.test(name)) return undefined;
+  const t = runTarget(dir, [name]);
+  return 'why' in t ? undefined : t;
+}
+
+/** 문자열 그대로 sandbox 안에서 돌 명령 — 꼴이 맞으면 S2 대조 대상을 함께 든다 (D-097 결정 8). W1·사람 명령이 같은 코드를 탄다. */
+export const shellCommand = (dir: string, cmd: string): AutoCommand => {
+  const target = scriptTarget(dir, cmd);
+  return { cmd, argv: ['/bin/sh', '-c', cmd], ...(target ? { target } : {}) };
+};
+
 /** W1·사람 명령이 같은 명령으로 합쳐졌다 (D-097 D1) — `into` 하나만 돈다. 증거 요약에 남긴다. */
 export interface MergedCommand {
   readonly cmd: string;
@@ -70,6 +95,7 @@ export interface MergedCommand {
 /**
  * 이 위임에서 돌 검증 명령을 세 목록(W1 선언 · 사람 명령 · W2 스크립트)에서 한 번에 고른다 (D-097 D1).
  * 같은 명령(npm 별칭 포함)이면 보호가 강한 쪽 하나만 남긴다 — W2(`target` 이 있어 S2 대조를 받는다) > W1(sandbox) > 사람(sandbox 밖).
+ * W1 도 문자열이 `<매니저> run <이름>` 꼴이면 `target` 을 가진다(`shellCommand`, D-097 결정 8) — 사람 명령은 부르는 쪽이 같은 함수로 붙인다.
  * 사람이 W2 와 같은 명령을 적으면 그 명령이 sandbox·S2 밖으로 빠지던 결함(Q31 E1)을 막는다.
  * phase 선언은 돌리지 않고 `notes` 로 남긴다 — phase 를 실행 시점으로 나누는 것은 CLI once·loop(D-045) 몫이다.
  * `commands` 는 W1 이 먼저, 그다음 W2 다. `human` 은 합쳐지지 않고 남은 사람 명령이다.
@@ -110,7 +136,7 @@ export function autoCommands(
       continue;
     }
     owner.set(key, key);
-    w1.push({ cmd: v.cmd, argv: ['/bin/sh', '-c', v.cmd] });
+    w1.push(shellCommand(dir, v.cmd));
   }
   const rest: string[] = [];
   for (const c of human) {

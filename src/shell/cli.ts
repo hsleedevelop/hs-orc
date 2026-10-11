@@ -26,7 +26,8 @@ import { depStatus } from './deps.ts';
 import { checksText, noTestsEvidenceNote, parseVerdict, primaryNoTestsNote, readOnlyVerifyNote, reviewPrompt, runDuo } from '../core/duo.ts';
 import { Budget } from '../core/budget.ts';
 import { changedFiles, loadEvidenceFile, noTests, runCommand, snapshotTests, testChanges, type CommandEvidence, type TestSnapshot } from '../core/evidence-gather.ts';
-import { defaultAutoVerify, runSandboxed, sandboxMarks, type AutoVerify, type SandboxVerdict } from '../core/auto-verify.ts';
+import { defaultAutoVerify, runSandboxed, sandboxMarks, scriptChanged, scriptTarget, type AutoVerify, type SandboxVerdict } from '../core/auto-verify.ts';
+import type { RunTarget } from '../core/run-app.ts';
 import { GATE_CHECKS, parseGateCheck, type GateSignals } from '../core/gatekeeper.ts';
 import { routeWithFallback } from '../core/pipeline.ts';
 import { defaultJev } from './jev.ts';
@@ -68,6 +69,8 @@ interface VerifyItem {
   readonly cmd: string;
   readonly phase?: string;
   readonly host?: true;
+  /** 꼴이 `<매니저> run <이름>` 이면 primary 전에 뜬 스크립트 스냅숏 — 실행 직전에 대조한다 (D-097 결정 8, S2+). */
+  readonly target?: RunTarget;
 }
 
 const USAGE = `사용법: hs-orc "<작업>" [--task R01] [--effort high] [--reviewer-effort high]
@@ -204,11 +207,17 @@ interface VerifyRun {
  * 검증 명령을 차례로 돌린다. 신호로 멈추면 남은 명령은 띄우지 않는다.
  * 선언·`--verify` 는 codex sandbox 안(`/bin/sh -c`, D-096 실행기), `--verify-host` 만 밖이다 (D-097 L1). codex 가 없으면 sandbox 명령을
  * 밖으로 내리지 않는다 — 부르는 쪽이 먼저 걸러야 하고, 여기서도 던진다.
+ * `moved` 를 주면(primary 뒤) 명령마다 **실행 직전에** 스냅숏을 대조해 바뀐 명령은 돌리지 않고 거기에 담는다 (S2, D-097 결정 8, PR #145 리뷰) —
+ * 목록 앞에서 한 번만 보면 앞 명령이 뒤 명령의 스크립트를 바꾸는 것을 놓친다. 세션 위임과 같은 자리다.
  */
-async function runVerifyList(cmds: readonly VerifyItem[], auto: AutoVerify): Promise<VerifyRun[]> {
+async function runVerifyList(cmds: readonly VerifyItem[], auto: AutoVerify, moved?: VerifyItem[]): Promise<VerifyRun[]> {
   return interruptible(async (signal) => {
     const out: VerifyRun[] = [];
     for (const item of cmds) {
+      if (moved && scriptMoved(item)) {
+        moved.push(item);
+        continue;
+      }
       const phase = item.phase !== undefined ? { phase: item.phase } : {};
       if (item.host) {
         const r = await runCommand(item.cmd, process.cwd(), { signal, ...phase });
@@ -238,6 +247,16 @@ const whyNotRun = (r: VerifyRun): string | null =>
   r.verdict.kind === 'blocked' ? `sandbox 가 막았다: ${r.verdict.denials.join(' · ')}`
   : r.verdict.kind === 'not-started' ? 'sandbox 를 시작하지 못했다'
   : notRun(r.evidence.exitCode);
+
+/** primary 전에 스크립트 스냅숏을 붙인다 (D-097 결정 8) — 세션 위임과 같은 꼴 맞추기(`scriptTarget`)다. 꼴이 다르면 대조하지 않는다. */
+const withTarget = (v: VerifyItem): VerifyItem => {
+  const target = scriptTarget(process.cwd(), v.cmd);
+  return target ? { ...v, target } : v;
+};
+
+/** 위임이 이 명령의 스크립트를 바꿨나 (S2) — 바뀌었으면 돌리지 않는다. 사람이 본(primary 전) 것과 다른 것이 돈다. */
+const scriptMoved = (v: VerifyItem): boolean => v.target !== undefined && scriptChanged(process.cwd(), v.target);
+const movedLine = (v: VerifyItem): string => `검증 스크립트가 위임 중 바뀌었다 — \`${verifyLabel(v)}\` 를 실행하지 않았다 (D-096 S2)`;
 
 /** codex 가 없어 sandbox 명령을 돌릴 수 없다는 줄 (D-097 L1) — 밖으로 내리지 않는다. */
 const noCodexLine = (boxed: readonly VerifyItem[]): string =>
@@ -374,7 +393,8 @@ async function main(): Promise<void> {
     // D-040: reviewer 는 읽기 전용이라 테스트를 못 돌린다 — 선언된 검증 명령은 Core 가 돌린다(once 와 같은 선언).
     // 읽기 전용이면 primary 의 diff 가 적용되지 않아 원본을 검사하게 되므로 돌리지 않고, 그렇다고 적는다.
     // 선언(W1)과 --verify 는 codex sandbox 안, --verify-host 만 밖이다 (D-097 L1).
-    const verifyCmds: VerifyItem[] = [...defaultVerify(plan.assignment.id, verifyConfigPath(process.cwd())), ...args.verify];
+    // 스냅숏은 기준선 전(= 첫 primary 전)에 뜬다 — 사이클마다 이 스냅숏과 대조한다 (D-097 결정 8).
+    const verifyCmds: VerifyItem[] = [...defaultVerify(plan.assignment.id, verifyConfigPath(process.cwd())), ...args.verify].map(withTarget);
     const cmdLabel = verifyLabel;
     const auto = defaultAutoVerify();
     const boxed = verifyCmds.filter((v) => !v.host);
@@ -502,6 +522,8 @@ async function main(): Promise<void> {
     let reviewerBroken = false;
     // 사이클 중 검증 명령이 돌지 못하면 primary 가 고칠 수 없다 — 재시도로 상한까지 태우지 않고 올린다 (D-046).
     let verifyBroken = false;
+    // 위임이 검증 스크립트를 바꿔 멈췄다 (D-097 결정 8) — 끝에 무엇을 하면 되는지 안내한다.
+    let scriptMovedStop = false;
     // D-049: 약화로 FAIL 한 다음 사이클도 기계적 FAIL(약화·명령 실패)이면 과제와 기존 테스트가 충돌하는 것이다 —
     // 모델은 약화 없이 풀 수 없다. 재시도로 상한까지 태우지 않고 사람에게 올린다. 첫 약화는 한 번 재시도한다(형식만 바꾼 실수일 수 있다).
     let weakenedLastCycle = false;
@@ -522,7 +544,19 @@ async function main(): Promise<void> {
         // Evaluator 는 reviewer 슬롯이 돈다 (D-003). 형식·판정은 once 의 독립 리뷰와 같다 —
         // 마지막 줄 PASS/FAIL, 못 읽으면 unknown 이고 통과로 봐주지 않는다.
         evaluate: async (_ctx, output) => {
-          const runs = args.write ? await runVerifyList(postCmds, auto) : [];
+          // 위임이 검증 스크립트를 바꿨다 (S2, D-097 결정 8) — 결과를 얻지 못한 검증이라 L1 의 막힌 명령처럼 재시도 없이 사람에게 올린다.
+          const moved: VerifyItem[] = [];
+          const runs = args.write ? await runVerifyList(postCmds, auto, moved) : [];
+          if (moved.length > 0) {
+            verifyBroken = true;
+            scriptMovedStop = true;
+            return {
+              passed: false,
+              verification: `reviewer ${plan.slots.reviewer.label} 생략 — 검증 스크립트가 위임 중 바뀌었다 · ${moved.map((v) => `\`${cmdLabel(v)}\``).join(', ')}`,
+              reason: moved.map(movedLine).join('\n'),
+              reviewerSkipped: true,
+            };
+          }
           const ran = runs.map((r) => r.evidence);
           const failed = ran.filter((c) => contradiction(c) !== null);
           // 결과 줄 — G1(통과했어도 막힌 부수 효과)이면 그 사실을 붙인다 (D-097 결정 9).
@@ -614,6 +648,9 @@ async function main(): Promise<void> {
     if (testConflict) {
       process.stderr.write('안내   과제가 기존 테스트와 충돌한다 — 테스트를 직접 고치거나 과제를 바꾼 뒤 다시 실행한다 (D-049).\n');
     }
+    if (scriptMovedStop) {
+      process.stderr.write('안내   primary 가 검증 스크립트를 바꿨다 — 바뀐 스크립트는 돌리지 않았다. 변경을 확인해 되돌리거나 검증 명령을 바꾼 뒤 다시 실행한다 (D-097 결정 8).\n');
+    }
     if (result.journal.unverified.length > 0) {
       process.stderr.write(`경고   검증 기록이 빈 사이클 ${result.journal.unverified.length}건 — "통과"가 아니다.\n`);
     }
@@ -666,7 +703,8 @@ async function main(): Promise<void> {
   const verifyConfig = verifyConfigPath(process.cwd());
   const declared = defaultVerify(plan.assignment.id, verifyConfig);
   // 선언(W1)과 --verify 는 codex sandbox 안, --verify-host 만 밖이다 (D-097 L1).
-  const verify: VerifyItem[] = [...declared, ...args.verify];
+  // 스냅숏은 primary 전인 지금 뜬다 (D-097 결정 8).
+  const verify: VerifyItem[] = [...declared, ...args.verify].map(withTarget);
   const auto = defaultAutoVerify();
   if (declared.length > 0) {
     process.stderr.write(`검증   ${verifyConfig} 선언 ${declared.length}건: ${declared.map((v) => v.cmd).join(' · ')}\n`);
@@ -696,14 +734,17 @@ async function main(): Promise<void> {
   }
   const checks = args.write && runnable.length > 0
     ? async (): Promise<string> => {
-        const runs = await runVerifyList(runnable, auto);
+        // 위임이 바꾼 스크립트는 돌리지 않고 증거에서 뺀다 → unverified (S2, D-097 결정 8) — 세션 위임과 같다.
+        const moved: VerifyItem[] = [];
+        const runs = await runVerifyList(runnable, auto, moved);
+        held.push(...moved.map(movedLine));
         for (const r of runs) {
           const sm = sandboxMarks(verifyLabel(r.item), r);
           if (sm.held) held.push(sm.held);
           else ran.push(r.evidence);
           if (sm.note) verifyNotes.push(sm.note);
         }
-        return checksText(runs.map(shownRun));
+        return [checksText(runs.map(shownRun)), ...moved.map(movedLine)].filter(Boolean).join('\n\n');
       }
     : undefined;
   const duo = await runDuo(matrix, plan, execute, missingTests ? `${args.task}\n\n${primaryNoTestsNote(missingTests)}` : args.task, budget, {
