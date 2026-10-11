@@ -361,7 +361,7 @@ reviewer 가 둘이면(사다리 ④, D-072) 판정은 **AND** 다 — 하나라
 구현: `src/core/evidence.ts` 의 `REQUIREMENTS` 가 위 표를 그대로 옮긴 것이다 — **이 표를 바꾸려면 SPEC 을 먼저 바꾼다.**
 증거 종류는 `command`(명령+exit code) · `document-section` · `changed-files` · `measurement`(값+환경) ·
 `citation`(`file:line`) · `review` · `ordering`(두 시각) 일곱이고, 모양 검사를 통과하지 못하면 **거절한다.**
-`--verify "[phase:]<명령>"` 은 명령을 실제로 돌려 exit code 를 받고(R05 `before`/`after`,
+`--verify "[phase:]<명령>"` 은 명령을 실제로 돌려(codex sandbox 안 — 밖은 `--verify-host`, D-097 L1) exit code 를 받고(R05 `before`/`after`,
 R06 `reproduce`/`fix`/`regress` 단계 표기 지원), 변경 파일은 git 에서 읽는다 — 모델이 말한 목록을 믿지 않는다.
 증거가 모였을 때만 결정 로그 2차 줄의 `outcome` 이 `ok` 가 된다. 아니면 `unverified` 다.
 단, 모양이 맞아도 **나쁜 결과를 말하는 증거**가 하나라도 있으면 `rework` 다 (D-043) — phase 없는 명령과
@@ -388,7 +388,7 @@ codex 가 없으면 돌리지 않는다 — sandbox 밖으로 내리지 않는�
 - 위 셋(작업 전부터 실패 · 스크립트 변경 · sandbox 막힘·시작 못 함)과 codex 없음은 **돌려야 했지만 결과를 얻지 못한 검증**이다 — 다른 명령이 요구를 채워도 `ok` 가 아니라 `unverified` 다(진짜 실패의 `rework` 가 먼저다). 작업 전부터 실패는 기준선이 실제로 돌아 실패했을 때만이다 — 막히거나 돌지 못한 기준선으로는 작업 뒤 실패를 면제하지 않는다.
 - 명령이 실패해도 reviewer 는 돈다. 테스트 없는 프로젝트의 1행은 Core 가 돌린 `lint` 통과가 `command` 증거라 `ok` 가 될 수 있다(D-093 결정 4 의 결과가 바뀐다).
 - **통과한 명령의 막힌 부수 효과** (D-097 G1) — exit 0 이어도 차단성 거부가 있었으면 증거 요약과 reviewer 절의 명령 줄에 `sandbox 가 막은 부수 효과` 를 남긴다. 판정은 바꾸지 않는다(위 sandbox 거부 판정 그대로).
-- CLI once·loop 는 그대로다 — 선언 + `--verify` 를 sandbox 밖에서 돌린다(D-097 L1 이 후속).
+- **CLI once·loop** (D-097 L1) — 선언과 `--verify` 는 같은 codex sandbox 안에서 `/bin/sh -c` 로 돈다. 밖에서 돌릴 명령만 `--verify-host "[phase:]<명령>"` 으로 명시한다(`chat --verify-host` 와 같은 이름·뜻). once 는 위 sandbox 거부 판정과 G1 표시를 증거 요약에 싣는다. loop 는 사이클의 검증이 sandbox 에 막혔거나 시작하지 못하면 D-046 "돌지 못했다" 로 멈추고(재시도하지 않는다), 기준선이 그러면 D-042 "기준선 실패" 가 아니라 "실행할 수 없다" 로 엔진 전에 멈춘다. codex 가 없으면 sandbox 명령을 밖으로 내리지 않는다 — once 는 돌리지 않고 `unverified`, loop 는 엔진 전에 멈춘다. `package.json` 스크립트(W2)는 CLI 에 넣지 않는다(후속).
 
 행별 **기본 검증 명령**은 `data/verify.json`(수기)에 프로젝트가 선언한다 — 이 파일에 대해 제품은 추론하지 않는다.
 `default` 와 행 id 선언을 합치고 `--verify` 와 다시 합친다. **선언이 없으면 빈 배열이다**:

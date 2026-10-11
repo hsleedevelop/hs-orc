@@ -13,7 +13,7 @@ import { cancelledLine, firstLine, secondLine } from './decide.ts';
 import { checksText, noTestsEvidenceNote, primaryNoTestsNote, readOnlyVerifyNote, reviewText, runDuo, type CancelledAt, type ReviewRun, type Verdict } from './duo.ts';
 import { EXISTING_TEST_ROWS, collect, notRun, outcomeOf, type Evidence, type EvidenceReport, type SettledOutcome } from './evidence.ts';
 import { changedFiles, noTests, runCommand, snapshotTests, testChanges, type CommandEvidence } from './evidence-gather.ts';
-import { autoCommands, runSandboxed, scriptChanged, type AutoCommand, type AutoVerify, type SandboxVerdict } from './auto-verify.ts';
+import { autoCommands, runSandboxed, sandboxMarks, scriptChanged, type AutoCommand, type AutoVerify, type SandboxVerdict } from './auto-verify.ts';
 import { declaredTests } from '../data/verify.ts';
 import type { EngineReport, SlotExecutor } from './executor.ts';
 import type { Journal } from './journal.ts';
@@ -196,28 +196,20 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
           // 작업 전부터 실패는 기준선이 **실제로 돌아** 실패했을 때만이다 (PR #137 리뷰) — sandbox 가 막았거나·시작하지 못했거나·
           // 돌지 못한(-1·126·127) 기준선은 코드의 실패가 아니라서, 그것으로 작업 뒤의 진짜 실패를 면제하면 새 실패가 숨는다.
           const redBefore = base !== undefined && baseExit !== 0 && base.verdict.kind === 'ran' && notRun(baseExit) === null;
+          const sm = sandboxMarks(c.cmd, r);
           const marks = [
             ...(c.auto ? ['codex sandbox'] : []),
             ...(c.host ? ['sandbox 밖 — 사람이 지정'] : []),
-            ...(r.verdict.kind === 'ran' && r.evidence.exitCode === 0 && (r.blocking?.length ?? 0) > 0 ? [`sandbox 가 막은 부수 효과: ${r.blocking?.join(' · ')}`] : []),
-            ...(r.verdict.kind === 'blocked' ? [`sandbox 가 막았다: ${r.verdict.denials.join(' · ')}`] : []),
-            ...(r.verdict.kind === 'not-started' ? ['sandbox 를 시작하지 못했다'] : []),
+            ...sm.marks,
             ...(redBefore ? [`기준선 exit=${baseExit} — 작업 전부터 실패`] : base !== undefined && baseExit !== 0 ? [`기준선 exit=${baseExit} — 돌지 못해 비교하지 않는다`] : []),
           ];
           shown.push(marks.length > 0 ? { ...r.evidence, cmd: `${c.cmd}  [${marks.join(' · ')}]` } : r.evidence);
           // V3a — sandbox 탓일 수 있는 실패는 rework 가 아니다. 진짜 실패와 겹쳐도 가를 수 없어 unverified 로 닫는다(D-096 한계).
-          if (r.verdict.kind === 'blocked') {
-            held.push(`sandbox 가 막았다 — \`${c.cmd}\` exit=${r.evidence.exitCode} (${r.verdict.denials.join(' · ')}) — 실패로 세지 않는다`);
+          if (sm.held) {
+            held.push(sm.held);
             continue;
           }
-          if (r.verdict.kind === 'not-started') {
-            held.push(`sandbox 를 시작하지 못했다 — \`${c.cmd}\` exit=${r.evidence.exitCode} (거부 로그 머리줄 없음)`);
-            continue;
-          }
-          // G1 — 통과했어도 막힌 부수 효과가 있었다. 판정은 바꾸지 않는다 (D-097 결정 9, D-096 V3a 1번 그대로).
-          if (r.verdict.kind === 'ran' && r.evidence.exitCode === 0 && (r.blocking?.length ?? 0) > 0) {
-            notes.push(`sandbox 가 막은 부수 효과가 있었다 — \`${c.cmd}\` exit=0 (${r.blocking?.join(' · ')}) — 판정은 바꾸지 않는다 (D-097 G1)`);
-          }
+          if (sm.note) notes.push(sm.note);
           if (redBefore && r.evidence.exitCode !== 0) {
             held.push(`작업 전부터 실패 — \`${c.cmd}\` 기준선 exit=${baseExit} · 작업 뒤 exit=${r.evidence.exitCode} — 불일치로 세지 않는다`);
             continue;

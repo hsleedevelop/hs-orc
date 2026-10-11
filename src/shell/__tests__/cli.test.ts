@@ -1,7 +1,7 @@
 import { after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { projectStateDir } from '../../core/project-state.ts';
@@ -260,6 +260,8 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
   const primaryCount = path.join(fakeDir, 'primary-count');
   const codexArgs = path.join(fakeDir, 'codex-args');
   const mark = path.join(fakeDir, 'verify-mark');
+  const sandboxLog = path.join(fakeDir, 'sandbox-log');
+  const sandboxCount = path.join(fakeDir, 'sandbox-count');
   const fakeClaude = path.join(fakeDir, 'claude');
   const fakeCodex = path.join(fakeDir, 'codex');
   const codexLine = (text: string) =>
@@ -283,6 +285,18 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     fakeCodex,
     [
       '#!/bin/sh',
+      // `codex sandbox … -- <argv>` 흉내 (D-097 L1) — `--` 뒤 명령을 그대로 돌리고, 끝난 뒤 거부 로그 머리줄과 `SANDBOX_DENIALS`(없으면 None found.)를
+      // 찍는다. 실제 codex 의 출력 순서다(D-096 사실 3). PATH 가 fakeDir 뿐이라 셸 내장만 쓴다.
+      'if [ "$1" = sandbox ]; then',
+      '  while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do shift; done; shift',
+      `  printf '%s\\n' "$*" >> '${sandboxLog}'`,
+      '  "$@"; rc=$?',
+      // SANDBOX_DENIALS_ON=N 이면 N번째 sandbox 호출에만 거부를 찍는다 (기준선에서만 막힌 경우).
+      `  c=0; [ -f '${sandboxCount}' ] && read c < '${sandboxCount}'; c=$((c+1)); echo "$c" > '${sandboxCount}'`,
+      '  d="${SANDBOX_DENIALS:-None found.}"; if [ -n "$SANDBOX_DENIALS_ON" ] && [ "$SANDBOX_DENIALS_ON" != "$c" ]; then d="None found."; fi',
+      `  printf '%s\\n' '=== Sandbox denials ===' "$d" >&2`,
+      '  exit "$rc"',
+      'fi',
       'if [ -n "$REVIEWER_EXIT" ]; then exit "$REVIEWER_EXIT"; fi',
       // PATH 가 fakeDir 뿐이라 cat 같은 외부 명령이 없다 — 셸 내장만 쓴다.
       `printf '%s\\n<<END>>\\n' "$*" >> '${codexArgs}'`,
@@ -295,7 +309,7 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
   );
   chmodSync(fakeCodex, 0o755);
   after(() => rmSync(fakeDir, { recursive: true, force: true }));
-  const reset = () => [claudeArgs, reviewCount, primaryCount, codexArgs, mark].forEach((f) => rmSync(f, { force: true }));
+  const reset = () => [claudeArgs, reviewCount, primaryCount, codexArgs, mark, sandboxLog, sandboxCount].forEach((f) => rmSync(f, { force: true }));
 
   it('FAIL 이면 다음 사이클로 가고, 그 프롬프트에 reviewer 의 지적이 실린다', () => {
     reset();
@@ -378,7 +392,7 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     assert.match(r.err, /중단 {3}goal-reached · 1회/);
     assert.match(r.err, /변경 전\(기준선\) 1회: before:echo RED_BEFORE; exit 1 — 실패해야 한다/);
     assert.match(r.err, /기준선 `before:echo RED_BEFORE; exit 1` exit=1/);
-    assert.match(readFileSync(codexArgs, 'utf8'), /before:echo RED_BEFORE; exit 1 \(기준선 — 변경 전\)[\s\S]*exit=1[\s\S]*RED_BEFORE/);
+    assert.match(readFileSync(codexArgs, 'utf8'), /before:echo RED_BEFORE; exit 1 {2}\[codex sandbox\] \(기준선 — 변경 전\)[\s\S]*exit=1[\s\S]*RED_BEFORE/);
   });
 
   it('before 가 변경 전에 통과하면 재현되지 않은 것이다 — --fix-red-baseline 으로도 넘기지 않고 엔진 없이 올린다 (D-045)', () => {
@@ -434,6 +448,124 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     assert.match(r.err, /reviewer Astra 생략 — 검증 명령을 실행할 수 없다\(환경\)/);
     assert.match(r.err, /중단 {3}escalated · 1회/);
     assert.equal(existsSync(codexArgs), false, '돌지 못한 검증에 reviewer 를 태웠다.');
+  });
+
+  // D-097 L1 — 선언·--verify 는 codex sandbox 안(가짜 codex 의 sandbox 흉내가 `sandboxLog` 에 남긴다), --verify-host 만 밖이다.
+  const sandboxed = (): string => (existsSync(sandboxLog) ? readFileSync(sandboxLog, 'utf8') : '');
+  const DENIED = '(node) file-write-create /Users/me/.escaped';
+
+  it('once — --verify 는 sandbox 안에서 돌고, 실패와 함께 홈 쓰기가 막혔으면 rework 가 아니라 unverified 다 (D-097 L1, V3a)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--no-reviewer', '--verify', 'echo ESC; exit 1'], { PATH: fakeDir, SANDBOX_DENIALS: DENIED });
+    assert.equal(r.code, 0, r.err);
+    assert.match(sandboxed(), /\/bin\/sh -c echo ESC; exit 1/);
+    assert.match(r.err, /sandbox 가 막았다 — `echo ESC; exit 1` exit=1 \(\(node\) file-write-create \/Users\/me\/\.escaped\)/);
+  });
+
+  it('once — --verify-host 만 sandbox 밖에서 돌고 그 사실이 reviewer 절·증거 요약에 남는다 (D-097 L1)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--verify', 'echo IN_MARK', '--verify-host', 'echo HOST_MARK'], { PATH: fakeDir, REVIEWER_PASS: '1' });
+    assert.equal(r.code, 0, r.err);
+    assert.match(sandboxed(), /echo IN_MARK/);
+    assert.doesNotMatch(sandboxed(), /HOST_MARK/, '--verify-host 가 sandbox 로 갔다');
+    const reviewer = readFileSync(codexArgs, 'utf8').split('<<END>>')[0] ?? '';
+    assert.match(reviewer, /\$ echo HOST_MARK {2}\[sandbox 밖 — 사람이 지정\]\nexit=0\nHOST_MARK/);
+    assert.match(r.err, /사람이 sandbox 밖을 지정한 명령 `echo HOST_MARK` 은 사용자 권한/);
+  });
+
+  it('once — codex 가 없으면 --verify 를 밖으로 내리지 않고 돌리지 않는다 → unverified (D-097 L1)', () => {
+    reset();
+    const noCodex = mkdtempSync(path.join(os.tmpdir(), 'hs-orc-cli-nocodex-'));
+    symlinkSync(fakeClaude, path.join(noCodex, 'claude'));
+    const out = path.join(noCodex, 'ran');
+    const r = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--no-reviewer', '--verify', `echo X > '${out}'`], { PATH: noCodex });
+    assert.equal(existsSync(out), false, 'sandbox 없이 밖에서 돌았다');
+    assert.match(r.err, /codex 를 찾지 못해 검증 명령 1개를 실행하지 않았다 — sandbox 밖에서 돌리려면 --verify-host 로 적는다/);
+    rmSync(noCodex, { recursive: true, force: true });
+  });
+
+  it('once — 통과한 명령에도 막힌 부수 효과가 있으면 표시만 하고 판정은 바꾸지 않는다 (D-097 G1)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--no-reviewer', '--verify', 'echo FINE'], { PATH: fakeDir, SANDBOX_DENIALS: DENIED });
+    assert.match(r.err, /\+ command `echo FINE` exit=0/);
+    assert.match(r.err, /sandbox 가 막은 부수 효과가 있었다 — `echo FINE` exit=0 \(\(node\) file-write-create \/Users\/me\/\.escaped\) — 판정은 바꾸지 않는다 \(D-097 G1\)/);
+  });
+
+  it('loop — 사이클의 검증이 sandbox 에 막히면 재시도하지 않고 D-046 "돌지 못했다" 로 멈춘다 (D-097 L1)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', verifyFailingOn(2)], {
+      PATH: fakeDir,
+      REVIEWER_PASS: '1',
+      SANDBOX_DENIALS: DENIED,
+    });
+    assert.notEqual(r.code, 0);
+    assert.match(sandboxed(), /RED_OMEGA/);
+    assert.match(r.err, /reviewer Astra 생략 — 검증 명령을 실행할 수 없다\(환경\) · .* exit=1 \(sandbox 가 막았다: \(node\) file-write-create/);
+    assert.match(r.err, /중단 {3}escalated · 1회/);
+    assert.equal(existsSync(codexArgs), false, '막힌 검증에 reviewer 를 태웠다.');
+  });
+
+  it('loop — 기준선이 sandbox 에 막히면 D-042 "기준선 실패" 가 아니라 "실행할 수 없다" 로 엔진 전에 멈춘다 (D-097 L1)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--fix-red-baseline', '--verify', verifyFailingOn(1)], {
+      PATH: fakeDir,
+      SANDBOX_DENIALS: DENIED,
+    });
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /중단 {3}검증 명령을 실행할 수 없다 — 테스트 실패가 아니라 환경 문제다/);
+    assert.match(r.err, /\(sandbox 가 막았다: \(node\) file-write-create/);
+    assert.doesNotMatch(r.err, /중단 {3}기준선 실패/);
+    assert.equal(existsSync(claudeArgs), false, '엔진을 띄웠다');
+  });
+
+  it('loop — --verify-host 만 밖에서 돌고, 나머지는 sandbox 다 (D-097 L1)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', 'echo LOOP_IN', '--verify-host', 'echo LOOP_HOST'], {
+      PATH: fakeDir,
+      REVIEWER_PASS: '1',
+    });
+    assert.equal(r.code, 0, r.err);
+    assert.match(sandboxed(), /echo LOOP_IN/);
+    assert.doesNotMatch(sandboxed(), /LOOP_HOST/);
+    assert.match(r.err, /검증 {3}sandbox 밖\(사용자 권한·네트워크·홈 쓰기 열림\): echo LOOP_HOST/);
+  });
+
+  it('loop — 기준선에서만 도는 --verify-host 재현 단계도 reviewer 에 "sandbox 밖" 꼬리표를 단 채 실린다 (PR #143 리뷰)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify-host', 'reproduce:echo REPRO_HOST; exit 1'], {
+      PATH: fakeDir,
+      REVIEWER_PASS: '1',
+    });
+    assert.equal(r.code, 0, r.err);
+    assert.doesNotMatch(sandboxed(), /REPRO_HOST/, '--verify-host 재현이 sandbox 로 갔다');
+    assert.match(r.err, /기준선 `reproduce:echo REPRO_HOST; exit 1` exit=1 \[sandbox 밖 — 사람이 지정\]/);
+    assert.match(readFileSync(codexArgs, 'utf8'), /\$ reproduce:echo REPRO_HOST; exit 1 {2}\[sandbox 밖 — 사람이 지정\] \(기준선 — 변경 전\)\nexit=1/);
+  });
+
+  it('loop — 기준선에서만 막힌 부수 효과(G1)도 기준선 줄과 reviewer 절에 남는다 (PR #143 리뷰)', () => {
+    reset();
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', 'echo BASE_SIDE'], {
+      PATH: fakeDir,
+      REVIEWER_PASS: '1',
+      SANDBOX_DENIALS: DENIED,
+      SANDBOX_DENIALS_ON: '1',
+    });
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.err, /기준선 `echo BASE_SIDE` exit=0 \[codex sandbox · sandbox 가 막은 부수 효과: \(node\) file-write-create/);
+    const reviewer = readFileSync(codexArgs, 'utf8');
+    assert.match(reviewer, /\$ echo BASE_SIDE {2}\[codex sandbox\]\nexit=0/, '사이클 실행은 거부가 없다');
+    assert.match(reviewer, /기준선\(변경 전\) — sandbox 가 막은 부수 효과가 있었다 — `echo BASE_SIDE` exit=0/);
+  });
+
+  it('loop — codex 가 없으면 sandbox 명령을 밖으로 내리지 않고 엔진 전에 멈춘다 (D-097 L1)', () => {
+    reset();
+    const noCodex = mkdtempSync(path.join(os.tmpdir(), 'hs-orc-cli-nocodex-'));
+    symlinkSync(fakeClaude, path.join(noCodex, 'claude'));
+    const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', 'echo X'], { PATH: noCodex });
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /중단 {3}codex 를 찾지 못해 검증 명령 1개를 실행하지 않았다/);
+    assert.equal(existsSync(claudeArgs), false, '엔진을 띄웠다');
+    rmSync(noCodex, { recursive: true, force: true });
   });
 
   // D-047: 선언된 기존 테스트(tw/*.test.txt)를 가짜 primary 가 약화·추가한다.
@@ -541,7 +673,8 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     const r = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--verify', 'echo ONCE_MARK'], { PATH: fakeDir, REVIEWER_PASS: '1' });
     assert.equal(r.code, 0, r.err);
     const reviewer = readFileSync(codexArgs, 'utf8').split('<<END>>')[0] ?? '';
-    assert.match(reviewer, /--- 검증 명령 \(Core 실행\) ---\n\$ echo ONCE_MARK\nexit=0\nONCE_MARK/);
+    // 선언·--verify 는 codex sandbox 안에서 돈다 (D-097 L1) — 명령 줄 꼬리표가 그 사실이다.
+    assert.match(reviewer, /--- 검증 명령 \(Core 실행\) ---\n\$ echo ONCE_MARK {2}\[codex sandbox\]\nexit=0\nONCE_MARK/);
   });
 
   it('once 는 reviewer 를 꺼도(--no-reviewer) 검증 명령을 돌려 증거에 싣는다 (D-094)', () => {

@@ -4452,7 +4452,31 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 - → 세 상태(sandbox 칸 · 스위치 · 밖 칸)를 **대기 중인 카드의 정체**(`transcript-lines.ts` `pendingCardKey` — 마지막 `plan`·`steps` 기록의 자리)에 묶었다. 값이 바뀌면 그리기 전에(`useLayoutEffect`) 비운다. 진행·설정 줄이 붙어도 같은 카드면 그대로다. 결정 7 의 원칙(앞 카드에 적은 명령이 다음 카드에 실리지 않는다)이 sandbox 칸에도 같으므로 함께 묶었다 — 승인 뒤 비우기도 이 규칙 하나로 된다.
 - 검증: `transcript-lines.test.ts` +1(같은 카드 · 새 메시지 · 재배정 · 단계 계획 · 대기 없음). 리뷰 전 코드(dbb5a9a)에서는 함수가 없어 실패한다. 브라우저 하네스(가짜 브리지, headless Chromium)에서 칸·스위치·밖 칸을 채운 뒤 새 메시지·재배정·지휘자 묻기·단계 계획 네 경로로 카드를 바꾸고 승인했다 — 수정 뒤 네 경로 모두 새 카드의 칸이 비고 payload `{verify:[], verifyHost:[]}`. 리뷰 전 렌더러는 네 경로 모두 앞 카드의 `verify`·`verifyHost` 를 실었다. 테스트 864 → 865.
 
-**상태** 결정 1(D1 + D1a) — PR #141 머지. 결정 6(T1) — PR #140 머지. 결정 2·3·4·7·9(O3 · 칸 비우기 · G1) — 이 PR, 머지로 확정한다(전하 직접 머지). 남은 것: 결정 5(L1, CLI once·loop) · 결정 8(S2+, 후속).
+**구현 기록 — 결정 5 (L1, CLI once·loop)** (O3 가 PR #142 로 머지된 뒤)
+- `shell/cli.ts` — 검증 명령을 `VerifyItem{cmd, phase?, host?}` 로 받는다. 선언(W1)과 `--verify` 는 `runSandboxed`(`/bin/sh -c`, D-096 실행기)로, `--verify-host "[phase:]<명령>"` 만 `runCommand`(밖)로 돈다. 이름·뜻은 O3 의 `chat --verify-host` 와 같고, `phase:` 문법을 `--verify` 와 똑같이 받는다.
+- **once** — sandbox 판정은 세션 위임과 같은 함수(`auto-verify.ts` `sandboxMarks`, 이번에 `delegate.ts` 에서 꺼냈다 — 문구 그대로)로 낸다: 막혔거나 시작하지 못한 명령은 증거에서 빼고 `held` → `unverified`, G1 은 증거 요약 줄. reviewer 절 명령 줄에 `[codex sandbox]` 또는 `[sandbox 밖 — 사람이 지정]` 꼬리표가 붙는다. codex 가 없으면 sandbox 명령은 돌리지 않고 `held`(`codex 를 찾지 못해 검증 명령 N개를 실행하지 않았다 — sandbox 밖에서 돌리려면 --verify-host 로 적는다`).
+- **loop** — 사이클의 `blocked`·`not-started` 는 D-046 "돌지 못했다"(`verifyBroken`)로 멈춘다. 기준선이 그러면 "실행할 수 없다" 로 엔진 전에 멈추고(D-042 "기준선 실패" 가 아니다 — `--fix-red-baseline` 으로도 못 넘긴다), sandbox 탓이면 `--verify-host` 안내를 붙인다. codex 가 없고 sandbox 명령이 있으면 엔진 전에 멈춘다. G1 은 reviewer 절 꼬리표와 결과 줄의 `(sandbox 가 막은 부수 효과)` 로 보인다.
+- W2(L2)와 S2+ 는 넣지 않았다(후속).
+- SPEC §5 문구.
+
+**검증 (L1)**
+- `npm run gate` 통과 — 테스트 865 → 873 (`cli.test.ts` +8). 모델·엔진 호출 0 — CLI 테스트의 가짜 `codex` 에 `sandbox … -- <argv>` 흉내(`--` 뒤 명령을 돌리고 거부 머리줄과 `SANDBOX_DENIALS` 를 찍는다)를 더했다.
+- **수정 전 실패 확인** — 새 회귀 8건을 origin/main `a18ae78` 의 `cli.ts`·`auto-verify.ts`·`delegate.ts` 에 대고 돌려 모두 실패했다: once sandbox 안 + 막히면 `unverified`(수정 전에는 밖에서 돌아 `rework`) · once `--verify-host` 밖·표시(수정 전에는 모르는 옵션) · once codex 없음(수정 전에는 밖에서 돌았다) · once G1 · loop 사이클 막힘 → 재시도 없이 중단 · loop 기준선 막힘 → "실행할 수 없다"(수정 전에는 "기준선 실패") · loop `--verify-host` · loop codex 없음 → 엔진 전 중단.
+- 종전 테스트 1건(once 의 reviewer 절 `$ echo ONCE_MARK`)은 `[codex sandbox]` 꼬리표가 붙는 새 동작으로 기대값을 고쳤다. 나머지 loop·once 검증 테스트는 가짜 sandbox 를 거쳐 그대로 통과한다.
+- **실측 — hs-orc 자기 R01 `npm test` 기준선** (2026-10-11, codex-cli 0.162.1, `env -u CODEX_HOME`, 모델 호출 0). 이 브랜치를 스크래치에 `rsync`(`.git` 제외 → 새 `git init`)하고 loop 기준선과 같은 실행기(`runSandboxed`, `/bin/sh -c npm test`)를 댔다: **exit 0 · 873/873 통과 · 24.7초 · 판정 `ran`** — T1(PR #140) 뒤 sandbox 안에서 통과한다. loop 를 실제로 띄우지는 않았다(기준선 뒤 엔진이 돈다). 거부 로그에 차단성 거부 `(git) file-write-create <복사본>/.git/index.lock` 1줄이 남아 G1 표시가 매번 붙는다 — 어떤 테스트가 저장소 `.git` 에 쓰려다 막히고도 통과한다(Q31 E3 사실 3 과 같은 줄). 판정은 바뀌지 않는다.
+
+**미검증·위험 (L1)**
+- **동작 변화**: CLI once·loop 의 선언·`--verify` 가 이제 sandbox 안에서 돈다. 네트워크·포트·홈·`.git` 쓰기·setuid 를 쓰는 명령은 once 에서 `unverified`, loop 에서 엔진 전(기준선)·사이클 중 중단으로 바뀐다. 되살리려면 `--verify-host`. **막힌 명령이 선언(W1, `verify.json`)이면 선언도 조정해야 한다** — `--verify-host` 로 같은 명령을 더해도 선언 쪽은 sandbox 목록에 그대로 남아 같은 자리에서 다시 막힌다. loop 의 중단 안내 줄에도 이것을 적었다. codex 가 없으면 once 는 `unverified`, loop 는 시작하지 않는다.
+- hs-orc 자기 R04 `npm run gate` 와 phase 선언(R05·R06)의 sandbox 동작은 재지 않았다. 실제 엔진을 띄운 loop 전체도 돌리지 않았다.
+- hs-orc 저장소에서 R01 loop 를 돌리면 매번 `.git/index.lock` G1 표시가 붙는다 — 소음이다. 원인 테스트를 찾아 고치는 것은 후속이다.
+
+**PR #143 리뷰 반영 (AO 리뷰 changes_requested, head 284082d)**
+- **loop 기준선이 실행 위치와 G1 을 잃었다** (P2). 기준선 결과를 evidence 로만 바꾼 뒤 기준선 줄과 reviewer 의 재현 결과를 만들어, (a) 기준선에서만 도는 `--verify-host "reproduce:…"`·`before:` 가 reviewer 에 `[sandbox 밖 — 사람이 지정]` 없이 실렸고, (b) phase 없는 명령이 기준선에서만 차단성 거부를 삼키고 exit 0 이면 그 G1 이 어디에도 남지 않았다(사이클 실행이 거부 없이 통과하면 영영 안 보인다).
+- → 기준선 결과(`VerifyRun` — 명령·판정·거부)를 그대로 쓴다. 기준선 줄은 `exit=N` 뒤에 실행 위치·sandbox 판정 꼬리표를 달고, reviewer 의 재현 결과는 `shownRun` 꼬리표를 단 채 싣는다. 기준선에서만 생긴 G1 은 `검증   기준선(변경 전) — sandbox 가 막은 부수 효과가 있었다 …` 줄로 찍고 reviewer 절에도 싣는다.
+- 회귀 2건(`--verify-host` 재현 단계의 꼬리표 · 기준선에서만 생긴 G1) — 리뷰 전 코드에서 둘 다 실패. 종전 D-045 테스트 1건은 reviewer 재현 줄에 `[codex sandbox]` 가 붙는 새 동작으로 기대값을 고쳤다. 테스트 873 → 875. 테스트의 가짜 sandbox 에 `SANDBOX_DENIALS_ON=N`(N번째 호출에만 거부)을 더했다.
+- (선택·문서) 위 "미검증·위험" 의 동작 변화 줄에 선언 조정 안내를 더했다.
+
+**상태** 결정 1(D1 + D1a) — PR #141 머지. 결정 6(T1) — PR #140 머지. 결정 2·3·4·7·9(O3 · 칸 비우기 · G1) — PR #142 머지. 결정 5(L1) — 이 PR, 머지로 확정한다(전하 직접 머지). 남은 것: 결정 8(S2+) · L2(CLI W2) — 후속.
 
 ---
 
