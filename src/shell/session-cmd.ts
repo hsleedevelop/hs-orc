@@ -82,6 +82,8 @@ export function parseSessionArgs(argv: readonly string[]): SessionCommand {
     else if (arg === '--write') write = true;
     else if (arg === '--run') run = true;
     else if (arg === '--verify') verify.push(value());
+    // sandbox 밖 실행(opt-out)은 받지 않는다 (D-097 결정 4) — 부르는 쪽이 에이전트일 수 있다. D-088 H7 과 같은 선이다.
+    else if (arg === '--verify-host') throw new Error('session send 는 --verify-host 를 받지 않는다 — --verify 의 명령은 codex sandbox 안에서 돈다. sandbox 밖 실행은 사람이 GUI·hs-orc chat 에서 고른다 (D-097 결정 4)');
     else if (arg === '--role') role = value();
     else if (arg === '--name') name = value();
     else if (arg === '--tail') {

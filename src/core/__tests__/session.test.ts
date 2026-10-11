@@ -3,7 +3,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadMatrix } from '../../data/matrix.ts';
@@ -1358,6 +1358,28 @@ describe('Core 가 고른 검증 명령 (D-096)', () => {
     assert.equal(argvs.length, 0, '카드만 섰는데 돌았다');
     await session.approve({ write: true });
     assert.deepEqual(argvs.map((a) => a.slice(1, 4).concat(a.slice(-3))), [['sandbox', '-P', ':workspace', 'npm', 'run', 'lint'], ['sandbox', '-P', ':workspace', 'npm', 'run', 'lint']]);
+  });
+
+  it('승인 때 적은 명령은 sandbox 로, 밖을 명시한 명령만 밖에서 돈다 (D-097 O3)', async () => {
+    isolate();
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-session-'));
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ scripts: {} }), 'utf8');
+    const argvs: (readonly string[])[] = [];
+    const runner: CommandRunner = (argv, options) => {
+      argvs.push(argv);
+      options.onLine?.(DENIAL_HEADER);
+      return Promise.resolve({ outcome: 'ok', exitCode: 0, tail: '', durationMs: 1 });
+    };
+    const session = new ConversationSession({ approvalMode: 'manual',
+      matrix, catalog, kind: 'project', dir, id: '1011-1200-aab',
+      budget: new Budget(20, 2_000_000), journal: new Journal(), conduct: conductSpy().exec, executorFor: () => delegateSpy().exec,
+      writeRows: [], autoVerify: { codex: '/bin/codex', runner, scripts: loadLimits().verifyScripts },
+    });
+    await session.send('이 타입 에러 고쳐줘');
+    await session.approve({ write: true, verify: ['touch inside'], verifyHost: ['touch host-ran'] });
+    assert.deepEqual(argvs.map((a) => a.slice(-3)), [['/bin/sh', '-c', 'touch inside'], ['/bin/sh', '-c', 'touch inside']]);
+    assert.equal(existsSync(path.join(dir, 'inside')), false, 'sandbox 밖에서 돌았다');
+    assert.equal(existsSync(path.join(dir, 'host-ran')), true, 'opt-out 명령이 돌지 않았다');
   });
 });
 

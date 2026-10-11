@@ -94,7 +94,7 @@ interface Bridge {
   convPlanAs(taskId: string): Promise<SessionView>;
   convReplan(taskId: string): Promise<SessionView>;
   convRead(): Promise<SessionView>;
-  convApprove(payload: { verify: string[]; write: boolean }): Promise<SessionView>;
+  convApprove(payload: { verify: string[]; verifyHost: string[]; write: boolean }): Promise<SessionView>;
   convCancel(): Promise<SessionView>;
   convEscalate(): Promise<SessionView>;
   convReject(): Promise<SessionView>;
@@ -575,6 +575,9 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState('');
   const [verify, setVerify] = useState('');
+  // sandbox 밖에서 돌릴 명령 (D-097 O3 opt-out) — 스위치를 켜야 칸이 열리고, 카드마다 꺼진 채 시작한다.
+  const [hostOn, setHostOn] = useState(false);
+  const [verifyHost, setVerifyHost] = useState('');
   // null = 카드가 정한 대로(쓰기 위임으로 보낸 배정은 켜진 채 선다). 사람이 스위치를 만지면 그 값이 이긴다.
   const [write, setWrite] = useState<boolean | null>(null);
   const [sendWrite, setSendWrite] = useState(false);
@@ -664,6 +667,45 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
     act(orc.convEnd(ref).then((v) => v ?? orc.convView()));
   };
 
+  /** 승인 때 실을 검증 명령 — 칸의 명령은 codex sandbox 안에서, 스위치로 연 칸의 명령만 sandbox 밖에서 돈다 (D-097 O3). */
+  const verifyInputs = (placeholder: string): ReactNode[] => [
+    h('textarea', {
+      key: 'verify', className: 'code', rows: 2, value: verify, placeholder,
+      onChange: (e: { target: { value: string } }) => setVerify(e.target.value),
+    }),
+    h('label', { key: 'host-toggle', className: 'toggle' },
+      h('input', { type: 'checkbox', checked: hostOn, onChange: (e: { target: { checked: boolean } }) => setHostOn(e.target.checked) }),
+      h('span', { className: 'track' }),
+      h('span', { className: 'text' }, hostOn ? h('b', null, 'sandbox 밖에서 돌릴 명령을 따로 적는다') : 'sandbox 밖에서 돌릴 명령 따로 적기',
+        h('span', { className: 'dim' }, ' · 위 칸의 명령은 codex sandbox 안에서 돈다'))),
+    ...(hostOn
+      ? [
+          h('div', { key: 'host-warn', className: 'hint warn' }, '아래 명령은 sandbox 밖에서 사용자 권한으로 돈다 — 네트워크·홈 쓰기가 열리고, primary 가 고친 코드를 그대로 실행한다'),
+          h('textarea', {
+            key: 'host', className: 'code', rows: 2, value: verifyHost, placeholder: 'sandbox 밖에서 돌릴 검증 명령 · 한 줄에 하나',
+            onChange: (e: { target: { value: string } }) => setVerifyHost(e.target.value),
+          }),
+        ]
+      : []),
+  ];
+  /** 다음 카드는 빈 칸·꺼진 스위치로 시작한다 (D-097 결정 7) — 첫 카드에 적은 명령이 다음 카드에 실리지 않게. */
+  const clearVerify = (): void => {
+    setVerify('');
+    setVerifyHost('');
+    setHostOn(false);
+  };
+  const approveWith = (writeOn: boolean): void => {
+    const payload = { verify: lines(verify), verifyHost: hostOn ? lines(verifyHost) : [], write: writeOn };
+    clearVerify();
+    setDelegation('running');
+    act(orc.convApprove(payload));
+  };
+  const rejectCard = (): void => {
+    setVerifyHost('');
+    setHostOn(false);
+    act(orc.convReject());
+  };
+
   const planCard = (r: Extract<Rec, { kind: 'plan' }>, i: number, active: boolean): ReactNode =>
     h('section', { key: i, className: 'card' },
       h('span', { className: 'label' }, `배정 · ${r.taskId}`),
@@ -707,10 +749,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
                 onChange: (e: { target: { value: string } }) => act(orc.convReplan(e.target.value)),
               }, ...props.rows.map((row) => h('option', { key: row.id, value: row.id }, `${row.id} · ${row.task}`))),
               h('span', { className: 'hint' }, '업무 행 직접 지정')),
-            h('textarea', {
-              className: 'code', rows: 2, value: verify, placeholder: '검증 명령 · 한 줄에 하나 (예: npm test)',
-              onChange: (e: { target: { value: string } }) => setVerify(e.target.value),
-            }),
+            ...verifyInputs('검증 명령 · 한 줄에 하나 · codex sandbox 안에서 돈다 (예: npm test)'),
             h('label', { className: 'toggle' },
               h('input', {
                 type: 'checkbox', checked: (write ?? r.write === true) && view.kind !== 'scratch', disabled: view.kind === 'scratch',
@@ -729,9 +768,9 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
             h('div', { className: 'row' },
               h('button', {
                 className: 'btn accent', disabled: locked || (r.readOnlyBlocked === true && !(write ?? r.write === true)),
-                onClick: () => { setDelegation('running'); act(orc.convApprove({ verify: lines(verify), write: (write ?? r.write === true) && view.kind !== 'scratch' })); },
+                onClick: () => approveWith((write ?? r.write === true) && view.kind !== 'scratch'),
               }, busy ? '실행 중…' : `승인하고 실행 · ${r.reviewer2 ? '세' : '두'} 슬롯${(write ?? r.write === true) && view.kind !== 'scratch' ? ' · 쓰기 켜짐' : ''}`),
-              h('button', { className: 'btn', disabled: locked, onClick: () => act(orc.convReject()) }, '거절'),
+              h('button', { className: 'btn', disabled: locked, onClick: rejectCard }, '거절'),
               // 규칙이 대화성 후속을 작업 행으로 잡았을 때 — 거절하고 같은 메시지를 지휘자가 답한다 (D-038).
               h('button', { className: 'btn', disabled: locked, onClick: () => act(orc.convAsk()) }, '지휘자에게 묻기'),
               // 한 행으로 안 끝날 요청이면 — 이 배정을 거절로 남기고 지휘자가 단계로 나눈다 (D-087).
@@ -762,10 +801,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
         ? h('div', { className: 'stack', style: { padding: 0, width: '100%', marginTop: 10 } },
             // 묻는 조건 (D-086) — 늘 H1(지휘자가 고른 행), 쓰기면 H5(미커밋), git 밖 쓰기 행이면 H6. 옛 기록은 H1 문구만 있다.
             h('div', { className: 'hint warn' }, `묻는 이유: ${(r.asked ?? [{ code: 'H1', text: '단계의 행을 지휘자(모델)가 골랐다' }]).map((a) => a.text).join(' · ')}`),
-            h('textarea', {
-              className: 'code', rows: 2, value: verify, placeholder: '검증 명령 · 단계마다 돈다 · 한 줄에 하나 (예: npm test)',
-              onChange: (e: { target: { value: string } }) => setVerify(e.target.value),
-            }),
+            ...verifyInputs('검증 명령 · 단계마다 돈다 · 한 줄에 하나 · codex sandbox 안에서 돈다 (예: npm test)'),
             // 쓰기 행 단계가 있을 때만 선다 (D-086) — 켜면 그 단계들만 쓴다. 읽기 행 단계는 켜도 읽기 전용이다.
             r.steps.some((st) => st.write)
               ? h('label', { className: 'toggle' },
@@ -782,9 +818,9 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
             h('div', { className: 'row' },
               h('button', {
                 className: 'btn accent', disabled: locked || r.readOnlyBlocked === true,
-                onClick: () => { setDelegation('running'); act(orc.convApprove({ verify: lines(verify), write: (write ?? r.write === true) && view.kind !== 'scratch' })); },
+                onClick: () => approveWith((write ?? r.write === true) && view.kind !== 'scratch'),
               }, busy ? '실행 중…' : `승인하고 실행 · ${r.steps.length}단계${(write ?? r.write === true) && view.kind !== 'scratch' ? ' · 쓰기 행 쓰기 켜짐' : ''}`),
-              h('button', { className: 'btn', disabled: locked, onClick: () => act(orc.convReject()) }, '거절')))
+              h('button', { className: 'btn', disabled: locked, onClick: rejectCard }, '거절')))
         : null);
 
   // 스캐폴딩 카드 (D-088) — hs-orc 가 엔진 없이 허용 목록 명령을 이 폴더에서 실행한다. 어느 방식에서도 이 버튼이 승인이다(H7).
@@ -796,7 +832,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
       active ? h('div', { className: 'hint warn' }, `묻는 이유: ${r.asked.map((a) => a.text).join(' · ')}`) : null,
       active
         ? h('div', { className: 'row', style: { marginTop: 10 } },
-            h('button', { className: 'btn accent', disabled: locked, onClick: () => { setDelegation('running'); act(orc.convApprove({ verify: [], write: false })); } }, busy ? '실행 중…' : '확인하고 실행'),
+            h('button', { className: 'btn accent', disabled: locked, onClick: () => { setDelegation('running'); act(orc.convApprove({ verify: [], verifyHost: [], write: false })); } }, busy ? '실행 중…' : '확인하고 실행'),
             h('button', { className: 'btn', disabled: locked, onClick: () => act(orc.convReject()) }, '거절'))
         : null);
 

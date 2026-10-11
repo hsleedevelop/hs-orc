@@ -40,7 +40,7 @@ async function main(): Promise<void> {
     process.stdout.write(`\n이어서: hs-orc chat --resume ${id}\n`);
     process.exit(130);
   });
-  await runChat(session, budget, { input: process.stdin, output: process.stdout }, { verify: args.verify });
+  await runChat(session, budget, { input: process.stdin, output: process.stdout }, { verify: args.verify, verifyHost: args.verifyHost });
   process.stdout.write(`\n이어서: hs-orc chat --resume ${id}\n`);
 }
 

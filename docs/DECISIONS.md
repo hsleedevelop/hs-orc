@@ -4428,7 +4428,26 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 **영향** `core/auto-verify.ts`(`autoCommands`·`MergedCommand`·`RUNLESS`) · `core/delegate.ts` · `core/__tests__/auto-verify.test.ts` · `core/__tests__/delegate.test.ts` · SPEC §5.
 
-**상태** 결정 1(D1 + D1a) 구현됨 — 이 PR. 머지로 확정한다(전하 직접 머지). 결정 2~9 는 위 순서로 후속 PR. T1 은 다른 워커가 병렬로 맡는다.
+**구현 기록 — 결정 2·3·4·7·9 (O3 + 칸 비우기 + G1)** (T1 은 PR #140, D1 은 PR #141 로 머지된 뒤)
+- `core/delegate.ts` — `DelegateInput.verifyHost`(사람이 sandbox 밖을 명시한 명령)를 더했다. `autoVerify` 가 있는 위임에서 사람 명령(`verify`)은 `runSandboxed` 에 `['/bin/sh','-c',명령]`(W1 과 같은 모양, Q31 E2)으로 돌고 V3a 를 받는다. `verifyHost` 는 `runCommand`(D-094) 로 밖에서 돌고, reviewer 절 명령 줄에 `[sandbox 밖 — 사람이 지정]`, 증거 요약에 `사람이 sandbox 밖을 지정한 명령 … 은 사용자 권한(네트워크·홈 쓰기 열림)으로 돌린다 (D-097 O3)` 가 남는다. codex 가 없으면 sandbox 기본인 사람 명령은 `held` 다 — `codex 를 찾지 못해 사람 명령 N개를 실행하지 않았다 — sandbox 밖에서 돌리려면 명령마다 "sandbox 밖에서 실행" 으로 적는다`. `autoVerify` 를 조립하지 않은 위임(실행기를 주입한 테스트)은 종전처럼 둘 다 밖이다.
+- **opt-out 과 D1 이 겹칠 때** (결정의 글자가 정하지 않은 것 — 전하가 다르게 보면 고친다): 사람이 sandbox 밖을 지정한 명령도 W2·W1 과 같으면 D1 대로 Core 쪽(sandbox) 하나로 돈다. 증거 요약의 합침 줄 끝에 `sandbox 밖 지정은 Core 가 고른 명령에는 적용되지 않는다` 를 붙인다. 근거: D1 은 "보호가 강한 쪽" 이고, opt-out 의 목적(sandbox 에서 깨지는 명령을 되살리기)은 Core 가 고르지 않은 명령에만 남는다 — hs-orc 자기 `npm test` 는 T1 로 sandbox 에서 돈다.
+- `core/session.ts` `ApproveOptions{verify, verifyHost, write}` — 단건·단계 계획 승인이 같이 넘긴다. `shell/chat.ts` `--verify-host "<명령>"`(반복). `shell/session-cmd.ts` 는 `--verify-host` 를 이유와 함께 거절한다(결정 4).
+- GUI(`renderer/app.ts`) — 배정·단계 카드의 칸 옆에 스위치 "sandbox 밖에서 돌릴 명령 따로 적기" 를 두고, 켜면 경고 줄과 둘째 칸이 열린다. 승인하면 두 칸과 스위치를 비운다(결정 7). 거절하면 스위치와 둘째 칸만 비운다(다음 카드도 꺼진 채 시작). IPC `conv-approve` 에 `verifyHost`.
+- G1 — `runSandboxed` 가 판정과 별개로 차단성 거부(`blocking`)를 돌려준다. exit 0 인데 있으면 reviewer 절 명령 줄에 `sandbox 가 막은 부수 효과: …`, 증거 요약에 `… 판정은 바꾸지 않는다 (D-097 G1)`. 판정은 그대로다. W1·W2·사람 명령 모두에 걸린다.
+- SPEC §5 문구.
+
+**검증 (O3)**
+- `npm run gate` 통과 — 테스트 859 → 864 (`delegate.test.ts` +4 · `session.test.ts` +1 · `chat.test.ts`·`session-cmd.test.ts` 는 기존 테스트에 단언 1개씩). 모델·엔진·sandbox 호출 0.
+- **수정 전 실패 확인** — 새 회귀 7건을 origin/main `b6e8e75` 의 원본 6파일(`auto-verify`·`delegate`·`session`·`chat`·`chat-main`·`session-cmd`)에 대고 돌려 모두 실패했다: 사람 명령이 sandbox 안에서 돌고 막히면 `unverified`(E2 꼴 — 수정 전에는 실제 `sh -c` 로 밖에서 돌았다) · opt-out 명령만 밖에서 돌고 표시 · codex 없음 · G1 표시 · 세션 승인 경로(`verify` 는 sandbox argv, `verifyHost` 는 밖) · chat `--verify-host` 파싱 · `session send --verify-host` 거절 문구(수정 전에는 일반 "모르는 옵션" 이었다 — 거절 자체는 같았다).
+- **GUI** — 렌더러를 스크래치로 번들하고 `window.orc` 를 가짜 브리지로 바꾼 하네스를 headless Chromium(Playwright MCP)에서 돌렸다. 칸에 두 줄 · 스위치를 켜 둘째 칸에 한 줄 · 승인 → payload `{verify:["npm test","npm run e2e"], verifyHost:["npm run integration"], write:true}` · 다음 카드는 칸이 비고 스위치가 꺼져 있다. 같은 시나리오를 수정 전 렌더러(origin/main)에 대면 다음 카드의 칸에 `npm test` 가 남는다 — Q31 §3 의 "칸이 낡는다" 가 코드 읽기에서 실측으로 바뀌었다. AO Browser 패널은 패널이 숨은 상태에서 클릭이 React 에 닿지 않았고, `chrome-devtools-axi` 는 eval 마다 `pageId` 누락 오류로 쓰지 못했다.
+
+**미검증·위험 (O3)**
+- **동작 변화**: GUI·chat·`session send` 에서 사람이 적은 명령이 이제 sandbox 안에서 돈다. 네트워크·포트·홈·`.git` 쓰기·setuid 를 쓰는 명령은 `sandbox 가 막았다` → `unverified` 로 바뀐다(종전에는 통과면 `ok`, 실패면 `rework`). 되살리려면 GUI 스위치·`chat --verify-host` 로 명시한다. `session send` 로는 되살릴 수 없다(결정 4).
+- codex 가 없는 사용자는 칸의 명령이 돌지 않는다 — 사유 줄이 유일한 안내다.
+- 실제 Electron 앱과 실제 codex sandbox 로는 돌리지 않았다 — 가짜 sandbox 실행기와 브라우저 하네스(가짜 브리지)로만 확인했다. IPC 경로(preload → `main.ts` → `service.converseApprove`)는 타입으로만 맞췄다(preload 는 payload 를 그대로 넘긴다).
+- 사람 명령의 기준선도 sandbox 에서 돈다 — 기준선이 막히면 종전 D-096 규칙대로 "돌지 못해 비교하지 않는다" 다.
+
+**상태** 결정 1(D1 + D1a) — PR #141 머지. 결정 6(T1) — PR #140 머지. 결정 2·3·4·7·9(O3 · 칸 비우기 · G1) — 이 PR, 머지로 확정한다(전하 직접 머지). 남은 것: 결정 5(L1, CLI once·loop) · 결정 8(S2+, 후속).
 
 ---
 

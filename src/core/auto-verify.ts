@@ -163,7 +163,7 @@ const TAIL_LINES = 60;
 const TAIL_CHARS = 4000;
 
 /**
- * Core 가 고른 명령 하나를 sandbox 안에서 돌린다. 출력은 줄마다 받아 머리줄 앞(명령 출력)과 뒤(거부)를 가른다 —
+ * 검증 명령 하나를 sandbox 안에서 돌린다 — Core 가 고른 것(D-096)과 사람이 적은 것(D-097 O3) 모두다. 출력은 줄마다 받아 머리줄 앞(명령 출력)과 뒤(거부)를 가른다 —
  * 실행기의 꼬리는 둘이 섞이고 거부가 길면 명령 출력이 밀려난다. npm 은 매 실행 `~/.npm/_logs` 에 쓰려다 막히므로(실측 사실 4)
  * 로그 폴더를 임시 폴더로 돌린다 — 아니면 진짜 lint 실패마다 `file-write` 거부가 붙어 `unverified` 로 숨는다.
  */
@@ -172,7 +172,7 @@ export async function runSandboxed(
   command: AutoCommand,
   cwd: string,
   options: { readonly signal?: AbortSignal; readonly timeoutMs?: number } = {},
-): Promise<{ readonly evidence: CommandEvidence; readonly cancelled: boolean; readonly verdict: SandboxVerdict }> {
+): Promise<{ readonly evidence: CommandEvidence; readonly cancelled: boolean; readonly verdict: SandboxVerdict; readonly blocking: readonly string[] }> {
   const output: string[] = [];
   const denials: string[] = [];
   let headerSeen = false;
@@ -196,5 +196,7 @@ export async function runSandboxed(
     evidence: { kind: 'command', cmd: command.cmd, exitCode, output: tail.length > TAIL_CHARS ? `…${tail.slice(-(TAIL_CHARS - 1))}` : tail },
     cancelled: run.outcome === 'cancelled',
     verdict: sandboxVerdict(exitCode, headerSeen, denials),
+    // 판정과 별개로 막힌 부수 효과 — exit 0 이어도 남긴다 (D-097 G1, 표시만).
+    blocking: denials.filter(blockingDenial),
   };
 }

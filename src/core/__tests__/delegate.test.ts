@@ -342,10 +342,10 @@ describe('Core 가 고른 검증 명령은 codex sandbox 안에서 기준선과 
     };
     return { runner, calls, inners: () => calls.map((c) => inner(c.argv)) };
   };
-  const go = (dir: string, execute: SlotExecutor, auto: { runner: CommandRunner; codex?: string | null }, options: { write?: boolean; id?: string; signal?: AbortSignal; verify?: string[] } = {}) =>
+  const go = (dir: string, execute: SlotExecutor, auto: { runner: CommandRunner; codex?: string | null }, options: { write?: boolean; id?: string; signal?: AbortSignal; verify?: string[]; verifyHost?: string[] } = {}) =>
     delegate({
       matrix, plan: assign(matrix, catalog, row(options.id ?? 'R01')), reason: '수동 지정', title: '날짜 넣어줘', prompt: '날짜 넣어줘',
-      verify: options.verify ?? [], write: options.write ?? true, cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
+      verify: options.verify ?? [], ...(options.verifyHost ? { verifyHost: options.verifyHost } : {}), write: options.write ?? true, cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
       autoVerify: { codex: auto.codex === undefined ? '/bin/codex' : auto.codex, runner: auto.runner, scripts: loadLimits().verifyScripts },
       ...(options.signal ? { signal: options.signal } : {}),
     });
@@ -459,6 +459,51 @@ describe('Core 가 고른 검증 명령은 codex sandbox 안에서 기준선과 
     assert.equal(existsSync(path.join(dir, 'lint-ran')), false, 'sandbox 밖에서 돌았다');
     assert.equal(d.outcome, 'unverified');
     assert.match(d.report.summary, /같은 명령인 사람 명령 `npm run lint` 도 돌리지 않았다 \(D-097 D1a\)/);
+  });
+
+  it('사람이 적은 명령도 codex sandbox 안에서 돌고 V3a 를 받는다 — primary 의 코드가 쓰려던 곳이 막히면 unverified (D-097 O3, Q31 E2 꼴)', async () => {
+    const dir = project({ 'package.json': JSON.stringify(PKG) });
+    const s = spy('없음\nPASS');
+    const f = fake((inner, nth) => (inner === '/bin/sh -c touch escaped' && nth === 2 ? { exit: 1, out: ['EPERM'], denials: ['(node) file-write-create /Users/me/escaped'] } : { exit: 0 }));
+    const d = await go(dir, s.execute, f, { id: 'R03', verify: ['touch escaped'] });
+    assert.equal(existsSync(path.join(dir, 'escaped')), false, 'sandbox 밖에서 돌았다');
+    assert.deepEqual(f.calls[0]?.argv, ['/bin/codex', 'sandbox', '-P', ':workspace', '-C', dir, '--log-denials', '--', '/bin/sh', '-c', 'touch escaped']);
+    assert.equal(d.outcome, 'unverified');
+    assert.match(d.report.summary, /sandbox 가 막았다 — `touch escaped` exit=1/);
+    assert.match(s.prompts.reviewer[0] ?? '', /\$ touch escaped {2}\[codex sandbox · sandbox 가 막았다: \(node\) file-write-create \/Users\/me\/escaped\]/);
+  });
+
+  it('사람이 sandbox 밖을 명시한 명령만 밖에서 돌고, 증거 요약·reviewer 절에 그 사실이 남는다 (D-097 O3 opt-out)', async () => {
+    const dir = project({ 'package.json': JSON.stringify(PKG) });
+    const s = spy('없음\nPASS');
+    const f = fake();
+    const d = await go(dir, s.execute, f, { id: 'R03', verify: ['touch inside'], verifyHost: ['touch host-ran'] });
+    assert.equal(existsSync(path.join(dir, 'host-ran')), true, 'opt-out 명령이 돌지 않았다');
+    assert.equal(existsSync(path.join(dir, 'inside')), false, 'opt-out 하지 않은 명령이 밖에서 돌았다');
+    assert.ok(!f.inners().some((c) => c.includes('host-ran')), 'opt-out 명령이 sandbox 로 갔다');
+    assert.match(s.prompts.reviewer[0] ?? '', /\$ touch host-ran {2}\[sandbox 밖 — 사람이 지정\]\nexit=0/);
+    assert.match(d.report.summary, /사람이 sandbox 밖을 지정한 명령 `touch host-ran` 은 사용자 권한\(네트워크·홈 쓰기 열림\)으로 돌린다 \(D-097 O3\)/);
+  });
+
+  it('codex 가 없으면 sandbox 가 기본인 사람 명령은 돌지 않고 unverified 다 — opt-out 한 명령만 밖에서 돈다 (D-097 결정 3)', async () => {
+    const dir = project({ 'package.json': JSON.stringify({ scripts: {} }) });
+    const f = fake();
+    const d = await go(dir, spy('없음\nPASS').execute, { runner: f.runner, codex: null }, { id: 'R03', verify: ['touch human-ran'], verifyHost: ['touch host-ran'] });
+    assert.equal(f.calls.length, 0);
+    assert.equal(existsSync(path.join(dir, 'human-ran')), false, 'sandbox 없이 밖으로 내려 돌았다');
+    assert.equal(existsSync(path.join(dir, 'host-ran')), true);
+    assert.equal(d.outcome, 'unverified');
+    assert.match(d.report.summary, /codex 를 찾지 못해 사람 명령 1개를 실행하지 않았다 — sandbox 밖에서 돌리려면 명령마다 "sandbox 밖에서 실행" 으로 적는다 \(D-097 O3\) — `touch human-ran`/);
+  });
+
+  it('통과한 명령에도 막힌 부수 효과가 있으면 표시만 하고 판정은 바꾸지 않는다 (D-097 G1)', async () => {
+    const dir = project({ 'package.json': JSON.stringify(PKG) });
+    const s = spy('없음\nPASS');
+    const f = fake((inner, nth) => (inner === 'npm run lint' && nth === 2 ? { exit: 0, denials: ['(node) sysctl-read kern.bootargs', '(node) file-write-create /Users/me/.cache/eslint'] } : { exit: 0 }));
+    const d = await go(dir, s.execute, f);
+    assert.equal(d.outcome, 'ok');
+    assert.match(d.report.summary, /sandbox 가 막은 부수 효과가 있었다 — `npm run lint` exit=0 \(\(node\) file-write-create \/Users\/me\/\.cache\/eslint\) — 판정은 바꾸지 않는다 \(D-097 G1\)/);
+    assert.match(s.prompts.reviewer[0] ?? '', /\$ npm run lint {2}\[codex sandbox · sandbox 가 막은 부수 효과: \(node\) file-write-create \/Users\/me\/\.cache\/eslint\]/);
   });
 
   it('읽기 전용 위임에서는 돌리지 않는다 (D-094 결정 4)', async () => {
