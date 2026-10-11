@@ -5,7 +5,7 @@
  * 엔진 쪽 기록을 진실로 삼으면 교차 벤더 순간 대화가 끊긴다.
  * append-only JSONL. 결정 로그와 같은 규칙으로 읽는다: 깨진 줄은 건너뛰고 **센다**.
  */
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -471,9 +471,11 @@ export const LEGACY_LIST_TIMEOUT_MS = 2000;
 
 export type LegacyLister = (folder: string) => { readonly status: number | null; readonly stdout: string };
 
-/** Electron 메인에서도 node 로 돈다 — `process.execPath` 가 Electron 이라 `ELECTRON_RUN_AS_NODE` 가 필요하다. */
-const listInChild: LegacyLister = (folder) =>
-  spawnSync(process.execPath, ['-e', "process.stdout.write(JSON.stringify(require('node:fs').readdirSync(process.argv[1])))", folder], {
+export type LegacySpawn = (cmd: string, args: readonly string[], options: SpawnSyncOptionsWithStringEncoding) => ReturnType<LegacyLister>;
+
+/** Electron 메인에서도 node 로 돈다 — `process.execPath` 가 Electron 이라 `ELECTRON_RUN_AS_NODE` 가 필요하다. `spawn` 은 테스트가 옵션을 보려고 바꾼다. */
+export const listInChild = (folder: string, spawn: LegacySpawn = spawnSync): ReturnType<LegacyLister> =>
+  spawn(process.execPath, ['-e', "process.stdout.write(JSON.stringify(require('node:fs').readdirSync(process.argv[1])))", folder], {
     encoding: 'utf8',
     timeout: LEGACY_LIST_TIMEOUT_MS,
     killSignal: 'SIGKILL',
