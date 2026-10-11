@@ -225,7 +225,10 @@ describe('기계적 수집', () => {
   });
 
   it('변경 파일은 git 이 진실이다 — 모델이 말한 목록을 믿지 않는다', () => {
-    const e = changedFiles();
+    // 저장소 루트가 아니라 임시 저장소다 — hs-orc 의 `.git/index.lock` 을 잡으면 sandbox 에서 G1 소음이 된다 (D-097 후속).
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hs-ev-git-'));
+    spawnSync('git', ['init', '-q'], { cwd: dir, env: gitEnv() });
+    const e = changedFiles(dir);
     assert.equal(e.kind, 'changed-files');
   });
 

@@ -1,4 +1,5 @@
 import { describe, it } from 'node:test';
+import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -15,6 +16,7 @@ import { projectStateDir, verifyConfigPath } from '../project-state.ts';
 import { REPO_ROOT, REPO_VERIFY_PATH } from '../../data/verify.ts';
 import { loadLimits } from '../../data/limits.ts';
 import { DENIAL_HEADER } from '../auto-verify.ts';
+import { gitEnv } from '../git-env.ts';
 import type { CommandRunner } from '../scaffold.ts';
 
 const matrix = loadMatrix();
@@ -27,6 +29,8 @@ describe('위임 1건 (SPEC §4 5~7단계)', () => {
     const log = path.join(dir, 'log.jsonl');
     process.env['HS_ORC_DECISION_LOG'] = log;
     process.env['HS_ORC_RUN_STORE'] = path.join(dir, 'runs');
+    // 증거 단계의 `git status` 가 hs-orc 저장소의 `.git/index.lock` 을 잡지 않게 임시 저장소에서 돈다 (D-097 후속 — sandbox 의 G1 소음).
+    spawnSync('git', ['init', '-q'], { cwd: dir, env: gitEnv() });
     const prompts: string[] = [];
     const execute: SlotExecutor = (slot, prompt) => {
       prompts.push(prompt);
@@ -36,7 +40,7 @@ describe('위임 1건 (SPEC §4 5~7단계)', () => {
     const d = await delegate({
       matrix, plan: assign(matrix, catalog, row('R01')), reason: '수동 지정 R01',
       title: '타입 고쳐줘', prompt: '[최근 대화]\n사용자: 앞\n\n[이번 요청]\n타입 고쳐줘',
-      verify: [], write: true, cwd: process.cwd(), execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
+      verify: [], write: true, cwd: dir, execute, budget: new Budget(20, 2_000_000), journal: new Journal(),
       note: 'session 0923-1200-aaa',
     });
 

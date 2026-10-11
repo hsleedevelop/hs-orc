@@ -4467,8 +4467,8 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 **미검증·위험 (L1)**
 - **동작 변화**: CLI once·loop 의 선언·`--verify` 가 이제 sandbox 안에서 돈다. 네트워크·포트·홈·`.git` 쓰기·setuid 를 쓰는 명령은 once 에서 `unverified`, loop 에서 엔진 전(기준선)·사이클 중 중단으로 바뀐다. 되살리려면 `--verify-host`. **막힌 명령이 선언(W1, `verify.json`)이면 선언도 조정해야 한다** — `--verify-host` 로 같은 명령을 더해도 선언 쪽은 sandbox 목록에 그대로 남아 같은 자리에서 다시 막힌다. loop 의 중단 안내 줄에도 이것을 적었다. codex 가 없으면 once 는 `unverified`, loop 는 시작하지 않는다.
-- hs-orc 자기 R04 `npm run gate` 와 phase 선언(R05·R06)의 sandbox 동작은 재지 않았다. 실제 엔진을 띄운 loop 전체도 돌리지 않았다.
-- hs-orc 저장소에서 R01 loop 를 돌리면 매번 `.git/index.lock` G1 표시가 붙는다 — 소음이다. 원인 테스트를 찾아 고치는 것은 후속이다.
+- ~~hs-orc 자기 R04 `npm run gate` 와 phase 선언(R05·R06)의 sandbox 동작은 재지 않았다~~ → 아래 "후속 실측" 에서 쟀다(모두 `ran`, 거부 0). 실제 엔진을 띄운 loop 전체는 여전히 돌리지 않았다.
+- ~~hs-orc 저장소에서 R01 loop 를 돌리면 매번 `.git/index.lock` G1 표시가 붙는다~~ → 아래 "후속" 에서 원인 테스트 11건을 고쳤다.
 
 **PR #143 리뷰 반영 (AO 리뷰 changes_requested, head 284082d)**
 - **loop 기준선이 실행 위치와 G1 을 잃었다** (P2). 기준선 결과를 evidence 로만 바꾼 뒤 기준선 줄과 reviewer 의 재현 결과를 만들어, (a) 기준선에서만 도는 `--verify-host "reproduce:…"`·`before:` 가 reviewer 에 `[sandbox 밖 — 사람이 지정]` 없이 실렸고, (b) phase 없는 명령이 기준선에서만 차단성 거부를 삼키고 exit 0 이면 그 G1 이 어디에도 남지 않았다(사이클 실행이 거부 없이 통과하면 영영 안 보인다).
@@ -4476,7 +4476,32 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 - 회귀 2건(`--verify-host` 재현 단계의 꼬리표 · 기준선에서만 생긴 G1) — 리뷰 전 코드에서 둘 다 실패. 종전 D-045 테스트 1건은 reviewer 재현 줄에 `[codex sandbox]` 가 붙는 새 동작으로 기대값을 고쳤다. 테스트 873 → 875. 테스트의 가짜 sandbox 에 `SANDBOX_DENIALS_ON=N`(N번째 호출에만 거부)을 더했다.
 - (선택·문서) 위 "미검증·위험" 의 동작 변화 줄에 선언 조정 안내를 더했다.
 
-**상태** 결정 1(D1 + D1a) — PR #141 머지. 결정 6(T1) — PR #140 머지. 결정 2·3·4·7·9(O3 · 칸 비우기 · G1) — PR #142 머지. 결정 5(L1) — 이 PR, 머지로 확정한다(전하 직접 머지). 남은 것: 결정 8(S2+) · L2(CLI W2) — 후속.
+**구현 기록 — 후속: `.git/index.lock` G1 소음 · R04·R05·R06 실측** (L1 이 PR #143 으로 머지된 뒤, 이번 PR)
+- **원인 특정** — 재현은 L1 실측과 같은 절차다(이 브랜치를 스크래치에 `rsync`(`.git` 제외) → `git init` + 커밋, `runSandboxed`·`/bin/sh -c`, codex-cli 0.162.1, `env -u CODEX_HOME`, 모델 호출 0). 테스트 파일 48개를 하나씩 sandbox 에 돌려 3개(`evidence.test.ts` · `delegate.test.ts` · `service.test.ts`)로, 그 안의 테스트 125개를 `--test-name-pattern` 으로 하나씩 돌려 **11건**으로 좁혔다(evidence 1 · delegate 1 · service 9). PATH 에 기록용 `git` 을 끼워 보니 11건 모두 같은 호출이다 — **저장소 루트(`process.cwd()`)에서 `git status --porcelain`**. 위임의 증거 단계(`delegate.ts` `changedFiles(input.cwd)`)·대화의 미커밋 확인(`uncommittedFiles`)·`changedFiles()` 기본값이 그 경로다. git status 는 인덱스의 stat 정보를 고치려고 `index.lock` 을 잡는데(선택적 잠금), sandbox 의 `:workspace` 는 `.git` 쓰기를 막는다 — git 은 잠금 실패를 무시하고 결과를 내므로 테스트는 통과한다.
+- **수정** — 11건의 작업 폴더를 임시 git 저장소로 바꿨다(테스트만, 제품 코드·V3a·G1 판정은 그대로). `service.test.ts` 는 기존 `initRepo` 위에 `tempRepo()` 를 두고 9곳의 `new GuiService(fake…)` 에 넘긴다. `delegate.test.ts` 는 이미 만들던 임시 폴더에 `git init` 을 하고 `cwd` 로 쓴다. `evidence.test.ts` 는 `changedFiles(임시 저장소)` 다. 기대값은 하나도 바꾸지 않았다.
+- **검증** — 같은 절차로 수정 전 복사본은 `npm test` **exit 0 · 875/875 · 25.6초 · `ran` · 차단성 거부 `(git) file-write-create <복사본>/.git/index.lock` 1줄**(두 번 재현), 수정 후 복사본은 **exit 0 · 875/875 · 25.2초 · `ran` · 차단성 거부 0줄**. 복사본의 `git status` 는 실행 뒤에도 깨끗하다. 워크트리에서 `npm run gate` 통과(테스트 875 — 수 그대로).
+
+**후속 실측 — hs-orc 자기 선언 R04·R05·R06 (sandbox, 위 수정 뒤 복사본)** (2026-10-11, 같은 절차·실행기, 모델·엔진 호출 0, loop 는 띄우지 않았다)
+
+| 행 | 선언 (`data/verify.json`) | 판정 | exit | 시간 | 차단성 거부 |
+|---|---|---|---|---|---|
+| R04 | `npm run gate` | `ran` | 0 | 29.6초 (호스트 29.2초) | 0 |
+| R05 | `[]` — 선언 없음 | 돌 명령 없음 | — | — | — |
+| R06 | `npm test` (phase 없음) | `ran` | 0 | 24.4초 | 0 |
+
+- R04 는 꼬리 60줄만 남으므로 gate 의 단계를 따로도 sandbox 에 돌렸다 — `matrix:check` 0.2초 · `type-check`(tsc 둘) 1.4초 · `lint` 3.3초 · 모두 exit 0 · 거부 0. tsc·eslint 는 sandbox 에서도 막히는 쓰기가 없다.
+- **"phase 선언(R05·R06)" 은 지금 없다.** R05 는 비어 있어 CLI loop 의 R05 는 W1 이 없고 `--verify` 만 돈다. R06 은 phase 없는 `npm test` 라 D-045 대로 기준선·매 사이클에 같은 명령이 돈다(R01 과 같은 명령 · 같은 결과). 막히는 것이 없어 선언 변경·`--verify-host` 는 필요 없다.
+- 수정 전 코드에서 R04·R06 을 돌리면 둘 다 `npm test` 를 품으므로 R01 과 같은 `index.lock` G1 이 붙는다(이번 수정으로 함께 사라진다 — R04·R06 은 수정 뒤 복사본으로만 쟀다).
+
+**미검증·위험 (후속)**
+- 실제 엔진을 띄운 CLI loop 전체는 여전히 돌리지 않았다 — 실측은 같은 실행기에 선언 명령을 직접 댄 것이다.
+- `service.test.ts` 의 다른 테스트 41곳이 저장소 루트를 작업 폴더로 쓴다(`process.cwd()` 를 넘기는 36곳 · 기본값을 쓰는 `new GuiService(fake)` 5곳) — 지금은 증거 단계(`git status`)까지 가지 않아 소음이 없지만, 그런 테스트가 위임을 끝까지 돌리게 바뀌면 같은 G1 이 돌아온다. 그때마다 이번처럼 찾아야 한다.
+
+**전하 결정 필요 (이번 PR 에서 정하지 않았다)**
+1. **R05·R06 에 phase 선언을 둘지** — R05 `before:`/`after:`, R06 `reproduce:`/`fix:`/`regress:` 를 hs-orc 자기 선언에 적을지. 지금은 R05 비움 · R06 phase 없는 `npm test` 다. 적으면 D-045 단계 대조가 hs-orc 자기 위임에도 걸린다. 무엇을 적을지는 행의 뜻에 달려 정책이다.
+2. **`GIT_OPTIONAL_LOCKS=0` 을 둘지** — git 이 status 의 선택적 잠금(`index.lock`)을 잡지 않게 하는 공식 환경 변수다. (a) `scripts/test-setup.mjs` 에 한 줄 — 위 "다른 테스트 41곳" 의 재발을 한 번에 막는다(테스트 전용). (b) 제품의 `git status` 두 곳(`evidence-gather.ts` `changedFiles`·`uncommittedFiles`) — 사용자가 같은 저장소에서 git 을 쓰는 중에 hs-orc 의 증거 수집이 `index.lock` 을 잡아 사용자 명령이 `File exists` 로 실패할 수 있는 경합을 없앤다(미실측). (c) 두지 않는다 — 이번 수정으로 지금 소음은 없다. 권장: (a) 는 값이 작고 되돌리기 쉽다. (b) 는 제품 동작이라 실제 경합을 재현한 뒤에 정한다.
+
+**상태** 결정 1(D1 + D1a) — PR #141 머지. 결정 6(T1) — PR #140 머지. 결정 2·3·4·7·9(O3 · 칸 비우기 · G1) — PR #142 머지. 결정 5(L1) — PR #143 머지. 후속(`index.lock` G1 소음 · R04·R05·R06 실측) — 이 PR, 머지로 확정한다(전하 직접 머지). 남은 것: 결정 8(S2+) · L2(CLI W2) — 후속. 위 "전하 결정 필요" 2건.
 
 ---
 
