@@ -510,6 +510,39 @@ describe('Core 가 고른 검증 명령은 codex sandbox 안에서 기준선과 
     assert.match(s.prompts.reviewer[0] ?? '', /\$ npm run lint {2}\[codex sandbox · sandbox 가 막은 부수 효과: \(node\) file-write-create \/Users\/me\/\.cache\/eslint\]/);
   });
 
+  it('선언·사람 명령이 `<매니저> run <이름>` 꼴이면 verifyScripts 밖 이름도 S2 를 받는다 — sandbox 명령·sandbox 밖 지정 모두 (D-097 결정 8, S2+)', async () => {
+    const pkg = { scripts: { gate: 'node -e 0', e2e: 'node -e 0' } };
+    const cases: [string, { declared?: string[]; verify?: string[]; verifyHost?: string[] }, string][] = [
+      ['선언', { declared: ['npm run gate'] }, 'npm run gate'],
+      ['사람', { verify: ['npm run e2e'] }, 'npm run e2e'],
+      ['sandbox 밖 지정', { verifyHost: ['npm run e2e'] }, 'npm run e2e'],
+    ];
+    for (const [name, opts, cmd] of cases) {
+      const dir = project({ 'package.json': JSON.stringify(pkg) });
+      if (opts.declared) {
+        const config = verifyConfigPath(dir);
+        mkdirSync(path.dirname(config), { recursive: true });
+        writeFileSync(config, JSON.stringify({ R03: opts.declared }), 'utf8');
+      }
+      const weaken = () => writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ scripts: { gate: 'exit 0', e2e: 'exit 0' } }));
+      const f = fake();
+      const d = await go(dir, spy('없음\nPASS', weaken).execute, f, { id: 'R03', ...(opts.verify ? { verify: opts.verify } : {}), ...(opts.verifyHost ? { verifyHost: opts.verifyHost } : {}) });
+      assert.equal(d.outcome, 'unverified', name);
+      assert.match(d.report.summary, new RegExp(`검증 스크립트가 위임 중 바뀌었다 — \`${cmd}\` 를 실행하지 않았다`), name);
+      // 기준선 한 번만 돌았다 — 작업 뒤의 바뀐 스크립트는 돌지 않았다.
+      assert.deepEqual(f.inners(), opts.verifyHost ? [] : [`/bin/sh -c ${cmd}`], name);
+    }
+  });
+
+  it('꼴이 다른 문자열(`npm run e2e -- --ci`)은 스크립트가 바뀌어도 대조하지 않고 그대로 돈다 (D-097 결정 8)', async () => {
+    const dir = project({ 'package.json': JSON.stringify({ scripts: { e2e: 'node e2e.js' } }) });
+    const f = fake();
+    const weaken = () => writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ scripts: { e2e: 'exit 0' } }));
+    const d = await go(dir, spy('없음\nPASS', weaken).execute, f, { id: 'R03', verify: ['npm run e2e -- --ci'] });
+    assert.deepEqual(f.inners(), ['/bin/sh -c npm run e2e -- --ci', '/bin/sh -c npm run e2e -- --ci']);
+    assert.doesNotMatch(d.report.summary, /검증 스크립트가 위임 중 바뀌었다/);
+  });
+
   it('읽기 전용 위임에서는 돌리지 않는다 (D-094 결정 4)', async () => {
     const dir = project({ 'package.json': JSON.stringify(PKG) });
     const f = fake();
