@@ -159,6 +159,28 @@ export function sandboxVerdict(exitCode: number, headerSeen: boolean, denials: r
   return blocking.length > 0 ? { kind: 'blocked', denials: blocking } : { kind: 'ran' };
 }
 
+/**
+ * sandbox 를 탄 검증 명령 하나의 표시와 처리 (D-096 V3a · D-097 G1) — 세션 위임과 CLI once·loop 가 같은 문구를 쓴다.
+ * `marks` 는 reviewer 절 명령 줄의 꼬리표, `held` 는 돌려야 했지만 결과를 얻지 못한 검증(증거에서 빼고 `unverified`), `note` 는 판정을 바꾸지 않는 증거 요약 줄이다.
+ */
+export function sandboxMarks(
+  cmd: string,
+  run: { readonly evidence: CommandEvidence; readonly verdict: SandboxVerdict; readonly blocking?: readonly string[] },
+): { readonly marks: string[]; readonly held?: string; readonly note?: string } {
+  const { evidence, verdict } = run;
+  if (verdict.kind === 'blocked') {
+    return { marks: [`sandbox 가 막았다: ${verdict.denials.join(' · ')}`], held: `sandbox 가 막았다 — \`${cmd}\` exit=${evidence.exitCode} (${verdict.denials.join(' · ')}) — 실패로 세지 않는다` };
+  }
+  if (verdict.kind === 'not-started') {
+    return { marks: ['sandbox 를 시작하지 못했다'], held: `sandbox 를 시작하지 못했다 — \`${cmd}\` exit=${evidence.exitCode} (거부 로그 머리줄 없음)` };
+  }
+  // G1 — 통과했어도 막힌 부수 효과가 있었다. 판정은 바꾸지 않는다 (D-097 결정 9, D-096 V3a 1번 그대로).
+  const side = evidence.exitCode === 0 ? (run.blocking ?? []) : [];
+  return side.length > 0
+    ? { marks: [`sandbox 가 막은 부수 효과: ${side.join(' · ')}`], note: `sandbox 가 막은 부수 효과가 있었다 — \`${cmd}\` exit=0 (${side.join(' · ')}) — 판정은 바꾸지 않는다 (D-097 G1)` }
+    : { marks: [] };
+}
+
 const TAIL_LINES = 60;
 const TAIL_CHARS = 4000;
 

@@ -26,6 +26,7 @@ import { depStatus } from './deps.ts';
 import { checksText, noTestsEvidenceNote, parseVerdict, primaryNoTestsNote, readOnlyVerifyNote, reviewPrompt, runDuo } from '../core/duo.ts';
 import { Budget } from '../core/budget.ts';
 import { changedFiles, loadEvidenceFile, noTests, runCommand, snapshotTests, testChanges, type CommandEvidence, type TestSnapshot } from '../core/evidence-gather.ts';
+import { defaultAutoVerify, runSandboxed, sandboxMarks, type AutoVerify, type SandboxVerdict } from '../core/auto-verify.ts';
 import { GATE_CHECKS, parseGateCheck, type GateSignals } from '../core/gatekeeper.ts';
 import { routeWithFallback } from '../core/pipeline.ts';
 import { defaultJev } from './jev.ts';
@@ -41,7 +42,8 @@ interface Parsed {
   /** 이 실행 한정 토큰 상한. 없으면 `limits.tokenBudget` (D-035) — 조용히 커지는 상한은 없다. */
   tokenBudget?: number;
   graphFile?: string;
-  verify: { cmd: string; phase?: string }[];
+  /** 검증 명령. `host` 가 없으면 codex sandbox 안에서 돈다 (D-097 L1) — `--verify-host` 로 받은 것만 sandbox 밖이다. */
+  verify: VerifyItem[];
   evidenceFile?: string;
   crashTest: boolean;
   skipReviewer: boolean;
@@ -61,11 +63,18 @@ interface Parsed {
   timeoutMs: number;
 }
 
+/** CLI 검증 명령 하나 — 선언(W1)·`--verify` 는 sandbox, `--verify-host` 는 사람이 밖을 명시한 것이다 (D-097 L1·O3). */
+interface VerifyItem {
+  readonly cmd: string;
+  readonly phase?: string;
+  readonly host?: true;
+}
+
 const USAGE = `사용법: hs-orc "<작업>" [--task R01] [--effort high] [--reviewer-effort high]
        [--gate <${GATE_CHECKS.join('|')}>]... [--no-classify-llm] [--no-jev] [--run] [--write] [--timeout 600] [--raw]
        [--mode once|pingpong|loop|graph] [--max-iterations N] [--budget 20] [--token-budget N] [--graph <nodes.json>]
        (그래프 스펙 예제: examples/graph-nodes.json · --token-budget 0 = 토큰 상한 없음, D-035)
-       [--verify "[phase:]<명령>"]... [--evidence <file.json>] [--crash-test]
+       [--verify "[phase:]<명령>"]... [--verify-host "[phase:]<명령>"]... [--evidence <file.json>] [--crash-test]
        [--no-reviewer] [--side primary|reviewer] [--fix-red-baseline]`;
 
 function parseArgs(argv: readonly string[]): Parsed {
@@ -98,15 +107,14 @@ function parseArgs(argv: readonly string[]): Parsed {
         break;
       }
       case '--graph': parsed.graphFile = value(); break;
-      case '--verify': {
+      case '--verify':
+      case '--verify-host': {
         // `phase:명령` 이면 단계를 붙인다 (R05 before/after, R06 reproduce/fix/regress 용).
+        // --verify 는 codex sandbox 안, --verify-host 는 사람이 밖을 명시한 명령이다 (D-097 L1 — chat 의 같은 이름 플래그와 같은 뜻).
         const v = value();
         const [head, ...rest] = v.split(':');
-        parsed.verify.push(
-          rest.length > 0 && head !== undefined && /^[a-z-]+$/.test(head)
-            ? { cmd: rest.join(':'), phase: head }
-            : { cmd: v },
-        );
+        const item = rest.length > 0 && head !== undefined && /^[a-z-]+$/.test(head) ? { cmd: rest.join(':'), phase: head } : { cmd: v };
+        parsed.verify.push(arg === '--verify-host' ? { ...item, host: true } : item);
         break;
       }
       case '--evidence': parsed.evidenceFile = value(); break;
@@ -184,18 +192,56 @@ async function interruptible<T>(fn: (signal: AbortSignal) => Promise<T>): Promis
   }
 }
 
-/** 검증 명령을 차례로 돌린다. 신호로 멈추면 남은 명령은 띄우지 않는다. */
-async function runVerifyList(cmds: readonly { cmd: string; phase?: string }[]): Promise<CommandEvidence[]> {
+/** 검증 명령 하나의 결과 — sandbox 판정(V3a)과 막힌 부수 효과(G1)를 함께 든다 (D-097 L1). */
+interface VerifyRun {
+  readonly item: VerifyItem;
+  readonly evidence: CommandEvidence;
+  readonly verdict: SandboxVerdict;
+  readonly blocking: readonly string[];
+}
+
+/**
+ * 검증 명령을 차례로 돌린다. 신호로 멈추면 남은 명령은 띄우지 않는다.
+ * 선언·`--verify` 는 codex sandbox 안(`/bin/sh -c`, D-096 실행기), `--verify-host` 만 밖이다 (D-097 L1). codex 가 없으면 sandbox 명령을
+ * 밖으로 내리지 않는다 — 부르는 쪽이 먼저 걸러야 하고, 여기서도 던진다.
+ */
+async function runVerifyList(cmds: readonly VerifyItem[], auto: AutoVerify): Promise<VerifyRun[]> {
   return interruptible(async (signal) => {
-    const out: CommandEvidence[] = [];
-    for (const v of cmds) {
-      const r = await runCommand(v.cmd, process.cwd(), { signal, ...(v.phase !== undefined ? { phase: v.phase } : {}) });
+    const out: VerifyRun[] = [];
+    for (const item of cmds) {
+      const phase = item.phase !== undefined ? { phase: item.phase } : {};
+      if (item.host) {
+        const r = await runCommand(item.cmd, process.cwd(), { signal, ...phase });
+        if (r.cancelled) break;
+        out.push({ item, evidence: r.evidence, verdict: { kind: 'ran' }, blocking: [] });
+        continue;
+      }
+      if (!auto.codex) throw new Error(`sandbox 없이 sandbox 검증 명령을 돌리려 했다: ${item.cmd}`);
+      const r = await runSandboxed({ ...auto, codex: auto.codex }, { cmd: item.cmd, argv: ['/bin/sh', '-c', item.cmd] }, process.cwd(), { signal });
       if (r.cancelled) break;
-      out.push(r.evidence);
+      out.push({ item, evidence: { ...r.evidence, ...phase }, verdict: r.verdict, blocking: r.blocking });
     }
     return out;
   });
 }
+
+const verifyLabel = (v: { cmd: string; phase?: string }): string => (v.phase ? `${v.phase}:${v.cmd}` : v.cmd);
+
+/** reviewer 절·결과 줄에 보일 명령 줄 — 어디서 돌았는지와 sandbox 판정을 꼬리표로 단다 (D-096·D-097). */
+const shownRun = (r: VerifyRun): CommandEvidence => {
+  const marks = [r.item.host ? 'sandbox 밖 — 사람이 지정' : 'codex sandbox', ...sandboxMarks(verifyLabel(r.item), r).marks];
+  return { ...r.evidence, cmd: `${r.evidence.cmd}  [${marks.join(' · ')}]` };
+};
+
+/** 돌지 못한 이유 — 시그널·시간 초과·126·127(D-046)과 sandbox 가 막았거나 시작하지 못한 것(V3a). 돌았으면 null. */
+const whyNotRun = (r: VerifyRun): string | null =>
+  r.verdict.kind === 'blocked' ? `sandbox 가 막았다: ${r.verdict.denials.join(' · ')}`
+  : r.verdict.kind === 'not-started' ? 'sandbox 를 시작하지 못했다'
+  : notRun(r.evidence.exitCode);
+
+/** codex 가 없어 sandbox 명령을 돌릴 수 없다는 줄 (D-097 L1) — 밖으로 내리지 않는다. */
+const noCodexLine = (boxed: readonly VerifyItem[]): string =>
+  `codex 를 찾지 못해 검증 명령 ${boxed.length}개를 실행하지 않았다 — sandbox 밖에서 돌리려면 --verify-host 로 적는다 (D-097 L1) — ${boxed.map((v) => `\`${verifyLabel(v)}\``).join(' · ')}`;
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
@@ -327,8 +373,11 @@ async function main(): Promise<void> {
     );
     // D-040: reviewer 는 읽기 전용이라 테스트를 못 돌린다 — 선언된 검증 명령은 Core 가 돌린다(once 와 같은 선언).
     // 읽기 전용이면 primary 의 diff 가 적용되지 않아 원본을 검사하게 되므로 돌리지 않고, 그렇다고 적는다.
-    const verifyCmds = [...defaultVerify(plan.assignment.id, verifyConfigPath(process.cwd())), ...args.verify];
-    const cmdLabel = (v: { cmd: string; phase?: string }): string => (v.phase ? `${v.phase}:${v.cmd}` : v.cmd);
+    // 선언(W1)과 --verify 는 codex sandbox 안, --verify-host 만 밖이다 (D-097 L1).
+    const verifyCmds: VerifyItem[] = [...defaultVerify(plan.assignment.id, verifyConfigPath(process.cwd())), ...args.verify];
+    const cmdLabel = verifyLabel;
+    const auto = defaultAutoVerify();
+    const boxed = verifyCmds.filter((v) => !v.host);
     const verifyList = verifyCmds.map(cmdLabel).join(' · ');
     // D-045: phase 는 **언제** 돌리는가다. before·reproduce 는 변경 전의 사실이라 기준선에서 한 번(실패 기대),
     // 나머지(phase 없음·after·fix·regress…)는 변경 후의 사실이라 매 사이클 게이트(통과 기대)다.
@@ -364,19 +413,31 @@ async function main(): Promise<void> {
       process.exitCode = 1;
       return;
     }
+    // codex 가 없으면 sandbox 명령을 돌릴 수 없다 — 밖으로 내리지 않고 엔진 전에 멈춘다 (D-097 L1, D-096 안전선).
+    if (args.write && boxed.length > 0 && auto.codex === null) {
+      process.stderr.write([`중단   ${noCodexLine(boxed)}. 엔진을 띄우지 않았다.`, ''].join('\n'));
+      process.exitCode = 1;
+      return;
+    }
+    if (args.write && verifyCmds.some((v) => v.host)) {
+      process.stderr.write(`검증   sandbox 밖(사용자 권한·네트워크·홈 쓰기 열림): ${verifyCmds.filter((v) => v.host).map(cmdLabel).join(' · ')} — 나머지는 codex sandbox 안 (D-097 L1)\n`);
+    }
     const plainCmds = postCmds.filter((v) => v.phase === undefined);
     let reproduced = '';
     if (args.write && plainCmds.length + preCmds.length > 0) {
-      const baseline = await runVerifyList([...plainCmds, ...preCmds]);
-      process.stderr.write(`기준선 ${baseline.map((c) => `\`${cmdLabel(c)}\` exit=${c.exitCode}`).join(', ')}\n`);
+      const baselineRuns = await runVerifyList([...plainCmds, ...preCmds], auto);
+      const baseline = baselineRuns.map((r) => r.evidence);
+      process.stderr.write(`기준선 ${baselineRuns.map((r) => `\`${cmdLabel(r.evidence)}\` exit=${r.evidence.exitCode}`).join(', ')}\n`);
       // D-046: 돌지 못한 명령(126·127·시그널·시간 초과)은 환경 문제다 — 모델도 --fix-red-baseline 도 고치지 못한다.
-      const unrunnable = baseline.filter((c) => notRun(c.exitCode) !== null);
+      // sandbox 가 막았거나 시작하지 못한 기준선도 같다 (D-097 L1) — D-042 의 "기준선 실패" 가 아니다.
+      const unrunnable = baselineRuns.filter((r) => whyNotRun(r) !== null);
       if (unrunnable.length > 0) {
         process.stderr.write(
           [
             `중단   검증 명령을 실행할 수 없다 — 테스트 실패가 아니라 환경 문제다. 엔진을 띄우지 않았다.`,
-            ...unrunnable.map((c) => `$ ${cmdLabel(c)} → exit ${c.exitCode} (${notRun(c.exitCode)})\n${c.output.slice(-1500)}`),
+            ...unrunnable.map((r) => `$ ${cmdLabel(r.evidence)} → exit ${r.evidence.exitCode} (${whyNotRun(r)})\n${r.evidence.output.slice(-1500)}`),
             `안내   PATH·설치·시간 제한을 확인한다.`,
+            ...(unrunnable.some((r) => r.verdict.kind !== 'ran') ? ['안내   sandbox 가 막은 명령은 고치거나, 사용자 권한이 필요하면 --verify-host 로 밖에서 돌린다 (D-097 L1).'] : []),
             '',
           ].join('\n'),
         );
@@ -453,24 +514,30 @@ async function main(): Promise<void> {
         // Evaluator 는 reviewer 슬롯이 돈다 (D-003). 형식·판정은 once 의 독립 리뷰와 같다 —
         // 마지막 줄 PASS/FAIL, 못 읽으면 unknown 이고 통과로 봐주지 않는다.
         evaluate: async (_ctx, output) => {
-          const ran = args.write ? await runVerifyList(postCmds) : [];
+          const runs = args.write ? await runVerifyList(postCmds, auto) : [];
+          const ran = runs.map((r) => r.evidence);
           const failed = ran.filter((c) => contradiction(c) !== null);
+          // 결과 줄 — G1(통과했어도 막힌 부수 효과)이면 그 사실을 붙인다 (D-097 결정 9).
+          const ranText = runs
+            .map((r) => `\`${cmdLabel(r.evidence)}\` exit=${r.evidence.exitCode}${sandboxMarks(cmdLabel(r.evidence), r).note ? ' (sandbox 가 막은 부수 효과)' : ''}`)
+            .join(', ');
           const checks = args.write
-            ? [checksText(ran), reproduced]
+            ? [checksText(runs.map(shownRun)), reproduced]
                 .filter(Boolean)
                 .join('\n\n') || undefined
             : verifyCmds.length > 0
               ? `primary 의 변경은 작업 트리에 적용되지 않았고 검증 명령(${verifyList})도 실행되지 않았다. 테스트가 통과한다고 가정하지 마라.`
               : undefined;
-          const unrunnable = ran.filter((c) => notRun(c.exitCode) !== null);
+          // sandbox 가 막았거나 시작하지 못한 명령도 "돌지 못했다" 다 (D-097 L1) — primary 는 거부를 고칠 수 없어 재시도는 사이클만 태운다.
+          const unrunnable = runs.filter((r) => whyNotRun(r) !== null);
           if (unrunnable.length > 0) {
             verifyBroken = true;
             return {
               passed: false,
               verification:
                 `reviewer ${plan.slots.reviewer.label} 생략 — 검증 명령을 실행할 수 없다(환경)` +
-                ` · ${unrunnable.map((c) => `\`${cmdLabel(c)}\` exit=${c.exitCode} (${notRun(c.exitCode)})`).join(', ')}`,
-              reason: unrunnable.map((c) => `$ ${cmdLabel(c)} → exit ${c.exitCode}\n${c.output.slice(-1500)}`).join('\n\n').slice(0, 4000),
+                ` · ${unrunnable.map((r) => `\`${cmdLabel(r.evidence)}\` exit=${r.evidence.exitCode} (${whyNotRun(r)})`).join(', ')}`,
+              reason: unrunnable.map((r) => `$ ${cmdLabel(r.evidence)} → exit ${r.evidence.exitCode}\n${r.evidence.output.slice(-1500)}`).join('\n\n').slice(0, 4000),
               reviewerSkipped: true,
             };
           }
@@ -494,7 +561,7 @@ async function main(): Promise<void> {
                 [weakened.length > 0 ? `기존 테스트 약화: ${weakened.join(', ')}` : '', failed.length > 0 ? '검증 명령 실패' : '']
                   .filter(Boolean)
                   .join(' · ') +
-                (ran.length > 0 ? ` · 검증 명령 ${ran.map((c) => `\`${cmdLabel(c)}\` exit=${c.exitCode}`).join(', ')}` : '') +
+                (ran.length > 0 ? ` · 검증 명령 ${ranText}` : '') +
                 addedNote +
                 (testConflict ? ' · 과제가 기존 테스트와 충돌한다 — 재시도하지 않는다' : ''),
               // 있는 블록만 빈 줄 하나로 잇는다 — 약화만 있을 때 지적 끝에 빈 줄이 겹치던 자리다 (D-047 실측).
@@ -516,7 +583,7 @@ async function main(): Promise<void> {
               `reviewer ${plan.slots.reviewer.label} → ${verdict.toUpperCase()}` +
               (check.ok ? '' : ` (실행 실패: ${check.text.slice(0, 80)})`) +
               (ran.length > 0
-                ? ` · 검증 명령 ${ran.map((c) => `\`${cmdLabel(c)}\` exit=${c.exitCode}`).join(', ')}`
+                ? ` · 검증 명령 ${ranText}`
                 : !args.write && verifyCmds.length > 0
                   ? ' · 테스트 미실행(읽기 전용)'
                   : '') +
@@ -590,7 +657,9 @@ async function main(): Promise<void> {
   // 프로젝트가 선언한 기본 검증 + 이번 실행의 --verify. 추론은 없다 (SPEC §5).
   const verifyConfig = verifyConfigPath(process.cwd());
   const declared = defaultVerify(plan.assignment.id, verifyConfig);
-  const verify = [...declared, ...args.verify];
+  // 선언(W1)과 --verify 는 codex sandbox 안, --verify-host 만 밖이다 (D-097 L1).
+  const verify: VerifyItem[] = [...declared, ...args.verify];
+  const auto = defaultAutoVerify();
   if (declared.length > 0) {
     process.stderr.write(`검증   ${verifyConfig} 선언 ${declared.length}건: ${declared.map((v) => v.cmd).join(' · ')}\n`);
   }
@@ -599,11 +668,34 @@ async function main(): Promise<void> {
     process.stderr.write(`검증   읽기 전용이라 검증 명령(${verifyLabels.join(' · ')})을 실행하지 않는다 — 실행하려면 --write (D-094)\n`);
   }
   // 검증 명령은 primary 뒤·reviewer 앞에 돌리고 결과를 reviewer 에 싣는다 (D-094, D-040 과 같은 형식).
+  // sandbox 가 막았거나 시작하지 못한 명령은 증거에서 빼고 `held` 로 둔다 — `rework` 가 아니라 `unverified` 다 (V3a, D-097 L1).
   const ran: CommandEvidence[] = [];
-  const checks = args.write && verify.length > 0
+  const held: string[] = [];
+  const verifyNotes: string[] = [];
+  let runnable = verify;
+  if (args.write) {
+    const boxed = verify.filter((v) => !v.host);
+    // codex 가 없으면 sandbox 명령을 밖으로 내리지 않는다 — 돌리지 않고 unverified 로 닫는다 (D-097 L1, D-096 안전선).
+    if (boxed.length > 0 && auto.codex === null) {
+      held.push(noCodexLine(boxed));
+      runnable = verify.filter((v) => v.host);
+      process.stderr.write(`검증   ${noCodexLine(boxed)}\n`);
+    }
+    const host = verify.filter((v) => v.host);
+    if (host.length > 0) {
+      verifyNotes.push(`사람이 sandbox 밖을 지정한 명령 ${host.map((v) => `\`${verifyLabel(v)}\``).join(' · ')} 은 사용자 권한(네트워크·홈 쓰기 열림)으로 돌린다 (D-097 L1)`);
+    }
+  }
+  const checks = args.write && runnable.length > 0
     ? async (): Promise<string> => {
-        ran.push(...(await runVerifyList(verify)));
-        return checksText(ran);
+        const runs = await runVerifyList(runnable, auto);
+        for (const r of runs) {
+          const sm = sandboxMarks(verifyLabel(r.item), r);
+          if (sm.held) held.push(sm.held);
+          else ran.push(r.evidence);
+          if (sm.note) verifyNotes.push(sm.note);
+        }
+        return checksText(runs.map(shownRun));
       }
     : undefined;
   const duo = await runDuo(matrix, plan, execute, missingTests ? `${args.task}\n\n${primaryNoTestsNote(missingTests)}` : args.task, budget, {
@@ -672,7 +764,8 @@ async function main(): Promise<void> {
   const report = collect(plan.assignment, evidence, [
     ...(missingTests ? [noTestsEvidenceNote(missingTests)] : []),
     ...(!args.write && verify.length > 0 ? [readOnlyVerifyNote(verifyLabels)] : []),
-  ]);
+    ...verifyNotes,
+  ], held);
 
   process.stderr.write(
     [
