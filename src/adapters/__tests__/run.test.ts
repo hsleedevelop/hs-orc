@@ -4,7 +4,15 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runProcess } from '../run.ts';
+import { outsideGroupDescendants, runProcess } from '../run.ts';
+
+/**
+ * codex sandbox(seatbelt) 안이라 setuid `/bin/ps` 가 막혔는가 (Q31 E3 — forbidden-exec-sugid). 두 조건이 다 맞을 때만 참이다 —
+ * sandbox 밖에서 `ps` 가 깨지면 D-078 테스트가 대체 경로로 숨지 않고 실패해야 한다.
+ */
+const PS_BLOCKED =
+  process.env.CODEX_SANDBOX !== undefined &&
+  (spawnSync('ps', ['-o', 'pid=', '-p', String(process.pid)]).error as NodeJS.ErrnoException | undefined)?.code === 'EPERM';
 
 const sh = (script: string, timeoutMs = 10_000) =>
   runProcess({ bin: '/bin/sh', argv: ['-c', script], cwd: process.cwd(), timeoutMs, format: 'claude' });
@@ -31,20 +39,47 @@ const alive = (pid: number): boolean => {
 /**
  * codex 흉내 (D-067 추가 실측 2 (c)): 셸 명령을 **새 세션·프로세스 그룹**(setsid — node `detached`)으로 띄우고,
  * SIGTERM 에는 명령을 정리하지 않고 끝난다. 손자 pid 를 stderr 첫 줄(또는 `pidFile`)로 알린다.
- * 손자의 pgid 가 엔진과 같으면 이 가짜는 검사할 경우를 만들지 못한 것이다 — 던져서 드러낸다.
+ * 손자의 pgid 가 엔진과 같으면 이 가짜는 검사할 경우를 만들지 못한 것이다 — 던져서 드러낸다(`ps` 가 막힌 sandbox 에서는 건너뛴다).
  */
 const newGroupEngineScript = (command: string, pidFile?: string): string => `
   const { spawn, execFileSync } = require('node:child_process');
   const c = spawn('/bin/sh', ['-c', ${JSON.stringify(command)}], { detached: true, stdio: 'ignore' });
   const pgid = (pid) => execFileSync('ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8' }).trim();
   setTimeout(() => {
-    if (pgid(c.pid) === pgid(process.pid)) throw new Error('손자가 새 그룹을 만들지 않았다');
+    if (${!PS_BLOCKED} && pgid(c.pid) === pgid(process.pid)) throw new Error('손자가 새 그룹을 만들지 않았다');
     ${pidFile ? `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(c.pid));` : `process.stderr.write(c.pid + '\\n');`}
   }, 200);
   setInterval(() => {}, 1000);
 `;
-const newGroupEngine = (command: string) =>
-  runProcess({ bin: process.execPath, argv: ['-e', newGroupEngineScript(command)], cwd: process.cwd(), timeoutMs: 30_000, format: 'claude' });
+/**
+ * `ps` 가 막힌 sandbox 에서 제품의 스냅숏 대신 넣는다 — 가짜 엔진이 알린 새 그룹 손자(자기 그룹 리더)를 `-pgid` 로 돌려준다.
+ * 제품의 신호 경로(SIGTERM → 유예 → SIGKILL, 종료 훅)는 그대로 탄다. sandbox 안에서 빠지는 것은 `ps` 호출·파싱뿐이다.
+ */
+const knownDescendants = (pidFile: string) => (): number[] => {
+  try {
+    return [-Number(readFileSync(pidFile, 'utf8').trim())];
+  } catch {
+    return [];
+  }
+};
+const newGroupEngine = (command: string) => {
+  const pidFile = path.join(mkdtempSync(path.join(os.tmpdir(), 'hs-group-')), 'pid');
+  const handle = runProcess({
+    bin: process.execPath,
+    argv: ['-e', newGroupEngineScript(command, pidFile)],
+    cwd: process.cwd(),
+    timeoutMs: 30_000,
+    format: 'claude',
+    ...(PS_BLOCKED ? { descendants: knownDescendants(pidFile) } : {}),
+  });
+  return { handle, pidFile };
+};
+const grandchildFromFile = (pidFile: string): number => {
+  const pid = Number(readFileSync(pidFile, 'utf8').trim());
+  assert.ok(Number.isInteger(pid) && pid > 0, `손자 pid 를 못 읽었다: ${pidFile}`);
+  spawnedGrandchildren.push(pid);
+  return pid;
+};
 
 /** 실제 좀비 여부는 `kill -0` 로만 알 수 있다 — 종료를 기다리지 않고 단정하면 초록 거짓말이 된다. */
 const waitGone = async (pid: number, ms = 5_000): Promise<boolean> => {
@@ -147,29 +182,34 @@ describe('취소와 타임아웃', () => {
   });
 
   it('취소하면 새 프로세스 그룹을 만든 손자도 죽는다 — 엔진이 정리 없이 끝나도 (Q24, D-078)', async () => {
-    const handle = newGroupEngine('sleep 120');
+    // sandbox 에서는 스냅숏이 실패해 빈 목록이다 — 엔진 그룹 종료만 남는다(제품 기본값의 대체 동작).
+    if (PS_BLOCKED) assert.deepEqual(outsideGroupDescendants(process.pid), []);
+    const { handle, pidFile } = newGroupEngine('sleep 120');
     await new Promise((r) => setTimeout(r, 600));
     handle.cancel();
     const result = await handle.result;
     assert.equal(result.outcome, 'cancelled');
-    const grandchild = grandchildPidOf(result.rawStderr);
+    const grandchild = grandchildFromFile(pidFile);
     assert.equal(await waitGone(grandchild), true, `새 그룹 손자 ${grandchild} 가 살아남았다 (고아)`);
   });
 
   it('엔진이 SIGTERM 에 바로 끝나도 SIGTERM 을 무시하는 새 그룹 손자는 유예 뒤 SIGKILL 로 죽는다 (Q24, D-078)', async () => {
-    const handle = newGroupEngine("trap '' TERM; exec sleep 120");
+    const { handle, pidFile } = newGroupEngine("trap '' TERM; exec sleep 120");
     await new Promise((r) => setTimeout(r, 600));
     handle.cancel();
-    const result = await handle.result;
-    const grandchild = grandchildPidOf(result.rawStderr);
+    await handle.result;
+    const grandchild = grandchildFromFile(pidFile);
     assert.equal(await waitGone(grandchild, 8_000), true, `새 그룹 손자 ${grandchild} 가 살아남았다 (고아)`);
   });
 
   it('취소 직후 호스트가 나가도 SIGTERM 을 무시하는 새 그룹 손자가 남지 않는다 (Q24, D-078)', async () => {
     const pidFile = path.join(mkdtempSync(path.join(os.tmpdir(), 'hs-exit-')), 'pid');
+    // sandbox 에서는 knownDescendants 와 같은 것을 호스트 안에 넣는다.
+    const descendants = PS_BLOCKED ? `descendants: () => [-Number(readFileSync(${JSON.stringify(pidFile)}, 'utf8'))],` : '';
     const host = `
+      import { readFileSync } from 'node:fs';
       import { runProcess } from ${JSON.stringify(new URL('../run.ts', import.meta.url).href)};
-      const h = runProcess({ bin: process.execPath, argv: ['-e', ${JSON.stringify(newGroupEngineScript("trap '' TERM; exec sleep 120", pidFile))}], cwd: process.cwd(), timeoutMs: 60000, format: 'claude' });
+      const h = runProcess({ bin: process.execPath, argv: ['-e', ${JSON.stringify(newGroupEngineScript("trap '' TERM; exec sleep 120", pidFile))}], cwd: process.cwd(), timeoutMs: 60000, format: 'claude', ${descendants} });
       await new Promise((r) => setTimeout(r, 800));
       h.cancel();
       await new Promise((r) => setTimeout(r, 100));
