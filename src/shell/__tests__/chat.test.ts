@@ -267,7 +267,9 @@ describe('chat — 입력 루프', () => {
 
 describe('chat — 진입', () => {
   it('인자를 읽고, 모르는 옵션과 --scratch·--resume 동시 지정은 던진다', () => {
-    assert.deepEqual(parseChatArgs(['--scratch', '--verify', 'npm test']), { scratch: true, list: false, help: false, verify: ['npm test'] });
+    assert.deepEqual(parseChatArgs(['--scratch', '--verify', 'npm test']), { scratch: true, list: false, help: false, verify: ['npm test'], verifyHost: [] });
+    // sandbox 밖 실행은 별도 플래그로만 받는다 (D-097 O3) — 줄 머리(host:)는 phase 문법과 부딪힌다.
+    assert.deepEqual(parseChatArgs(['--verify', 'npm test', '--verify-host', 'npm run e2e']).verifyHost, ['npm run e2e']);
     assert.equal(parseChatArgs(['--resume', 'abc']).resume, 'abc');
     assert.throws(() => parseChatArgs(['--oops']), /모르는 옵션/);
     assert.throws(() => parseChatArgs(['--resume']), /값이 없다/);

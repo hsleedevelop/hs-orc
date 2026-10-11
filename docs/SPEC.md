@@ -379,14 +379,16 @@ GUI 는 위임을 Electron 메인 프로세스에서 도므로 동기 실행이�
 `lint` · `typecheck`/`type-check` 는 모든 쓰기 위임, `test` 는 1·4·6행. `build` 는 네트워크를 써서 넣지 않는다. 패키지 매니저는 잠금 파일로, D-091 과 같다).
 제품이 고르는 것은 **이름**까지다 — 스크립트 본문은 프로젝트의 것이고 카드가 원문(`pre`·`post` 포함)을 읽기 전용으로 보인다.
 이 둘은 사람 클릭 없이 primary 가 쓴 코드를 돌리므로 **`codex sandbox -P :workspace` 안에서만** 돈다(primary 와 같은 경계 — 네트워크·홈 쓰기 차단).
-codex 가 없으면 돌리지 않는다 — sandbox 밖으로 내리지 않는다. 사람이 적은 명령은 위 그대로 sandbox 밖 `sh -c` 다.
-- **같은 명령은 하나만** (D-097 D1) — 스크립트 · 선언 · 사람 명령이 같은 명령(`test` 별칭 `npm test` ≡ `npm run test` 포함 — npm·pnpm·yarn 만. bun 의 `bun test` 는 내장 테스트 러너라 `bun run test` 와 다르다)이면 보호가 강한 쪽 하나만 돈다: 스크립트(스냅숏 대조를 받는다) > 선언(sandbox) > 사람 명령(sandbox 밖). 합쳐진 쪽은 증거 요약에 `… 은 Core 가 고른 \`…\`(codex sandbox) 하나로 돌린다` 로 남는다. 사람이 같은 명령을 적었다고 그 명령이 sandbox·대조 밖으로 빠지지 않는다. codex 가 없으면 합쳐진 사람 명령도 돌지 않는다(D1a).
+codex 가 없으면 돌리지 않는다 — sandbox 밖으로 내리지 않는다.
+- **사람이 적은 명령도 sandbox 가 기본이다** (D-097 O3) — GUI 배정·단계 카드의 칸, `chat --verify`, `session send --verify` 의 명령은 같은 `codex sandbox -P :workspace` 안에서 `/bin/sh -c` 로 돌고 아래 sandbox 거부 판정을 받는다. 밖에서 돌리려면 사람이 **명령마다** 명시한다 — GUI 는 칸 옆 스위치로 여는 둘째 칸(카드마다 꺼진 채 시작), `chat` 은 `--verify-host "<명령>"`. 그 명령만 사용자 권한(네트워크·홈 쓰기 열림)으로 돌고, 증거 요약과 reviewer 절의 명령 줄에 `sandbox 밖 — 사람이 지정` 이 붙는다. 줄 머리(`host:`)로는 받지 않는다 — `phase:` 문법과 부딪힌다. `session send` 는 `--verify-host` 를 받지 않는다 — 부르는 쪽이 에이전트일 수 있다(D-088 H7 과 같은 선). codex 가 없으면 sandbox 가 기본인 사람 명령은 돌지 않고 사유 줄과 함께 `unverified` 다. GUI 칸은 승인 뒤 비워진다 — 앞 카드에 적은 명령이 다음 카드에 실리지 않는다.
+- **같은 명령은 하나만** (D-097 D1) — 스크립트 · 선언 · 사람 명령이 같은 명령(`test` 별칭 `npm test` ≡ `npm run test` 포함 — npm·pnpm·yarn 만. bun 의 `bun test` 는 내장 테스트 러너라 `bun run test` 와 다르다)이면 보호가 강한 쪽 하나만 돈다: 스크립트(스냅숏 대조를 받는다) > 선언 > 사람 명령. 사람이 sandbox 밖을 지정한 명령도 Core 가 고른 명령과 같으면 Core 쪽(sandbox) 하나로 돈다. 합쳐진 쪽은 증거 요약에 `… 은 Core 가 고른 \`…\`(codex sandbox) 하나로 돌린다` 로 남는다. 사람이 같은 명령을 적었다고 그 명령이 sandbox·대조 밖으로 빠지지 않는다. codex 가 없으면 합쳐진 사람 명령도 돌지 않는다(D1a).
 - **기준선** — primary 전에 같은 명령을 돌린다. **사람이 적은 명령도 포함이다** — 칸·`--verify` 의 명령은 이제 바뀌지 않은 트리에서 한 번, primary 뒤에 한 번, 두 번 돈다. 작업 전에도 뒤에도 빨간 명령은 증거 요약에 `작업 전부터 실패` 로 싣고 불일치로도 증거로도 세지 않는다.
 - **스냅숏 대조** — `package.json` 스크립트는 primary 직전에 본 것과 본문·`pre`·`post` 까지 같을 때만 primary 뒤에 돈다. 다르면 `검증 스크립트가 위임 중 바뀌었다` 를 남기고 돌리지 않는다.
 - **sandbox 거부** — 명령이 실패하고 sandbox 의 거부 로그에 네트워크·`/dev/` 밖 쓰기 거부가 있으면 `rework` 가 아니라 `sandbox 가 막았다` 로 남긴다(→ `unverified`). 거부 로그 머리줄 없이 실패하면 `sandbox 를 시작하지 못했다` 다. exit 0 은 거부와 무관하게 통과다.
 - 위 셋(작업 전부터 실패 · 스크립트 변경 · sandbox 막힘·시작 못 함)과 codex 없음은 **돌려야 했지만 결과를 얻지 못한 검증**이다 — 다른 명령이 요구를 채워도 `ok` 가 아니라 `unverified` 다(진짜 실패의 `rework` 가 먼저다). 작업 전부터 실패는 기준선이 실제로 돌아 실패했을 때만이다 — 막히거나 돌지 못한 기준선으로는 작업 뒤 실패를 면제하지 않는다.
 - 명령이 실패해도 reviewer 는 돈다. 테스트 없는 프로젝트의 1행은 Core 가 돌린 `lint` 통과가 `command` 증거라 `ok` 가 될 수 있다(D-093 결정 4 의 결과가 바뀐다).
-- CLI once·loop 는 그대로다 — 선언 + `--verify` 를 sandbox 밖에서 돌린다.
+- **통과한 명령의 막힌 부수 효과** (D-097 G1) — exit 0 이어도 차단성 거부가 있었으면 증거 요약과 reviewer 절의 명령 줄에 `sandbox 가 막은 부수 효과` 를 남긴다. 판정은 바꾸지 않는다(위 sandbox 거부 판정 그대로).
+- CLI once·loop 는 그대로다 — 선언 + `--verify` 를 sandbox 밖에서 돌린다(D-097 L1 이 후속).
 
 행별 **기본 검증 명령**은 `data/verify.json`(수기)에 프로젝트가 선언한다 — 이 파일에 대해 제품은 추론하지 않는다.
 `default` 와 행 id 선언을 합치고 `--verify` 와 다시 합친다. **선언이 없으면 빈 배열이다**:

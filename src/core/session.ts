@@ -204,6 +204,16 @@ export interface LadderOffer {
   readonly changes: readonly string[];
 }
 
+/**
+ * 승인 때 사람이 주는 것. `verify` 는 codex sandbox 안에서 돌고(D-097 O3), `verifyHost` 는 사람이 명령마다 sandbox 밖을 명시한 것이다.
+ * `session send` 는 `verifyHost` 를 넘기지 않는다 (D-097 결정 4).
+ */
+export interface ApproveOptions {
+  readonly verify?: readonly string[];
+  readonly verifyHost?: readonly string[];
+  readonly write?: boolean;
+}
+
 /** `approve()`·자동 승인이 같이 타는 시작 경로. `by` 가 기록과 결정 로그 note 에 남는다 (D-064 결정 7). */
 type ApprovedBy = 'user' | 'auto';
 
@@ -1080,14 +1090,14 @@ export class ConversationSession {
   }
 
   /** 선 카드를 승인한다. 스캐폴딩 카드(D-088)는 `verify`·`write` 를 쓰지 않는다 — 허용 목록 명령을 그대로 돌린다. */
-  async approve(options: { readonly verify?: readonly string[]; readonly write?: boolean } = {}): Promise<TranscriptRecord[]> {
+  async approve(options: ApproveOptions = {}): Promise<TranscriptRecord[]> {
     if (this.pendingScaffold) return this.runScaffold();
     // 실행 카드는 터미널을 고르는 셸이 `launchRun()` 으로 연다 (D-091) — 여기서 열 터미널이 없다. 카드는 그대로 남는다.
     if (this.pendingRun) throw new SessionStateError('앱 실행 카드는 GUI 의 "터미널에서 실행" 으로 연다 (D-091) — 거절하거나 새 메시지로 넘어갈 수 있다.');
     return this.pendingSteps ? this.runSteps(options) : this.start(options, 'user');
   }
 
-  private async start(options: { readonly verify?: readonly string[]; readonly write?: boolean }, by: ApprovedBy): Promise<TranscriptRecord[]> {
+  private async start(options: ApproveOptions, by: ApprovedBy): Promise<TranscriptRecord[]> {
     this.require('blocked', '승인');
     const pending = this.pending;
     if (!pending) throw new SessionStateError('승인할 배정이 없다.');
@@ -1130,6 +1140,7 @@ export class ConversationSession {
         title: pending.title,
         prompt,
         verify: options.verify ?? [],
+        ...(options.verifyHost ? { verifyHost: options.verifyHost } : {}),
         write,
         cwd: dir,
         execute: this.tapProgress(this.deps.executorFor(write), true),
@@ -1441,7 +1452,7 @@ export class ConversationSession {
    * 실패가 아니다 — 읽기 전용 계획은 대개 검증 명령이 없어 이것까지 막으면 둘째 단계가 영영 돌지 않는다. 상한에 닿거나 취소하면 남은 단계를 시작하지 않는다.
    * 병렬로 돌리지 않는다 — 단계의 쓰기 대상을 지휘자가 선언하지 않으므로 `/graph` 규칙대로 순차다.
    */
-  private async runSteps(options: { readonly verify?: readonly string[]; readonly write?: boolean }): Promise<TranscriptRecord[]> {
+  private async runSteps(options: ApproveOptions): Promise<TranscriptRecord[]> {
     this.require('blocked', '승인');
     const pending = this.pendingSteps;
     if (!pending) throw new SessionStateError('승인할 단계 계획이 없다.');
@@ -1501,6 +1512,7 @@ export class ConversationSession {
           title: `${pending.title} — 단계 ${node.id}`,
           prompt: buildStepPrompt(pending.title, node, before, context.text),
           verify: options.verify ?? [],
+          ...(options.verifyHost ? { verifyHost: options.verifyHost } : {}),
           write: write && pending.writeSteps.has(node.id),
           cwd: dir,
           execute: this.tapProgress(this.deps.executorFor(write && pending.writeSteps.has(node.id)), true),

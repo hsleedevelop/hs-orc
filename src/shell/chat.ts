@@ -191,7 +191,7 @@ export async function runChat(
   session: ConversationSession,
   budget: Budget,
   io: ChatIO,
-  options: { readonly verify: readonly string[] },
+  options: { readonly verify: readonly string[]; readonly verifyHost?: readonly string[] },
 ): Promise<void> {
   const say = (line: string): void => void io.output.write(`${line}\n`);
   // 승인은 앞서 그린 카드와 다른 묶음으로 온다 — 마지막 카드를 들고 있다가 승인 줄이 묻는 이유를 빌리게 한다.
@@ -291,7 +291,7 @@ export async function runChat(
           show(await session.send(line.slice('/write '.length), { write: true }));
         } else if (session.state === 'blocked') {
           if (line === 'y' || (line === 'w' && !session.scaffoldPending)) {
-            show(await session.approve({ verify: options.verify, write: line === 'w' }));
+            show(await session.approve({ verify: options.verify, ...(options.verifyHost?.length ? { verifyHost: options.verifyHost } : {}), write: line === 'w' }));
             say(`누적   ${budget.summary()}`);
           } else if (line === 'n') show(session.reject());
           else if (line === 'a' && !session.stepsPending && !session.scaffoldPending) show(await session.askConductor());
@@ -335,12 +335,15 @@ export interface ChatArgs {
   readonly resume?: string;
   readonly list: boolean;
   readonly help: boolean;
+  /** 승인마다 실릴 검증 명령 — codex sandbox 안에서 돈다 (D-097 O3). */
   readonly verify: readonly string[];
+  /** 사람이 sandbox 밖을 명시한 검증 명령 (D-097 O3 opt-out) — 사용자 권한으로 돈다. `session send` 에는 이 플래그가 없다(결정 4). */
+  readonly verifyHost: readonly string[];
   /** 시작 때 이 세션의 승인 방식을 바꾼다 (D-064). 없으면 기록·기본값 그대로. */
   readonly approval?: ApprovalMode;
 }
 
-export const CHAT_USAGE = '사용법: hs-orc chat [--scratch | --resume <id|이름>] [--list] [--approval manual|auto-ask|auto] [--verify "<명령>"]...';
+export const CHAT_USAGE = '사용법: hs-orc chat [--scratch | --resume <id|이름>] [--list] [--approval manual|auto-ask|auto] [--verify "<명령>"]... [--verify-host "<명령>"]...';
 
 export function parseChatArgs(argv: readonly string[]): ChatArgs {
   let scratch = false;
@@ -349,6 +352,7 @@ export function parseChatArgs(argv: readonly string[]): ChatArgs {
   let resume: string | undefined;
   let approval: ApprovalMode | undefined;
   const verify: string[] = [];
+  const verifyHost: string[] = [];
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     const value = (): string => {
@@ -363,6 +367,7 @@ export function parseChatArgs(argv: readonly string[]): ChatArgs {
       case '--help': case '-h': help = true; break;
       case '--resume': resume = value(); break;
       case '--verify': verify.push(value()); break;
+      case '--verify-host': verifyHost.push(value()); break;
       case '--approval': {
         const mode = value();
         if (!isApprovalMode(mode)) throw new Error(`--approval 은 ${APPROVAL_MODES.join('·')} 중 하나다: ${mode}`);
@@ -374,7 +379,7 @@ export function parseChatArgs(argv: readonly string[]): ChatArgs {
     }
   }
   if (scratch && resume !== undefined) throw new Error('--scratch 와 --resume 은 함께 쓸 수 없다 — 이어 갈 세션의 종류는 기록이 정한다.');
-  return { scratch, list, help, verify, ...(resume !== undefined ? { resume } : {}), ...(approval ? { approval } : {}) };
+  return { scratch, list, help, verify, verifyHost, ...(resume !== undefined ? { resume } : {}), ...(approval ? { approval } : {}) };
 }
 
 /**

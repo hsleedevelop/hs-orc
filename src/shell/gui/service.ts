@@ -491,7 +491,7 @@ export class GuiService {
     return this.conversation();
   }
 
-  async converseApprove(payload: { verify: readonly string[]; write: boolean }): Promise<SessionView> {
+  async converseApprove(payload: { verify: readonly string[]; verifyHost?: readonly string[]; write: boolean }): Promise<SessionView> {
     await this.running((s) => s.approve(payload));
     return this.conversation();
   }

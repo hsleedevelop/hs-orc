@@ -75,6 +75,18 @@ export const lastEvent = <T extends { readonly kind: string }>(records: readonly
   records.findLast((r) => !SETTING_KINDS.has(r.kind));
 
 /**
+ * 승인을 기다리는 카드(배정 `plan`·단계 계획 `steps`)의 정체 (D-097 결정 7·O3). GUI 의 검증 칸·sandbox 밖 스위치는 이 값에 묶인다 —
+ * 카드가 승인·거절·새 메시지·재배정·단계 계획·지휘자 묻기로 바뀌거나 사라지면 값이 바뀌어 칸을 비운다. 앞 카드용으로 적은 명령이
+ * 다음 카드(새 primary 가 고친 코드)에서 돌면 안 된다. 기록 안 자리로 가르므로 같은 턴의 재배정도 다른 카드다.
+ * 진행·설정 줄이 붙어도 같은 카드면 같은 값이다. 대기 중인 카드가 없으면 빈 문자열이다.
+ */
+export const pendingCardKey = <T extends { readonly kind: string }>(records: readonly T[], blocked: boolean): string => {
+  if (!blocked) return '';
+  const last = lastEvent(records);
+  return last && (last.kind === 'plan' || last.kind === 'steps') ? `${last.kind}@${records.lastIndexOf(last)}` : '';
+};
+
+/**
  * GUI 의 IPC 거절 문구 — Electron 은 main 쪽 예외를 `Error invoking remote method '<채널>': <예외 이름>: <문구>` 로 감싸 넘긴다.
  * 사람에게는 문구만 보인다. 그 모양이 아니면 그대로 둔다.
  */

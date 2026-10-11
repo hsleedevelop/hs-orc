@@ -31,7 +31,13 @@ export interface DelegateInput {
   readonly title: string;
   /** 엔진에 보내는 프롬프트. 대화 세션은 맥락을 붙여 넘긴다 (SPEC §6.4.3). */
   readonly prompt: string;
+  /** 사람이 승인 때 적은 검증 명령. `autoVerify` 가 있으면 codex sandbox 안에서 돈다 (D-097 O3). */
   readonly verify: readonly string[];
+  /**
+   * 사람이 sandbox 밖에서 돌리라고 **명령마다 명시한** 검증 명령 (D-097 O3 opt-out) — 사용자 권한으로 돈다.
+   * GUI 칸 옆 스위치·chat `--verify-host` 만 넘긴다. `session send` 는 넘기지 않는다 (D-097 결정 4 — 부르는 쪽이 에이전트일 수 있다).
+   */
+  readonly verifyHost?: readonly string[];
   /** 쓰기 위임인가. 읽기 전용이면 `verify` 를 돌리지 않는다 — primary 의 변경이 작업 트리에 없어 원본을 검사하게 된다 (D-094, D-040 결정 3). */
   readonly write: boolean;
   readonly cwd: string;
@@ -53,16 +59,22 @@ export interface DelegateInput {
   readonly autoVerify?: AutoVerify;
 }
 
-/** 검증 명령 하나 — 사람이 적은 것(sandbox 밖 `sh -c`, D-094)이거나 Core 가 고른 것(sandbox 안, D-096). */
+/**
+ * 검증 명령 하나. `auto` 가 있으면 codex sandbox 안에서 돈다 — Core 가 고른 것(D-096)과 사람이 적은 것(D-097 O3).
+ * 없으면 sandbox 밖 `sh -c` 다 — 사람이 밖을 명시한 것(`host`)이거나 sandbox 를 조립하지 않은 위임(테스트 주입, D-094 그대로)이다.
+ */
 interface Check {
   readonly cmd: string;
   readonly auto?: AutoCommand;
+  readonly host?: true;
 }
 
 interface CheckRun {
   readonly evidence: CommandEvidence;
   readonly cancelled: boolean;
   readonly verdict: SandboxVerdict;
+  /** exit 0 이어도 sandbox 가 막은 부수 효과 (D-097 G1) — 판정은 바꾸지 않고 표시만 한다. */
+  readonly blocking?: readonly string[];
 }
 
 export interface Delegated {
@@ -104,32 +116,47 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
   const notes: string[] = [];
   // 돌려야 했지만 결과를 얻지 못한 검증 (D-096) — 다른 명령이 요구를 채워도 ok 로 닫지 않는다(`collect` 의 held). 진짜 실패의 rework 가 먼저다.
   const held: string[] = [];
+  const hostCmds = (input.verifyHost ?? []).filter((v) => v.trim());
+  const hostSet = new Set(hostCmds.map((c) => c.trim()));
   const checksList: Check[] = [];
   // Core 가 고른 명령은 쓰기 위임에서만, codex sandbox 안에서만 돈다 (D-096). codex 가 없으면 sandbox 밖으로 내리지 않는다.
+  // 사람이 적은 명령도 같은 sandbox 가 기본이다 (D-097 O3) — 밖에서 돌리려면 사람이 명령마다 명시한다(`verifyHost`).
   const autoVerify = input.write ? input.autoVerify : undefined;
   if (autoVerify) {
     // 사람 명령·선언이 Core 가 고른 명령과 같으면 보호가 강한 쪽 하나만 남는다 (D-097 D1) — 사람이 적었다고 sandbox·S2 밖으로 빠지지 않는다.
-    const picked = autoCommands(input.cwd, plan.assignment.id, autoVerify.scripts, verifyConfigPath(input.cwd), verifyCmds);
+    const picked = autoCommands(input.cwd, plan.assignment.id, autoVerify.scripts, verifyConfigPath(input.cwd), [...verifyCmds, ...hostCmds]);
     notes.push(...picked.notes);
-    checksList.push(...picked.human.map((cmd) => ({ cmd })));
+    const host = picked.human.filter((cmd) => hostSet.has(cmd.trim()));
+    const human = picked.human.filter((cmd) => !hostSet.has(cmd.trim()));
     const mergedText = picked.merged.map((m) => `${m.from === 'human' ? '사람 명령' : '선언'} \`${m.cmd}\``).join(' · ');
-    if (autoVerify.codex === null && picked.commands.length > 0) {
+    if (autoVerify.codex === null) {
       // 합쳐진 사람 명령도 돌지 않는다 (D-097 D1a) — 밖에서 돌리면 D-096 안전선을 넘는다.
-      held.push(
-        `codex 를 찾지 못해 Core 가 고른 검증 명령 ${picked.commands.length}개를 실행하지 않았다 — sandbox 밖에서는 돌리지 않는다 (D-096) — ${picked.commands.map((c) => `\`${c.cmd}\``).join(' · ')}` +
-          (mergedText ? ` — 같은 명령인 ${mergedText} 도 돌리지 않았다 (D-097 D1a)` : ''),
-      );
+      if (picked.commands.length > 0) {
+        held.push(
+          `codex 를 찾지 못해 Core 가 고른 검증 명령 ${picked.commands.length}개를 실행하지 않았다 — sandbox 밖에서는 돌리지 않는다 (D-096) — ${picked.commands.map((c) => `\`${c.cmd}\``).join(' · ')}` +
+            (mergedText ? ` — 같은 명령인 ${mergedText} 도 돌리지 않았다 (D-097 D1a)` : ''),
+        );
+      }
+      // sandbox 가 기본인 사람 명령도 밖으로 내리지 않는다 (D-097 결정 3).
+      if (human.length > 0) {
+        held.push(`codex 를 찾지 못해 사람 명령 ${human.length}개를 실행하지 않았다 — sandbox 밖에서 돌리려면 명령마다 "sandbox 밖에서 실행" 으로 적는다 (D-097 O3) — ${human.map((c) => `\`${c}\``).join(' · ')}`);
+      }
     } else {
+      checksList.push(...human.map((cmd) => ({ cmd, auto: { cmd, argv: ['/bin/sh', '-c', cmd] } })));
       checksList.push(...picked.commands.map((auto) => ({ cmd: auto.cmd, auto })));
-      notes.push(...picked.merged.map((m) => `${m.from === 'human' ? '사람 명령' : '선언'} \`${m.cmd}\` 은 Core 가 고른 \`${m.into}\`(codex sandbox) 하나로 돌린다 (D-097 D1)`));
+      notes.push(...picked.merged.map((m) =>
+        `${m.from === 'human' ? '사람 명령' : '선언'} \`${m.cmd}\` 은 Core 가 고른 \`${m.into}\`(codex sandbox) 하나로 돌린다 (D-097 D1)` +
+          (hostSet.has(m.cmd) ? ' — sandbox 밖 지정은 Core 가 고른 명령에는 적용되지 않는다' : '')));
     }
+    checksList.push(...host.map((cmd) => ({ cmd, host: true as const })));
+    if (host.length > 0) notes.push(`사람이 sandbox 밖을 지정한 명령 ${host.map((c) => `\`${c}\``).join(' · ')} 은 사용자 권한(네트워크·홈 쓰기 열림)으로 돌린다 (D-097 O3)`);
   } else {
-    checksList.push(...verifyCmds.map((cmd) => ({ cmd })));
+    checksList.push(...[...verifyCmds, ...hostCmds].map((cmd) => ({ cmd })));
   }
   const runCheck = async (c: Check, signal?: AbortSignal): Promise<CheckRun> => {
     // Core 가 고른 명령에는 sandbox 밖 길이 없다 (D-096 안전선) — codex 가 없으면 위에서 목록에 넣지 않았고, 여기서도 던진다.
     if (c.auto) {
-      if (!autoVerify?.codex) throw new Error(`sandbox 없이 Core 가 고른 검증 명령을 돌리려 했다: ${c.cmd}`);
+      if (!autoVerify?.codex) throw new Error(`sandbox 없이 sandbox 검증 명령을 돌리려 했다: ${c.cmd}`);
       return runSandboxed({ ...autoVerify, codex: autoVerify.codex }, c.auto, input.cwd, signal ? { signal } : {});
     }
     const r = await runCommand(c.cmd, input.cwd, signal ? { signal } : {});
@@ -171,6 +198,8 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
           const redBefore = base !== undefined && baseExit !== 0 && base.verdict.kind === 'ran' && notRun(baseExit) === null;
           const marks = [
             ...(c.auto ? ['codex sandbox'] : []),
+            ...(c.host ? ['sandbox 밖 — 사람이 지정'] : []),
+            ...(r.verdict.kind === 'ran' && r.evidence.exitCode === 0 && (r.blocking?.length ?? 0) > 0 ? [`sandbox 가 막은 부수 효과: ${r.blocking?.join(' · ')}`] : []),
             ...(r.verdict.kind === 'blocked' ? [`sandbox 가 막았다: ${r.verdict.denials.join(' · ')}`] : []),
             ...(r.verdict.kind === 'not-started' ? ['sandbox 를 시작하지 못했다'] : []),
             ...(redBefore ? [`기준선 exit=${baseExit} — 작업 전부터 실패`] : base !== undefined && baseExit !== 0 ? [`기준선 exit=${baseExit} — 돌지 못해 비교하지 않는다`] : []),
@@ -184,6 +213,10 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
           if (r.verdict.kind === 'not-started') {
             held.push(`sandbox 를 시작하지 못했다 — \`${c.cmd}\` exit=${r.evidence.exitCode} (거부 로그 머리줄 없음)`);
             continue;
+          }
+          // G1 — 통과했어도 막힌 부수 효과가 있었다. 판정은 바꾸지 않는다 (D-097 결정 9, D-096 V3a 1번 그대로).
+          if (r.verdict.kind === 'ran' && r.evidence.exitCode === 0 && (r.blocking?.length ?? 0) > 0) {
+            notes.push(`sandbox 가 막은 부수 효과가 있었다 — \`${c.cmd}\` exit=0 (${r.blocking?.join(' · ')}) — 판정은 바꾸지 않는다 (D-097 G1)`);
           }
           if (redBefore && r.evidence.exitCode !== 0) {
             held.push(`작업 전부터 실패 — \`${c.cmd}\` 기준선 exit=${baseExit} · 작업 뒤 exit=${r.evidence.exitCode} — 불일치로 세지 않는다`);
@@ -250,7 +283,7 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
   if (evidence.length > 0) evidence.push(changedFiles(input.cwd));
   if (testsBefore) evidence.push(testChanges(testsBefore, testGlobs, input.cwd));
   notes.unshift(...(missingTests ? [noTestsEvidenceNote(missingTests)] : []));
-  if (!input.write && verifyCmds.length > 0) notes.push(readOnlyVerifyNote(verifyCmds));
+  if (!input.write && verifyCmds.length + hostCmds.length > 0) notes.push(readOnlyVerifyNote([...verifyCmds, ...hostCmds]));
   const report = collect(plan.assignment, evidence, notes, held);
 
   journal.append({

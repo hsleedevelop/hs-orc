@@ -46,6 +46,8 @@ describe('session — 인자', () => {
   it('명령마다 받는 옵션만 받는다 — 무시되는 옵션은 던진다', () => {
     assert.deepEqual(parseSessionArgs([]), { cmd: 'help' });
     assert.deepEqual(parseSessionArgs(['ls', '--json']), { cmd: 'ls', json: true });
+    // session send 는 sandbox 밖 실행을 받지 않는다 — 부르는 쪽이 에이전트일 수 있다 (D-097 결정 4).
+    assert.throws(() => parseSessionArgs(['send', 'hub', '고쳐줘', '--run', '--verify-host', 'npm test']), /session send 는 --verify-host 를 받지 않는다/);
     assert.deepEqual(parseSessionArgs(['send', 'web', '고쳐줘', '--run', '--verify', 'npm test']), { cmd: 'send', ref: 'web', message: '고쳐줘', write: false, run: true, verify: ['npm test'] });
     assert.deepEqual(parseSessionArgs(['show', 'web', '--tail', '3']), { cmd: 'show', ref: 'web', tail: 3, json: false });
     assert.deepEqual(parseSessionArgs(['name', 'web', '']), { cmd: 'name', ref: 'web', name: '' });
