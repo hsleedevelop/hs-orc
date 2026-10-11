@@ -11,6 +11,12 @@ import path from 'node:path';
 process.env.HS_ORC_JEV = 'off';
 
 /**
+ * 테스트의 `git status` 가 선택적 잠금(`.git/index.lock`)을 잡지 않게 한다 — 저장소 루트에서 증거 단계까지 가는 테스트가 생기면
+ * codex sandbox 가 `.git` 쓰기를 막아 R01 기준선마다 G1 표시가 붙는다 (D-097 후속, 전하 결정 2-a). 자식 git 은 `gitEnv()` 로 이 값을 물려받는다.
+ */
+process.env.GIT_OPTIONAL_LOCKS = '0';
+
+/**
  * 홈을 기본값으로 쓰는 상태 경로도 전부 가둔다 — 테스트 파일 프로세스마다 하나의 임시 뿌리다.
  * 프로젝트별 상태(D-071, `~/.hs-orc/projects`)에 세션·원시 로그가 쌓이면 안 되고,
  * 최근 목록(`~/.hs-orc/projects.json`)을 읽으면 세션 찾기가 개발자의 실제 폴더를 뒤진다 — iCloud 폴더에서는 readdir 가 멈춘다.
