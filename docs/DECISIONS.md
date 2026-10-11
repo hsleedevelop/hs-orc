@@ -4495,11 +4495,11 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 **미검증·위험 (후속)**
 - 실제 엔진을 띄운 CLI loop 전체는 여전히 돌리지 않았다 — 실측은 같은 실행기에 선언 명령을 직접 댄 것이다.
-- `service.test.ts` 의 다른 테스트 41곳이 저장소 루트를 작업 폴더로 쓴다(`process.cwd()` 를 넘기는 36곳 · 기본값을 쓰는 `new GuiService(fake)` 5곳) — 지금은 증거 단계(`git status`)까지 가지 않아 소음이 없지만, 그런 테스트가 위임을 끝까지 돌리게 바뀌면 같은 G1 이 돌아온다. 그때마다 이번처럼 찾아야 한다.
+- `service.test.ts` 의 다른 테스트 41곳이 저장소 루트를 작업 폴더로 쓴다(`process.cwd()` 를 넘기는 36곳 · 기본값을 쓰는 `new GuiService(fake)` 5곳) — 지금은 증거 단계(`git status`)까지 가지 않아 소음이 없지만, 그런 테스트가 위임을 끝까지 돌리게 바뀌면 같은 G1 이 돌아온다. ~~그때마다 이번처럼 찾아야 한다~~ → 결정 2-a(`GIT_OPTIONAL_LOCKS=0`, 아래)가 막는다.
 
-**전하 결정 필요 (이번 PR 에서 정하지 않았다)**
-1. **R05·R06 에 phase 선언을 둘지** — R05 `before:`/`after:`, R06 `reproduce:`/`fix:`/`regress:` 를 hs-orc 자기 선언에 적을지. 지금은 R05 비움 · R06 phase 없는 `npm test` 다. 적으면 D-045 단계 대조가 hs-orc 자기 위임에도 걸린다. 무엇을 적을지는 행의 뜻에 달려 정책이다.
-2. **`GIT_OPTIONAL_LOCKS=0` 을 둘지** — git 이 status 의 선택적 잠금(`index.lock`)을 잡지 않게 하는 공식 환경 변수다. (a) `scripts/test-setup.mjs` 에 한 줄 — 위 "다른 테스트 41곳" 의 재발을 한 번에 막는다(테스트 전용). (b) 제품의 `git status` 두 곳(`evidence-gather.ts` `changedFiles`·`uncommittedFiles`) — 사용자가 같은 저장소에서 git 을 쓰는 중에 hs-orc 의 증거 수집이 `index.lock` 을 잡아 사용자 명령이 `File exists` 로 실패할 수 있는 경합을 없앤다(미실측). (c) 두지 않는다 — 이번 수정으로 지금 소음은 없다. 권장: (a) 는 값이 작고 되돌리기 쉽다. (b) 는 제품 동작이라 실제 경합을 재현한 뒤에 정한다.
+**전하 결정 (2026-10-11, 권장안)** — PR #144 에서 올린 2건
+1. **R05·R06 phase 선언은 두지 않는다(보류)** — 지금처럼 R05 비움 · R06 phase 없는 `npm test` 다. 필요 근거가 생기면 다시 본다.
+2. **`GIT_OPTIONAL_LOCKS=0` 은 (a) 테스트 전용으로만 둔다** — `scripts/test-setup.mjs` 에 한 줄. 위 "다른 테스트 41곳" 이 증거 단계까지 가게 바뀌어도 `git status` 가 `index.lock` 을 잡지 않는다. (b) 제품의 `git status` 두 곳(`evidence-gather.ts` `changedFiles`·`uncommittedFiles`)은 **실제 경합을 재현한 뒤에 정한다 — 후속**. (c) 는 택하지 않았다.
 
 **구현 기록 — 결정 8 (S2+ · D1+T)** (L1 이 PR #143 으로 머지된 뒤 · 전하 착수 승인 2026-10-11)
 - `core/auto-verify.ts` `scriptTarget(dir, cmd)` — 문자열을 공백·탭으로 나눈 낱말이 **정확히** `<매니저> run <이름>`(npm·pnpm·yarn·bun) 또는 `<매니저> test`(D1 의 `RUNLESS` 그대로 — npm·pnpm·yarn, `bun test` 는 내장 러너라 제외)일 때만 `runTarget(dir, [이름])` 으로 스냅숏을 뜬다. 이름은 셸이 다르게 읽을 글자가 없고 `-` 로 시작하지 않는 것만(`[A-Za-z0-9_][A-Za-z0-9_:.+@/-]*`). 스크립트가 없으면 대조하지 않는다. 셸 문자열은 해석하지 않는다 — 그 밖의 문자열은 종전 그대로(대조 없음). `shellCommand` = 문자열 그대로 `/bin/sh -c` + 스냅숏 — **실행은 적힌 문자열 그대로**이고 스냅숏은 대조에만 쓴다.
@@ -4534,7 +4534,11 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 - → `runVerifyList` 가 `moved` 를 받으면(primary 뒤) 명령마다 **실행 직전에** `scriptMoved` 를 대조하고 바뀐 명령은 돌리지 않고 담는다. once 는 `held` → `unverified`, loop 는 그 사이클을 `escalated` 로 올린다(앞의 2 그대로). 기준선은 대조하지 않는다 — primary 전이다.
 - 회귀 2건(`cli.test.ts` — once: 앞 `--verify` 가 `e2e` 본문 · `pree2e` hook 을 바꾸는 두 경우 · loop: 사이클(2회차)에서만 앞 명령이 `e2e` 를 약화). 리뷰 전 코드(`fa53869` 의 `cli.ts`)에서 세 경우 모두 실패함을 확인했다(once 두 경우는 하나씩 남겨 각각). 테스트 881 → 883.
 
-**상태** 결정 1(D1 + D1a) — PR #141 머지. 결정 6(T1) — PR #140 머지. 결정 2·3·4·7·9(O3 · 칸 비우기 · G1) — PR #142 머지. 결정 5(L1) — PR #143 머지. 후속(`index.lock` G1 소음 · R04·R05·R06 실측) — PR #144 머지. 결정 8(S2+) — 이 PR, 머지로 확정한다(전하 직접 머지) · 구현에서 정한 2건(sandbox 밖 지정 명령에도 S2 · loop 는 중단)은 전하가 제안대로 확정(2026-10-11). 남은 것: L2(CLI W2) — 후속. 후속 절의 "전하 결정 필요" 2건(R05·R06 phase 선언 · `GIT_OPTIONAL_LOCKS=0`).
+**구현 기록 — 결정 2-a** (PR #144·#145 머지 뒤, 이번 PR)
+- `scripts/test-setup.mjs` — `process.env.GIT_OPTIONAL_LOCKS = '0'`. 모든 테스트 파일 프로세스가 먼저 싣고, 자식 git 은 `gitEnv()`(`...process.env`)로 물려받는다.
+- **검증** — 같은 절차(스크래치 복사본 · `runSandboxed` `/bin/sh -c npm test` · codex-cli 0.162.1 · `env -u CODEX_HOME` · 모델 호출 0)로, PR #144 수정 **전** 테스트(저장소 루트에서 `git status` 를 부르는 11건이 그대로인 복사본)에 이 줄만 더해 돌렸다: exit 0 · 875/875 · `ran` · **차단성 거부 0줄**(이 줄 없이는 `index.lock` 1줄). 재발 방지가 실제로 듣는다. 워크트리 `npm run gate` 통과.
+
+**상태** 결정 1(D1 + D1a) — PR #141 머지. 결정 6(T1) — PR #140 머지. 결정 2·3·4·7·9(O3 · 칸 비우기 · G1) — PR #142 머지. 결정 5(L1) — PR #143 머지. 후속(`index.lock` G1 소음 · R04·R05·R06 실측) — PR #144 머지. 결정 8(S2+) — PR #145 머지 · 구현에서 정한 2건(sandbox 밖 지정 명령에도 S2 · loop 는 중단)은 전하가 제안대로 확정(2026-10-11). 후속 절의 전하 결정 1(phase 선언 보류) · 2-a(`GIT_OPTIONAL_LOCKS=0` 테스트 전용) — 이 PR, 머지로 확정한다(전하 직접 머지). 남은 것: L2(CLI W2) · 2-b(제품 `git status` 의 `GIT_OPTIONAL_LOCKS`, 경합 재현 뒤) — 후속.
 
 ---
 
