@@ -4419,7 +4419,14 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 - 실제 codex sandbox 로 위임 전체를 돌리지 않았다 — 가짜 sandbox 실행기와 Q31 E1(실제 sandbox, 스크래치 하네스)로만 확인했다.
 - 사람 명령 중 W2·W1 과 같지 않은 것은 여전히 sandbox 밖이다 — 결정 2(O3) 몫이다. CLI once·loop 는 그대로다 — 결정 5(L1) 몫이다.
 
-**영향** `core/auto-verify.ts`(`autoCommands`·`MergedCommand`) · `core/delegate.ts` · `core/__tests__/auto-verify.test.ts` · `core/__tests__/delegate.test.ts` · SPEC §5.
+**PR #141 리뷰 반영 (AO 리뷰 changes_requested, head 75a4212)**
+- **bun 의 `bun test` 를 `bun run test` 와 합쳤다** (P2). `run` 없는 별칭(`<매니저> test` ≡ `<매니저> run test`)을 모든 패키지 매니저에 걸었다. 그런데 bun 은 내장 명령이 같은 이름의 스크립트를 이긴다 — `bun test` 는 내장 테스트 러너이고 `bun run test` 는 `scripts.test` 다. 그래서 `bun.lock` 과 `scripts.test` 가 있는 R01 프로젝트에서 선언·사람 명령 `bun test` 가 빠지고, `test` 스크립트가 일부만 돌거나 `exit 0` 이면 요청한 테스트를 돌리지 않고 통과 증거가 됐다. 종전 코드는 W1 이 이겨 `bun test` 가 남았으므로 이 PR 의 회귀다.
+- → 별칭을 패키지 매니저마다 문서로 확인한 것만 둔다(`RUNLESS`): npm·pnpm·yarn 은 `test`, bun 은 없음. 종전 표의 `start`·`stop`·`restart` 는 뺐다 — `verifyScripts` 가 고르지 않는 이름이고, `npm restart` 는 `restart` 스크립트가 없으면 `stop` → `start` 를 돌려 `npm run restart` 와 같지 않다.
+- 근거 (2026-10-11 조회): npm — docs.npmjs.com/cli/v11/commands/npm-test "runs a predefined command specified in the "test" property of a package's "scripts" object" · pnpm — pnpm.io/cli/test "Runs an arbitrary command specified in the package's test property of its scripts object" · yarn 1 — classic.yarnpkg.com/en/docs/cli/test "yarn test is also a shortcut for yarn run test", yarn 2+ — yarnpkg.com/cli/run 이 `run` 없는 `yarn test` 를 같은 동작의 예로 든다 · bun — bun.com/docs/runtime "If a built-in bun command has the same name, the built-in command takes precedence; use the explicit bun run <script> to run your package script instead".
+- 회귀 테스트 2건(`auto-verify.test.ts` — 선언 `bun test` 와 W2 `bun run test` 가 둘 다 남는다 · 사람 `bun test` 가 합쳐지지 않고 npm·pnpm·yarn 의 `test` 는 합쳐진다). 수정 전 코드(75a4212)에서 2건 모두 실패함을 확인했다. 테스트 857 → 859.
+- (미검증) pnpm·yarn 의 다른 `run` 생략형(`pnpm lint` 등)은 별칭으로 두지 않았다 — 같은 명령이어도 합쳐지지 않을 뿐(사람 명령이 그대로 남는다) 잘못 합치지는 않는다.
+
+**영향** `core/auto-verify.ts`(`autoCommands`·`MergedCommand`·`RUNLESS`) · `core/delegate.ts` · `core/__tests__/auto-verify.test.ts` · `core/__tests__/delegate.test.ts` · SPEC §5.
 
 **상태** 결정 1(D1 + D1a) 구현됨 — 이 PR. 머지로 확정한다(전하 직접 머지). 결정 2~9 는 위 순서로 후속 PR. T1 은 다른 워커가 병렬로 맡는다.
 

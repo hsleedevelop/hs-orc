@@ -13,7 +13,7 @@ import { loadEngines } from '../data/engines.ts';
 import { loadLimits, verifyGroups, type VerifyScripts } from '../data/limits.ts';
 import { defaultVerify } from '../data/verify.ts';
 import type { CommandEvidence } from './evidence-gather.ts';
-import { runTarget, sameRunTarget, type RunHook, type RunTarget } from './run-app.ts';
+import { runTarget, sameRunTarget, type PackageManager, type RunHook, type RunTarget } from './run-app.ts';
 import { runArgv, type CommandRunner } from './scaffold.ts';
 
 export interface AutoVerify {
@@ -53,8 +53,12 @@ export interface AutoVerifyShown {
 export const shownOf = (commands: readonly AutoCommand[]): AutoVerifyShown[] =>
   commands.map((c) => ({ cmd: c.cmd, ...(c.target ? { body: c.target.body, ...(c.target.hooks.length > 0 ? { hooks: c.target.hooks } : {}) } : {}) }));
 
-/** npm 이 `run` 없이 받는 스크립트 — 선언의 `npm test` 와 W2 의 `npm run test` 는 같은 명령이다. */
-const RUNLESS = new Set(['test', 'start', 'stop', 'restart']);
+/**
+ * `run` 없이 같은 스크립트를 부르는 별칭 — 패키지 매니저마다 공식 문서로 확인한 것만 둔다 (D-097, PR #141 리뷰).
+ * npm·pnpm·yarn 의 `test` 는 `scripts.test` 를 돌린다 — 선언의 `npm test` 와 W2 의 `npm run test` 는 같은 명령이다.
+ * bun 은 내장 명령이 같은 이름의 스크립트를 이겨 `bun test` 가 내장 테스트 러너다 — `bun run test` 와 다른 명령이라 합치지 않는다.
+ */
+const RUNLESS: Readonly<Record<PackageManager, readonly string[]>> = { npm: ['test'], pnpm: ['test'], yarn: ['test'], bun: [] };
 
 /** W1·사람 명령이 같은 명령으로 합쳐졌다 (D-097 D1) — `into` 하나만 돈다. 증거 요약에 남긴다. */
 export interface MergedCommand {
@@ -89,7 +93,7 @@ export function autoCommands(
     if (owner.has(cmd)) continue;
     w2.push({ cmd, argv: t.argv, target: t });
     owner.set(cmd, cmd);
-    if (RUNLESS.has(t.script)) owner.set(`${t.pm} ${t.script}`, cmd);
+    if (RUNLESS[t.pm].includes(t.script)) owner.set(`${t.pm} ${t.script}`, cmd);
   }
   const w1: AutoCommand[] = [];
   const notes: string[] = [];

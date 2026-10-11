@@ -42,6 +42,25 @@ describe('Core 가 고르는 검증 명령 (D-096 W1 + W2)', () => {
     assert.match(picked.notes[0] ?? '', /phase 선언을 돌리지 않는다 — `before:npm test`/);
   });
 
+  it('선언 bun test(내장 테스트 러너)는 bun run test(스크립트)와 다른 명령이라 둘 다 남는다 (PR #141 리뷰)', () => {
+    const pkg = { 'package.json': JSON.stringify({ scripts: { test: 'bun test src/a' } }), 'bun.lock': '' };
+    const declared = cmds(folder(pkg), 'R01', { R01: ['bun test'] });
+    assert.deepEqual(declared.commands.map((c) => c.cmd), ['bun test', 'bun run test']);
+    assert.deepEqual(declared.merged, []);
+  });
+
+  it('사람이 적은 bun test 도 bun run test 로 합쳐지지 않는다 — npm·pnpm·yarn 의 test 는 별칭 그대로다 (PR #141 리뷰)', () => {
+    const pkg = { 'package.json': JSON.stringify({ scripts: { test: 'bun test src/a' } }), 'bun.lock': '' };
+    const human = cmds(folder(pkg), 'R01', {}, ['bun test']);
+    assert.deepEqual(human.commands.map((c) => c.cmd), ['bun run test']);
+    assert.deepEqual(human.human, ['bun test']);
+    assert.deepEqual(human.merged, []);
+    for (const [lock, pm] of [['package-lock.json', 'npm'], ['pnpm-lock.yaml', 'pnpm'], ['yarn.lock', 'yarn']] as const) {
+      const picked = cmds(folder({ 'package.json': JSON.stringify({ scripts: { test: 'vitest run' } }), [lock]: '' }), 'R01', {}, [`${pm} test`]);
+      assert.deepEqual(picked.merged, [{ cmd: `${pm} test`, from: 'human', into: `${pm} run test` }], pm);
+    }
+  });
+
   it('npm init 자리표시 test 는 돌리지 않는다 — 늘 실패하는 명령이다 (D-093 과 같은 판정)', () => {
     const dir = folder({ 'package.json': JSON.stringify({ scripts: { test: 'echo "Error: no test specified" && exit 1' } }) });
     assert.deepEqual(cmds(dir, 'R01').commands, []);
