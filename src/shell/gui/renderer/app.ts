@@ -10,9 +10,9 @@
  *   2. **전송은 명시적이다.** 타이핑이 곧 호출이면 분류 폴백(D-026)이 키 입력마다 돈다.
  *   3. **승인은 화면에 찍힌 그 작업으로만 간다.** 입력을 고친 뒤 누른 승인은 막는다.
  */
-import { createElement as h, useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import { createElement as h, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { askedNote, cardAsked, compactLines, cutLine, ipcErrorText, lastEvent, ladderLines, retryLines, roleLabel, SETTING_KINDS, statusLabel } from '../../transcript-lines.ts';
+import { askedNote, cardAsked, compactLines, cutLine, ipcErrorText, lastEvent, ladderLines, pendingCardKey, retryLines, roleLabel, SETTING_KINDS, statusLabel } from '../../transcript-lines.ts';
 
 const SCREENS = ['Session', 'Dashboard', 'Agents', 'Reviews', 'Debug'] as const;
 type Screen = (typeof SCREENS)[number];
@@ -647,6 +647,14 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
 
   // 설정 줄(이름 D-085 · 승인 방식 · 지휘자 D-087)은 건너뛴다 — Core 와 같은 규칙이다.
   const last = lastEvent(view.records);
+  // 검증 칸·sandbox 밖 스위치는 대기 중인 카드 하나의 것이다 (D-097 결정 7·O3, PR #142 리뷰) — 카드가 바뀌거나 사라지면 그리기 전에 비운다.
+  // 승인·거절만이 아니라 새 메시지(Core 가 앞 카드를 거절하고 새 카드를 세운다)·재배정·단계 계획·지휘자 묻기도 카드를 바꾼다.
+  const cardKey = pendingCardKey(view.records, view.state === 'blocked');
+  useLayoutEffect(() => {
+    setVerify('');
+    setVerifyHost('');
+    setHostOn(false);
+  }, [cardKey]);
   // 다른 프로세스가 쥐었거나(D-085) 종료한 세션이면(D-089) 이 화면의 모든 조작을 막는다 — 눌러도 서비스가 거절한다.
   const locked = busy || !!view.external || view.ended;
   // 배정 카드가 선 채 보내면 그 배정은 거절로 남는다 (D-064) — 제안 카드가 대화를 막지 않는다.
@@ -688,22 +696,10 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
         ]
       : []),
   ];
-  /** 다음 카드는 빈 칸·꺼진 스위치로 시작한다 (D-097 결정 7) — 첫 카드에 적은 명령이 다음 카드에 실리지 않게. */
-  const clearVerify = (): void => {
-    setVerify('');
-    setVerifyHost('');
-    setHostOn(false);
-  };
+  // 칸은 카드가 바뀔 때 비운다(위 `cardKey`) — 승인도 카드를 닫으므로 여기서 따로 비우지 않는다.
   const approveWith = (writeOn: boolean): void => {
-    const payload = { verify: lines(verify), verifyHost: hostOn ? lines(verifyHost) : [], write: writeOn };
-    clearVerify();
     setDelegation('running');
-    act(orc.convApprove(payload));
-  };
-  const rejectCard = (): void => {
-    setVerifyHost('');
-    setHostOn(false);
-    act(orc.convReject());
+    act(orc.convApprove({ verify: lines(verify), verifyHost: hostOn ? lines(verifyHost) : [], write: writeOn }));
   };
 
   const planCard = (r: Extract<Rec, { kind: 'plan' }>, i: number, active: boolean): ReactNode =>
@@ -770,7 +766,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
                 className: 'btn accent', disabled: locked || (r.readOnlyBlocked === true && !(write ?? r.write === true)),
                 onClick: () => approveWith((write ?? r.write === true) && view.kind !== 'scratch'),
               }, busy ? '실행 중…' : `승인하고 실행 · ${r.reviewer2 ? '세' : '두'} 슬롯${(write ?? r.write === true) && view.kind !== 'scratch' ? ' · 쓰기 켜짐' : ''}`),
-              h('button', { className: 'btn', disabled: locked, onClick: rejectCard }, '거절'),
+              h('button', { className: 'btn', disabled: locked, onClick: () => act(orc.convReject()) }, '거절'),
               // 규칙이 대화성 후속을 작업 행으로 잡았을 때 — 거절하고 같은 메시지를 지휘자가 답한다 (D-038).
               h('button', { className: 'btn', disabled: locked, onClick: () => act(orc.convAsk()) }, '지휘자에게 묻기'),
               // 한 행으로 안 끝날 요청이면 — 이 배정을 거절로 남기고 지휘자가 단계로 나눈다 (D-087).
@@ -820,7 +816,7 @@ function SessionScreen(props: { view: SessionView; rows: TaskRow[]; onChange: (v
                 className: 'btn accent', disabled: locked || r.readOnlyBlocked === true,
                 onClick: () => approveWith((write ?? r.write === true) && view.kind !== 'scratch'),
               }, busy ? '실행 중…' : `승인하고 실행 · ${r.steps.length}단계${(write ?? r.write === true) && view.kind !== 'scratch' ? ' · 쓰기 행 쓰기 켜짐' : ''}`),
-              h('button', { className: 'btn', disabled: locked, onClick: rejectCard }, '거절')))
+              h('button', { className: 'btn', disabled: locked, onClick: () => act(orc.convReject()) }, '거절')))
         : null);
 
   // 스캐폴딩 카드 (D-088) — hs-orc 가 엔진 없이 허용 목록 명령을 이 폴더에서 실행한다. 어느 방식에서도 이 버튼이 승인이다(H7).

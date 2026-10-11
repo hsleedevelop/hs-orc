@@ -4,7 +4,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { SETTING_KINDS as CORE_SETTING_KINDS } from '../../core/transcript.ts';
-import { SETTING_KINDS, askedNote, cardAsked, compactLines, cutLine, ipcErrorText, lastEvent } from '../transcript-lines.ts';
+import { SETTING_KINDS, askedNote, cardAsked, compactLines, cutLine, ipcErrorText, lastEvent, pendingCardKey } from '../transcript-lines.ts';
 
 describe('transcript-lines', () => {
   it('컷이 없으면 줄이 없고, 있으면 잘린 턴·글자 수를 한 줄로 알린다', () => {
@@ -40,6 +40,21 @@ describe('transcript-lines', () => {
 
   it('건너뛰는 설정 줄 목록이 Core(`transcript.ts`)와 같다 — 한쪽에만 더하면 화면과 Core 가 다른 카드를 살아 있다고 본다', () => {
     assert.deepEqual([...SETTING_KINDS].sort(), [...CORE_SETTING_KINDS].sort());
+  });
+
+  it('대기 중인 카드의 정체는 진행·설정 줄에는 그대로이고, 새 메시지·재배정·단계 계획으로 카드가 바뀌거나 닫히면 바뀐다 — GUI 검증 칸이 여기에 묶인다 (D-097, PR #142 리뷰)', () => {
+    const card = [{ kind: 'user', turn: 1 }, { kind: 'plan', turn: 1 }];
+    const key = pendingCardKey(card, true);
+    assert.notEqual(key, '');
+    assert.equal(pendingCardKey([...card, { kind: 'name', turn: 1 }, { kind: 'mode', turn: 1 }], true), key, '설정 줄은 같은 카드다');
+    // 새 메시지 — Core 가 앞 카드를 거절하고 새 카드를 세운다.
+    assert.notEqual(pendingCardKey([...card, { kind: 'approval', turn: 1 }, { kind: 'user', turn: 2 }, { kind: 'plan', turn: 2 }], true), key);
+    // 재배정 — 같은 턴에 새 plan 이 선다.
+    assert.notEqual(pendingCardKey([...card, { kind: 'approval', turn: 1 }, { kind: 'plan', turn: 1 }], true), key);
+    // 단계 계획 · 지휘자 묻기(답 뒤 카드 없음) · 승인 뒤 실행 중.
+    assert.notEqual(pendingCardKey([...card, { kind: 'approval', turn: 1 }, { kind: 'steps', turn: 1 }], true), key);
+    assert.equal(pendingCardKey([...card, { kind: 'approval', turn: 1 }, { kind: 'answer', turn: 1 }], false), '');
+    assert.equal(pendingCardKey(card, false), '');
   });
 
   it('IPC 거절은 Electron 머리(채널·예외 이름)를 떼고 문구만 남긴다 — 그 모양이 아니면 그대로다', () => {
