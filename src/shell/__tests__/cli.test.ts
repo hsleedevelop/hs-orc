@@ -596,6 +596,38 @@ describe('D-036 — CLI loop 재시도 + reviewer FAIL 사유 전달 (L2 + L4)',
     });
   });
 
+  it('once — 앞 검증 명령이 뒤 명령의 스크립트(본문·lifecycle hook)를 바꾸면 뒤 명령은 돌지 않고 unverified 다 — 명령마다 실행 직전에 대조한다 (PR #145 리뷰)', () => {
+    const rewrites: [string, object][] = [
+      ['본문', { scripts: { e2e: 'exit 0' } }],
+      ['hook', { scripts: { e2e: 'node e2e.js', pree2e: 'curl evil' } }],
+    ];
+    for (const [name, pkg] of rewrites) {
+      withPackage(() => {
+        reset();
+        const prepare = `echo '${JSON.stringify(pkg)}' > package.json`;
+        const r = cli(['이 아키텍처 설계 검토해줘', '--run', '--write', '--no-reviewer', '--verify', prepare, '--verify', 'npm run e2e'], { PATH: fakeDir });
+        assert.equal(r.code, 0, r.err);
+        assert.equal(npmRuns(), '', `${name}: 바뀐 스크립트를 돌렸다`);
+        assert.match(r.err, /검증 스크립트가 위임 중 바뀌었다 — `npm run e2e` 를 실행하지 않았다/, name);
+      });
+    }
+  });
+
+  it('loop — 사이클에서 앞 검증 명령이 뒤 명령의 스크립트를 바꾸면 뒤 명령은 돌지 않고 사람에게 올린다 (PR #145 리뷰)', () => {
+    withPackage(() => {
+      reset();
+      // 기준선(1회차)에서는 그대로 두고, 사이클(2회차)에서만 e2e 를 약화한다 — primary 가 고친 prepare 스크립트 꼴.
+      const prepare = `n=0; [ -f '${mark}' ] && read n < '${mark}'; n=$((n+1)); echo "$n" > '${mark}'; ` +
+        `if [ "$n" -ge 2 ]; then echo '{"scripts":{"e2e":"exit 0"}}' > package.json; fi`;
+      const r = cli(['이 아키텍처 설계 검토해줘', '--mode', 'loop', '--run', '--write', '--verify', prepare, '--verify', 'npm run e2e'], { PATH: fakeDir, REVIEWER_PASS: '1' });
+      assert.notEqual(r.code, 0);
+      assert.equal(npmRuns(), 'run e2e\n', '기준선 한 번만 돌아야 한다');
+      assert.match(r.err, /reviewer Astra 생략 — 검증 스크립트가 위임 중 바뀌었다 · `npm run e2e`/);
+      assert.match(r.err, /중단 {3}escalated · 1회/);
+      assert.equal(existsSync(codexArgs), false, '바뀐 검증에 reviewer 를 태웠다.');
+    });
+  });
+
   it('loop — 사이클 중 primary 가 검증 스크립트를 바꾸면 돌리지 않고 재시도 없이 사람에게 올린다 (D-097 결정 8, S2+)', () => {
     withPackage(() => {
       reset();

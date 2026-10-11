@@ -4514,7 +4514,7 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 2. **CLI loop 에서 사이클 중 스크립트가 바뀌면 그 사이클은 검증 명령도 reviewer 도 돌리지 않고, 재시도 없이 사람에게 올린다(`escalated`)** (구현). 결과 줄은 `reviewer … 생략 — 검증 스크립트가 위임 중 바뀌었다 · \`…\``. 끝에 `안내   primary 가 검증 스크립트를 바꿨다 — … 되돌리거나 검증 명령을 바꾼 뒤 다시 실행한다` 한 줄을 낸다. 근거: L1 이 결과를 얻지 못한 검증(`blocked`·`not-started`)을 D-046 중단으로 맵핑했다 — 같은 꼴이다. 세션·once 의 `unverified`(사람이 본다)와도 맞는다. **대안 (b)** D-047 약화처럼 FAIL + 지적("검증 스크립트를 되돌려라")으로 재시도하고, 연속이면 D-049 충돌로 올린다 — primary 가 되돌릴 수 있으니 실행 하나를 살릴 수 있다. 다만 스냅숏은 첫 primary 전 것이라 되돌리지 않으면 매 사이클 같은 자리에서 걸린다.
 
 **검증 (결정 8)**
-- `npm run gate` 통과 — 테스트 875 → 881 (`auto-verify.test.ts` +1 꼴 맞추기 표 · `delegate.test.ts` +2 · `cli.test.ts` +3). 모델·엔진·sandbox 호출 0 — 세션은 가짜 sandbox 실행기, CLI 는 가짜 codex·claude·npm(인자를 파일에 남긴다). 세션의 sandbox 밖 지정 경우는 기준선에서 실제 `npm run e2e`(본문 `node -e 0`)가 임시 폴더에서 한 번 돈다.
+- `npm run gate` 통과 — 테스트 875 → 881(리뷰 반영 뒤 883) (`auto-verify.test.ts` +1 꼴 맞추기 표 · `delegate.test.ts` +2 · `cli.test.ts` +3). 모델·엔진·sandbox 호출 0 — 세션은 가짜 sandbox 실행기, CLI 는 가짜 codex·claude·npm(인자를 파일에 남긴다). 세션의 sandbox 밖 지정 경우는 기준선에서 실제 `npm run e2e`(본문 `node -e 0`)가 임시 폴더에서 한 번 돈다.
 - 양성 — 꼴이 맞는 명령에서 primary 가 스크립트를 바꾸면 작업 뒤에 돌지 않고 `unverified`(세션: 선언 `npm run gate` · 사람 `npm run e2e` · sandbox 밖 지정 `npm run e2e`, 셋 다 `verifyScripts` 밖 이름 / once: `--verify`·`--verify-host` `npm run e2e`) · loop 는 기준선 한 번만 돌고 reviewer 없이 `escalated · 1회`.
 - 음성 — `npm run e2e -- --ci` 는 스크립트가 바뀌어도 그대로 돈다(세션·once). 꼴 표: `npx vitest` · `npm test && …` · `npm run a;b` · `npm run "e2e"` · `npm run --silent` · `bun test` · 없는 스크립트 · `toString run e2e` 는 스냅숏이 없다.
 - **수정 전 실패 확인** — 소스 3파일(`auto-verify.ts`·`delegate.ts`·`cli.ts`)만 HEAD `45ae267` 로 되돌리고 새 테스트를 돌렸다: 양성은 모두 실패했다(`auto-verify.test.ts` 는 `scriptTarget` export 가 없어 파일째 실패 · 세션 양성은 세 경우를 하나씩 남겨 각각 실패 · CLI once·loop 양성 실패). 음성 2건은 수정 전에도 통과한다 — 꼴 밖 문자열을 대조하지 않는 종전 동작을 지키는 가드다.
@@ -4528,6 +4528,11 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 - 스크립트 본문이 부르는 파일(`node e2e.js` 의 `e2e.js`)의 변경은 S2 가 보지 않는다 — D-096 과 같다(sandbox 의 몫).
 
 **영향 (결정 8)** `core/auto-verify.ts`(`scriptTarget`·`shellCommand`) · `core/delegate.ts`(`Check.target`) · `shell/cli.ts`(`VerifyItem.target`·`withTarget`·`scriptMoved`) · 테스트 3파일 · SPEC §5.
+
+**PR #145 리뷰 반영 (AO 리뷰 changes_requested, head fa53869)**
+- **CLI 의 S2 대조가 목록 실행 전에 한 번만 돌았다** (P2). once 는 `runnable.filter(scriptMoved)`, loop 는 `postCmds.filter(scriptMoved)` 로 대조한 뒤 목록을 돌려, 앞 검증 명령(예: primary 가 고친 `node prepare.js`)이 뒤 명령의 `package.json` 스크립트 본문이나 lifecycle hook(`pree2e`)을 바꾸면 바뀐 명령이 그대로 돌아 통과 증거가 됐다. 세션 위임은 명령마다 실행 직전에 대조하므로 CLI 만의 결함이다.
+- → `runVerifyList` 가 `moved` 를 받으면(primary 뒤) 명령마다 **실행 직전에** `scriptMoved` 를 대조하고 바뀐 명령은 돌리지 않고 담는다. once 는 `held` → `unverified`, loop 는 그 사이클을 `escalated` 로 올린다(앞의 결정 대기 2 그대로). 기준선은 대조하지 않는다 — primary 전이다.
+- 회귀 2건(`cli.test.ts` — once: 앞 `--verify` 가 `e2e` 본문 · `pree2e` hook 을 바꾸는 두 경우 · loop: 사이클(2회차)에서만 앞 명령이 `e2e` 를 약화). 리뷰 전 코드(`fa53869` 의 `cli.ts`)에서 세 경우 모두 실패함을 확인했다(once 두 경우는 하나씩 남겨 각각). 테스트 881 → 883.
 
 **상태** 결정 1(D1 + D1a) — PR #141 머지. 결정 6(T1) — PR #140 머지. 결정 2·3·4·7·9(O3 · 칸 비우기 · G1) — PR #142 머지. 결정 5(L1) — PR #143 머지. 후속(`index.lock` G1 소음 · R04·R05·R06 실측) — PR #144 머지. 결정 8(S2+) — 이 PR, 머지로 확정한다(전하 직접 머지) · 구현에서 정한 2건(sandbox 밖 지정 명령의 S2 · loop 의 중단)은 전하 결정 대기. 남은 것: L2(CLI W2) — 후속. 후속 절의 "전하 결정 필요" 2건(R05·R06 phase 선언 · `GIT_OPTIONAL_LOCKS=0`).
 

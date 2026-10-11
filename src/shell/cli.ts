@@ -207,11 +207,17 @@ interface VerifyRun {
  * 검증 명령을 차례로 돌린다. 신호로 멈추면 남은 명령은 띄우지 않는다.
  * 선언·`--verify` 는 codex sandbox 안(`/bin/sh -c`, D-096 실행기), `--verify-host` 만 밖이다 (D-097 L1). codex 가 없으면 sandbox 명령을
  * 밖으로 내리지 않는다 — 부르는 쪽이 먼저 걸러야 하고, 여기서도 던진다.
+ * `moved` 를 주면(primary 뒤) 명령마다 **실행 직전에** 스냅숏을 대조해 바뀐 명령은 돌리지 않고 거기에 담는다 (S2, D-097 결정 8, PR #145 리뷰) —
+ * 목록 앞에서 한 번만 보면 앞 명령이 뒤 명령의 스크립트를 바꾸는 것을 놓친다. 세션 위임과 같은 자리다.
  */
-async function runVerifyList(cmds: readonly VerifyItem[], auto: AutoVerify): Promise<VerifyRun[]> {
+async function runVerifyList(cmds: readonly VerifyItem[], auto: AutoVerify, moved?: VerifyItem[]): Promise<VerifyRun[]> {
   return interruptible(async (signal) => {
     const out: VerifyRun[] = [];
     for (const item of cmds) {
+      if (moved && scriptMoved(item)) {
+        moved.push(item);
+        continue;
+      }
       const phase = item.phase !== undefined ? { phase: item.phase } : {};
       if (item.host) {
         const r = await runCommand(item.cmd, process.cwd(), { signal, ...phase });
@@ -539,7 +545,8 @@ async function main(): Promise<void> {
         // 마지막 줄 PASS/FAIL, 못 읽으면 unknown 이고 통과로 봐주지 않는다.
         evaluate: async (_ctx, output) => {
           // 위임이 검증 스크립트를 바꿨다 (S2, D-097 결정 8) — 결과를 얻지 못한 검증이라 L1 의 막힌 명령처럼 재시도 없이 사람에게 올린다(전하 결정 대기).
-          const moved = args.write ? postCmds.filter(scriptMoved) : [];
+          const moved: VerifyItem[] = [];
+          const runs = args.write ? await runVerifyList(postCmds, auto, moved) : [];
           if (moved.length > 0) {
             verifyBroken = true;
             scriptMovedStop = true;
@@ -550,7 +557,6 @@ async function main(): Promise<void> {
               reviewerSkipped: true,
             };
           }
-          const runs = args.write ? await runVerifyList(postCmds, auto) : [];
           const ran = runs.map((r) => r.evidence);
           const failed = ran.filter((c) => contradiction(c) !== null);
           // 결과 줄 — G1(통과했어도 막힌 부수 효과)이면 그 사실을 붙인다 (D-097 결정 9).
@@ -729,9 +735,9 @@ async function main(): Promise<void> {
   const checks = args.write && runnable.length > 0
     ? async (): Promise<string> => {
         // 위임이 바꾼 스크립트는 돌리지 않고 증거에서 뺀다 → unverified (S2, D-097 결정 8) — 세션 위임과 같다.
-        const moved = runnable.filter(scriptMoved);
+        const moved: VerifyItem[] = [];
+        const runs = await runVerifyList(runnable, auto, moved);
         held.push(...moved.map(movedLine));
-        const runs = await runVerifyList(runnable.filter((v) => !moved.includes(v)), auto);
         for (const r of runs) {
           const sm = sandboxMarks(verifyLabel(r.item), r);
           if (sm.held) held.push(sm.held);
