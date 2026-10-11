@@ -152,7 +152,7 @@ export async function delegate(input: DelegateInput): Promise<Delegated> {
         `${m.from === 'human' ? '사람 명령' : '선언'} \`${m.cmd}\` 은 Core 가 고른 \`${m.into}\`(codex sandbox) 하나로 돌린다 (D-097 D1)` +
           (hostSet.has(m.cmd) ? ' — sandbox 밖 지정은 Core 가 고른 명령에는 적용되지 않는다' : '')));
     }
-    // sandbox 밖을 지정해도 무엇이 도는지(S2)는 대조한다 — opt-out 은 어디서 도는지만 바꾼다 (D-097 결정 8, 전하 결정 대기).
+    // sandbox 밖을 지정해도 무엇이 도는지(S2)는 대조한다 — opt-out 은 어디서 도는지만 바꾼다 (D-097 결정 8).
     checksList.push(...host.map((cmd) => {
       const target = scriptTarget(input.cwd, cmd);
       return { cmd, host: true as const, ...(target ? { target } : {}) };

@@ -4505,11 +4505,11 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 - `core/auto-verify.ts` `scriptTarget(dir, cmd)` — 문자열을 공백·탭으로 나눈 낱말이 **정확히** `<매니저> run <이름>`(npm·pnpm·yarn·bun) 또는 `<매니저> test`(D1 의 `RUNLESS` 그대로 — npm·pnpm·yarn, `bun test` 는 내장 러너라 제외)일 때만 `runTarget(dir, [이름])` 으로 스냅숏을 뜬다. 이름은 셸이 다르게 읽을 글자가 없고 `-` 로 시작하지 않는 것만(`[A-Za-z0-9_][A-Za-z0-9_:.+@/-]*`). 스크립트가 없으면 대조하지 않는다. 셸 문자열은 해석하지 않는다 — 그 밖의 문자열은 종전 그대로(대조 없음). `shellCommand` = 문자열 그대로 `/bin/sh -c` + 스냅숏 — **실행은 적힌 문자열 그대로**이고 스냅숏은 대조에만 쓴다.
 - 같은 함수를 세 자리가 탄다(결정 8 "W1·사람에 같은 코드로"): W1 선언(`autoCommands`) · 세션 사람 명령(`delegate`, sandbox 명령은 `shellCommand`, sandbox 밖 지정은 `Check.target`) · CLI once·loop(`withTarget`, 선언·`--verify`·`--verify-host`).
 - **스냅숏 시점** — D-096 S2 와 같다. 세션은 `checksList` 를 짓는 primary 전(기준선 전), CLI once 는 `verify` 목록을 짓는 primary 전(once 는 기준선이 없다), CLI loop 는 기준선 전(= 첫 primary 전)이다. 대조는 D-096 의 `scriptChanged`(argv·본문·`pre`·`post`) 그대로다.
-- **바뀌었을 때** — 세션·once: 돌리지 않고 `검증 스크립트가 위임 중 바뀌었다 — \`…\` 를 실행하지 않았다` 를 증거 요약(`held` → `unverified`)과 reviewer 절 끝에 남긴다(D-096 S2 와 같은 줄). loop: 아래 결정 대기 2.
+- **바뀌었을 때** — 세션·once: 돌리지 않고 `검증 스크립트가 위임 중 바뀌었다 — \`…\` 를 실행하지 않았다` 를 증거 요약(`held` → `unverified`)과 reviewer 절 끝에 남긴다(D-096 S2 와 같은 줄). loop: 아래 2.
 - 카드(W3) — 선언 문자열이 꼴에 맞으면 카드에 그 스크립트 원문(`pre`·`post` 포함)이 함께 보인다(`shownOf` 가 스냅숏을 읽는다). 사람 명령은 승인 때 적으므로 카드에 실리지 않는다.
 - SPEC §5 두 항목(스냅숏 대조 · CLI once·loop).
 
-**구현에서 정한 것 — 전하 결정 대기** (설계 문서가 정하지 않은 자리다. 하나를 구현하고 대안을 남긴다 — 다르게 보시면 고친다)
+**구현에서 정한 것 — 전하 결정 2026-10-11: 둘 다 제안(a)대로 확정** (설계 문서가 정하지 않은 자리라 하나를 구현하고 대안을 남겨 올렸다. 대안 (b)는 버린다)
 1. **sandbox 밖을 지정한 사람 명령(GUI 스위치 · `chat --verify-host` · CLI `--verify-host`)에도 S2 를 건다** (구현). 근거: S2 는 "무엇이 도나"(D-096), opt-out 은 "어디서 도나"(O3)를 정한다 — 둘은 직교한다. Q31 §4-2 의 S2+ 문장은 "사람 명령" 을 가르지 않았고, 결정 8 은 "W1·사람에 같은 코드로" 다. 사용자 권한으로 도는 명령일수록 약화 대조가 더 필요하다. **대안 (b)** 걸지 않는다 — O3 표의 "opt-out 한 명령은 지금(O1)과 같다" 를 대조까지 포함해 읽는 것이다. opt-out 의 목적(sandbox 에서 깨지는 명령을 되살리기)은 (a)에서도 그대로다.
 2. **CLI loop 에서 사이클 중 스크립트가 바뀌면 그 사이클은 검증 명령도 reviewer 도 돌리지 않고, 재시도 없이 사람에게 올린다(`escalated`)** (구현). 결과 줄은 `reviewer … 생략 — 검증 스크립트가 위임 중 바뀌었다 · \`…\``. 끝에 `안내   primary 가 검증 스크립트를 바꿨다 — … 되돌리거나 검증 명령을 바꾼 뒤 다시 실행한다` 한 줄을 낸다. 근거: L1 이 결과를 얻지 못한 검증(`blocked`·`not-started`)을 D-046 중단으로 맵핑했다 — 같은 꼴이다. 세션·once 의 `unverified`(사람이 본다)와도 맞는다. **대안 (b)** D-047 약화처럼 FAIL + 지적("검증 스크립트를 되돌려라")으로 재시도하고, 연속이면 D-049 충돌로 올린다 — primary 가 되돌릴 수 있으니 실행 하나를 살릴 수 있다. 다만 스냅숏은 첫 primary 전 것이라 되돌리지 않으면 매 사이클 같은 자리에서 걸린다.
 
@@ -4531,10 +4531,10 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 
 **PR #145 리뷰 반영 (AO 리뷰 changes_requested, head fa53869)**
 - **CLI 의 S2 대조가 목록 실행 전에 한 번만 돌았다** (P2). once 는 `runnable.filter(scriptMoved)`, loop 는 `postCmds.filter(scriptMoved)` 로 대조한 뒤 목록을 돌려, 앞 검증 명령(예: primary 가 고친 `node prepare.js`)이 뒤 명령의 `package.json` 스크립트 본문이나 lifecycle hook(`pree2e`)을 바꾸면 바뀐 명령이 그대로 돌아 통과 증거가 됐다. 세션 위임은 명령마다 실행 직전에 대조하므로 CLI 만의 결함이다.
-- → `runVerifyList` 가 `moved` 를 받으면(primary 뒤) 명령마다 **실행 직전에** `scriptMoved` 를 대조하고 바뀐 명령은 돌리지 않고 담는다. once 는 `held` → `unverified`, loop 는 그 사이클을 `escalated` 로 올린다(앞의 결정 대기 2 그대로). 기준선은 대조하지 않는다 — primary 전이다.
+- → `runVerifyList` 가 `moved` 를 받으면(primary 뒤) 명령마다 **실행 직전에** `scriptMoved` 를 대조하고 바뀐 명령은 돌리지 않고 담는다. once 는 `held` → `unverified`, loop 는 그 사이클을 `escalated` 로 올린다(앞의 2 그대로). 기준선은 대조하지 않는다 — primary 전이다.
 - 회귀 2건(`cli.test.ts` — once: 앞 `--verify` 가 `e2e` 본문 · `pree2e` hook 을 바꾸는 두 경우 · loop: 사이클(2회차)에서만 앞 명령이 `e2e` 를 약화). 리뷰 전 코드(`fa53869` 의 `cli.ts`)에서 세 경우 모두 실패함을 확인했다(once 두 경우는 하나씩 남겨 각각). 테스트 881 → 883.
 
-**상태** 결정 1(D1 + D1a) — PR #141 머지. 결정 6(T1) — PR #140 머지. 결정 2·3·4·7·9(O3 · 칸 비우기 · G1) — PR #142 머지. 결정 5(L1) — PR #143 머지. 후속(`index.lock` G1 소음 · R04·R05·R06 실측) — PR #144 머지. 결정 8(S2+) — 이 PR, 머지로 확정한다(전하 직접 머지) · 구현에서 정한 2건(sandbox 밖 지정 명령의 S2 · loop 의 중단)은 전하 결정 대기. 남은 것: L2(CLI W2) — 후속. 후속 절의 "전하 결정 필요" 2건(R05·R06 phase 선언 · `GIT_OPTIONAL_LOCKS=0`).
+**상태** 결정 1(D1 + D1a) — PR #141 머지. 결정 6(T1) — PR #140 머지. 결정 2·3·4·7·9(O3 · 칸 비우기 · G1) — PR #142 머지. 결정 5(L1) — PR #143 머지. 후속(`index.lock` G1 소음 · R04·R05·R06 실측) — PR #144 머지. 결정 8(S2+) — 이 PR, 머지로 확정한다(전하 직접 머지) · 구현에서 정한 2건(sandbox 밖 지정 명령에도 S2 · loop 는 중단)은 전하가 제안대로 확정(2026-10-11). 남은 것: L2(CLI W2) — 후속. 후속 절의 "전하 결정 필요" 2건(R05·R06 phase 선언 · `GIT_OPTIONAL_LOCKS=0`).
 
 ---
 

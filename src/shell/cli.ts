@@ -544,7 +544,7 @@ async function main(): Promise<void> {
         // Evaluator 는 reviewer 슬롯이 돈다 (D-003). 형식·판정은 once 의 독립 리뷰와 같다 —
         // 마지막 줄 PASS/FAIL, 못 읽으면 unknown 이고 통과로 봐주지 않는다.
         evaluate: async (_ctx, output) => {
-          // 위임이 검증 스크립트를 바꿨다 (S2, D-097 결정 8) — 결과를 얻지 못한 검증이라 L1 의 막힌 명령처럼 재시도 없이 사람에게 올린다(전하 결정 대기).
+          // 위임이 검증 스크립트를 바꿨다 (S2, D-097 결정 8) — 결과를 얻지 못한 검증이라 L1 의 막힌 명령처럼 재시도 없이 사람에게 올린다.
           const moved: VerifyItem[] = [];
           const runs = args.write ? await runVerifyList(postCmds, auto, moved) : [];
           if (moved.length > 0) {
