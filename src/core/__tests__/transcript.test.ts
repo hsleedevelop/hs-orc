@@ -1,12 +1,15 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import type { SpawnSyncOptionsWithStringEncoding } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
   appendRecord,
+  LEGACY_LIST_TIMEOUT_MS,
   legacySessionIds,
   legacyTranscriptPath,
+  listInChild,
   listSessions,
   prepareSession,
   readSessionLog,
@@ -124,6 +127,13 @@ describe('대화 기록 (SPEC §6.4.1)', () => {
     assert.deepEqual(legacySessionIds(folder, timedOut), []);
     assert.deepEqual(legacySessionIds(folder, timedOut), []);
     assert.equal(calls, 1);
+  });
+
+  it('옛 자리 목록 자식은 상한을 넘기면 SIGKILL 로 끊긴다 — 옵션이 빠지면 멈춘 readdir 를 끝없이 기다린다 (D-095)', () => {
+    let seen: SpawnSyncOptionsWithStringEncoding | undefined;
+    listInChild('/없는/폴더', (_cmd, _args, options) => { seen = options; return { status: 0, stdout: '[]' }; });
+    assert.equal(seen?.timeout, LEGACY_LIST_TIMEOUT_MS);
+    assert.equal(seen?.killSignal, 'SIGKILL');
   });
 });
 
