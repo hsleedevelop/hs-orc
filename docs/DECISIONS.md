@@ -4285,7 +4285,7 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 - **사실 2.** 실패 4건은 모두 `src/adapters/__tests__/run.test.ts` 의 D-078 취소 테스트다(`'error'` ≠ `'cancelled'` 등). 취소 경로가 자손 스냅숏에 `ps` 를 부르고(`adapters/run.ts:59`) `/bin/ps` 는 setuid root 다 — 거부 로그의 `(node) forbidden-exec-sugid` 가 그것이다.
 - **사실 3.** 같은 실행의 거부 60여 줄 중 V3a 가 세는 차단성 거부는 `(git) file-write-create <복사본>/.git/index.lock` 한 줄이다 — sandbox 는 작업 폴더 안이라도 `.git` 쓰기를 막는다. 그래서 `sandboxVerdict` = **`blocked`** → `unverified` 다.
 - **사실 4.** 그 `.git` 줄을 빼고 같은 함수에 넣으면 `ran` 이다 — `forbidden-exec-sugid` 는 V3a 의 차단성 목록(`network-*`·`/dev/` 밖 `file-write-*`, `auto-verify.ts:113-118`)에 없다. → (추론) sandbox 탓인 실패가 **우연히 함께 난 `.git` 쓰기 거부 덕에** `unverified` 가 됐다. 그 줄이 없었다면 `rework` 다(V3a 의 보수 쪽 오탐 — D-096 위험 줄의 "`mach-lookup` 거부 탓에 실패한 테스트" 와 같은 꼴).
-- **사실 5 (지금 상태).** hs-orc 저장소에서 R01·R06 쓰기 세션 위임은 이미 W1 `npm test` 를 sandbox 에서 돌린다(D-096). E3 대로면 그 위임은 지금 **`ok` 로 닫히지 못한다.** D-096 "미검증" 의 "hs-orc 자기 `npm test` 의 sandbox 동작" 이 이것이다. R04 `npm run gate` 는 재지 않았다(`npm test` 를 포함하므로 같을 것 — 추론).
+- **사실 5 (지금 상태).** hs-orc 저장소 — 정확히는 hs-orc 가 설치된 체크아웃 자신(`project-state.ts:82` 의 `REPO_ROOT` 와 대상이 같을 때, 워크트리는 홈의 상태 폴더 `verify.json` 을 읽는다) — 에서 R01·R06 쓰기 세션 위임은 이미 W1 `npm test` 를 sandbox 에서 돌린다(D-096). E3 대로면 그 위임은 지금 **`ok` 로 닫히지 못한다.** D-096 "미검증" 의 "hs-orc 자기 `npm test` 의 sandbox 동작" 이 이것이다. R04 `npm run gate` 는 재지 않았다(`npm test` 를 포함하므로 같을 것 — 추론).
 
 **3. 실제 위험** (추론 — 사실 1·E1·E3 위)
 - **경로는 있다.** primary 가 쓴 코드는 사람 명령·선언을 거쳐 sandbox 밖에서 돈다 — 테스트·설정 파일(`eslint.config.js`·`vitest.config.*`), `package.json` 스크립트와 `pre`·`post`, 그 스크립트가 부르는 파일(E1 (b)), 작업 폴더 안 `node_modules/.bin`. 네트워크·홈 쓰기·부모 env 의 토큰이 모두 열려 있다.
@@ -4305,7 +4305,7 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 | # | 선택지 | 효과 | 비용 · 위험 |
 |---|---|---|---|
 | D0 | 지금 그대로 — 사람 쪽을 남기고 W2 를 뺀다 | — | E1 2·4 행 그대로 |
-| **D1** | **W2 쪽을 남기고 같은 사람 명령을 뺀다** — `autoCommands` 를 사람 목록 없이 고르고, W2 와 같은(npm 별칭 포함) 사람 명령을 거른다 | 사람이 적은 명령이 보호를 빼지 않는다. 그 명령은 sandbox + S2 + V3a 로 돈다 | 작다. 그 명령이 sandbox 에서 깨지는 프로젝트(E3 꼴)는 `ok` → `unverified` 로 바뀐다 — 지금 사람이 W2 와 같은 명령을 적어 sandbox 를 피하던 것과 같은 효과가 사라진다 |
+| **D1** | **W2 쪽을 남기고 같은 사람 명령을 뺀다** — `autoCommands` 를 사람 목록 없이 고르고, W2 와 같은(npm 별칭 포함) 사람 명령을 거른다 | 사람이 적은 명령이 보호를 빼지 않는다. 그 명령은 sandbox + S2 + V3a 로 돈다 | 작다. 그 명령이 sandbox 에서 깨지는 프로젝트(E3 꼴)는 `ok` → `unverified` 로 바뀐다 — 지금 사람이 W2 와 같은 명령을 적어 sandbox 를 피하던 것과 같은 효과가 사라진다. **codex 가 없으면** W2 가 `held` 라(`delegate.ts:113-114`) 사람 명령도 돌지 않고 `unverified` 다 — (D1a) 그대로 둔다(안전선과 같다) / (D1b) codex 가 없을 때만 사람 쪽을 남긴다(D-094 유지, 안전선과 어긋난다) |
 
 **4-2. 사람 명령(H1~H4)을 어디서 돌리나**
 
@@ -4354,7 +4354,7 @@ NONE 한 칸이 두 가지를 담는다. (가) 대화 맥락만으로 답할 수
 - §4 의 구현 크기는 코드 읽기 어림이다.
 
 **7. 결정 대기 (전하 몫)**
-1. **W2 와 겹치는 사람 명령**: **D1 W2 쪽을 남긴다(권장)** / D0 그대로.
+1. **W2 와 겹치는 사람 명령**: **D1 W2 쪽을 남긴다(권장)** / D0 그대로. D1 이면 codex 가 없을 때: **D1a 사람 명령도 돌지 않는다(권장 — 안전선)** / D1b 그때만 사람 쪽을 밖에서 돌린다.
 2. **사람 명령(H1~H4)의 실행 위치**: O1 그대로 + 문서화 / O2 전부 sandbox / **O3 기본 sandbox + 명령 단위 opt-out(권장)** / O4 기본 밖 + opt-in.
 3. **codex 가 없을 때 sandbox 기본인 사람 명령**: **돌리지 않고 `unverified`(권장 — D-096 안전선)** / 밖에서 돌리고 표시.
 4. **`session send --verify` 의 opt-out**: **받지 않는다(권장 — 에이전트가 부를 수 있다, D-088 선례)** / 받는다.
